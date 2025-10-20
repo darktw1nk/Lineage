@@ -263,9 +263,12 @@ async function runTests(
   
   for (const test of config.testSet) {
     try {
+      // Combine candidate prompt (evolved system/instruction) with test input
+      const combinedPrompt = `${node.prompt}\n\n${test.prompt}`;
+      
       const result = await adapter.call({
         model: node.params.model.model,
-        prompt: test.prompt,
+        prompt: combinedPrompt,
         temperature: node.params.temperature,
         seed: node.params.seed,
       });
