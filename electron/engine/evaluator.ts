@@ -1,0 +1,728 @@
+import type {
+  EvaluationConfig,
+  EvaluationRun,
+  CandidateNode,
+  TestCase,
+  TestResult,
+  UUID,
+} from '../../src/types/index.js';
+import { v4 as uuidv4 } from 'uuid';
+import { getProviderAdapter } from '../providers/index.js';
+import { calculateFitness, evaluateTestResult } from './fitness.js';
+import {
+  applyMutation,
+  applyCrossover,
+  applyMetaPrompting,
+  applyParameterVariation,
+  generateInitialPopulation,
+} from './operators.js';
+import { BrowserWindow } from 'electron';
+import crypto from 'crypto';
+
+interface OperatorEffectiveness {
+  mutation: { totalDelta: number; count: number };
+  crossover: { totalDelta: number; count: number };
+  meta: { totalDelta: number; count: number };
+  param: { totalDelta: number; count: number };
+}
+
+interface EvaluationState {
+  run: EvaluationRun;
+  config: EvaluationConfig;
+  status: 'running' | 'paused' | 'stopped';
+  currentGeneration: number;
+  queue: CandidateNode[];
+  inProgress: Set<UUID>;
+  cache: Map<string, TestResult[]>;
+  lineageHistory: Map<UUID, { bestFitness: number; stagnantGenerations: number }>;
+  operatorEffectiveness: OperatorEffectiveness;
+}
+
+const activeEvaluations = new Map<UUID, EvaluationState>();
+
+export async function startEvaluation(
+  runId: UUID,
+  config: EvaluationConfig,
+  run: EvaluationRun
+): Promise<void> {
+  if (activeEvaluations.has(runId)) {
+    throw new Error('Evaluation already running');
+  }
+  
+  // Generate initial population
+  const initialNodes = await generateInitialPopulation(config);
+  
+  const state: EvaluationState = {
+    run: {
+      ...run,
+      generations: [initialNodes],
+    },
+    config,
+    status: 'running',
+    currentGeneration: 0,
+    queue: [...initialNodes],
+    inProgress: new Set(),
+    cache: new Map(),
+    lineageHistory: new Map(),
+    operatorEffectiveness: {
+      mutation: { totalDelta: 0, count: 0 },
+      crossover: { totalDelta: 0, count: 0 },
+      meta: { totalDelta: 0, count: 0 },
+      param: { totalDelta: 0, count: 0 },
+    },
+  };
+  
+  activeEvaluations.set(runId, state);
+  
+  // Start evaluation loop
+  evaluationLoop(runId);
+}
+
+export function pauseEvaluation(runId: UUID): void {
+  const state = activeEvaluations.get(runId);
+  if (state) {
+    state.status = 'paused';
+  }
+}
+
+export function resumeEvaluation(runId: UUID): void {
+  const state = activeEvaluations.get(runId);
+  if (state) {
+    state.status = 'running';
+    evaluationLoop(runId);
+  }
+}
+
+export function stopEvaluation(runId: UUID): void {
+  const state = activeEvaluations.get(runId);
+  if (state) {
+    state.status = 'stopped';
+    state.run.stopReason = 'manual';
+    state.run.finishedAt = Date.now();
+    activeEvaluations.delete(runId);
+    
+    sendUpdate(runId, { type: 'stop', reason: 'manual' });
+  }
+}
+
+async function evaluationLoop(runId: UUID): Promise<void> {
+  const state = activeEvaluations.get(runId);
+  if (!state || state.status !== 'running') return;
+  
+  // Check termination conditions
+  if (shouldStop(state)) {
+    finishEvaluation(runId, state);
+    return;
+  }
+  
+  // Process queue up to parallel limit
+  while (
+    state.queue.length > 0 &&
+    state.inProgress.size < state.config.parallelLimit &&
+    state.status === 'running'
+  ) {
+    const node = state.queue.shift()!;
+    state.inProgress.add(node.id);
+    
+    // Process node asynchronously
+    processNode(runId, node, state).then(() => {
+      state.inProgress.delete(node.id);
+      
+      // Continue loop
+      if (state.status === 'running') {
+        evaluationLoop(runId);
+      }
+    });
+  }
+  
+  // If queue is empty and nothing in progress, move to next generation
+  if (state.queue.length === 0 && state.inProgress.size === 0) {
+    await moveToNextGeneration(runId, state);
+  }
+}
+
+async function processNode(
+  runId: UUID,
+  node: CandidateNode,
+  state: EvaluationState
+): Promise<void> {
+  node.status = 'in_progress';
+  node.timings = { startedAt: Date.now() };
+  
+  sendUpdate(runId, { type: 'node', node });
+  
+  try {
+    // Check cache
+    const cacheKey = getCacheKey(node, state.config.testSet);
+    const cachedResults = state.cache.get(cacheKey);
+    
+    if (cachedResults) {
+      node.tests = cachedResults;
+      state.run.cacheHits++;
+    } else {
+      // Run tests
+      node.tests = await runTests(node, state.config);
+      state.cache.set(cacheKey, node.tests);
+    }
+    
+    // Calculate costs using actual cost table
+    let totalCost = 0;
+    let totalLatency = 0;
+    
+    for (const test of node.tests) {
+      // Get actual model cost from database
+      const { getModelCost } = await import('../providers/costs.js');
+      const costEntry = await getModelCost(node.params.model);
+      
+      if (costEntry) {
+        const promptCost = (test.promptTokens / 1000) * costEntry.promptUSDper1k;
+        const completionCost = (test.completionTokens / 1000) * costEntry.completionUSDper1k;
+        totalCost += promptCost + completionCost;
+      }
+      
+      // Latency is tracked during API call, stored in result
+      // For now, estimate based on tokens (very rough ~10ms per token)
+      totalLatency += (test.promptTokens + test.completionTokens) * 10;
+    }
+    
+    // Calculate safety if guardrails are configured
+    let safety: number | undefined;
+    if (state.config.fitness.guardrails && state.config.fitness.guardrails.length > 0) {
+      const serviceAdapter = getProviderAdapter(state.config.serviceModel.provider);
+      const { evaluateSafetyGuardrails } = await import('./fitness.js');
+      
+      // Evaluate guardrails against concatenated test outputs
+      const allOutputs = node.tests.map(t => t.outputText || '').join('\n---\n');
+      safety = await evaluateSafetyGuardrails(
+        allOutputs,
+        state.config.fitness.guardrails,
+        state.config.serviceModel,
+        serviceAdapter
+      );
+    }
+    
+    // Calculate fitness
+    node.metrics = {
+      costUSD: totalCost,
+      latencyMs: totalLatency,
+      safety,
+    };
+    
+    const fitnessResult = calculateFitness(node, state.config);
+    node.metrics = { ...node.metrics, ...fitnessResult };
+    
+    // Update totals
+    const totalTokens = node.tests.reduce(
+      (acc, test) => ({
+        prompt: acc.prompt + test.promptTokens,
+        completion: acc.completion + test.completionTokens,
+      }),
+      { prompt: 0, completion: 0 }
+    );
+    
+    state.run.totals.tokensPrompt += totalTokens.prompt;
+    state.run.totals.tokensCompletion += totalTokens.completion;
+    state.run.totals.usd += totalCost;
+    state.run.totals.calls += node.tests.length;
+    
+    node.status = 'finished';
+    node.timings.finishedAt = Date.now();
+  } catch (error) {
+    node.status = 'failed';
+    node.error = String(error);
+  }
+  
+  sendUpdate(runId, { type: 'node', node });
+  sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+}
+
+async function runTests(
+  node: CandidateNode,
+  config: EvaluationConfig
+): Promise<TestResult[]> {
+  const adapter = getProviderAdapter(node.params.model.provider);
+  const results: TestResult[] = [];
+  
+  for (const test of config.testSet) {
+    try {
+      const result = await adapter.call({
+        model: node.params.model.model,
+        prompt: test.prompt,
+        temperature: node.params.temperature,
+        seed: node.params.seed,
+      });
+      
+      let evaluation: { passed: boolean; score: number };
+      
+      if (test.mode === 'llm_grade') {
+        // Use LLM grading via service model
+        const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
+        const { evaluateTestResultLLM } = await import('./fitness.js');
+        
+        evaluation = await evaluateTestResultLLM(
+          test,
+          node.prompt,
+          test.prompt,
+          result.output,
+          config.serviceModel,
+          serviceAdapter
+        );
+      } else {
+        // Use exact match evaluation
+        evaluation = evaluateTestResult(test, result.output, test.mode);
+      }
+      
+      // Store raw blob if enabled
+      let rawResponsePath: string | undefined;
+      if (config.rawBlobCapture) {
+        rawResponsePath = await storeRawBlob(
+          node.id,
+          test.id,
+          result
+        );
+      }
+      
+      results.push({
+        testId: test.id,
+        passed: evaluation.passed,
+        score: evaluation.score,
+        promptTokens: result.promptTokens,
+        completionTokens: result.completionTokens,
+        outputText: result.output,
+        rawResponsePath,
+      });
+    } catch (error) {
+      results.push({
+        testId: test.id,
+        passed: false,
+        score: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        outputText: `Error: ${error}`,
+      });
+    }
+  }
+  
+  return results;
+}
+
+async function moveToNextGeneration(
+  runId: UUID,
+  state: EvaluationState
+): Promise<void> {
+  const currentGen = state.run.generations[state.currentGeneration];
+  
+  // Persist current generation to database
+  await persistGeneration(runId, state);
+  
+  // Sort by fitness
+  const sorted = currentGen
+    .filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
+    .sort((a, b) => (b.metrics!.fitness! - a.metrics!.fitness!));
+  
+  if (sorted.length === 0) {
+    finishEvaluation(runId, state);
+    return;
+  }
+  
+  // Select top performers
+  const topCount = Math.max(1, Math.ceil(sorted.length * state.config.selection.topShare));
+  const topPerformers = sorted.slice(0, topCount);
+  
+  // Generate next generation
+  const nextGen: CandidateNode[] = [];
+  const nextGenNumber = state.currentGeneration + 1;
+  
+  const mutationCount = Math.ceil(state.config.population.size * state.config.operators.mutationFactor);
+  const crossoverCount = Math.ceil(state.config.population.size * state.config.operators.crossoverFactor);
+  const metaCount = state.config.operators.metaPrompting?.enabled
+    ? Math.ceil(state.config.population.size * (state.config.operators.metaPrompting.share ?? 0))
+    : 0;
+  
+  // Update lineage history and check for pruning
+  updateLineageHistory(state, topPerformers);
+  
+  // Track operator effectiveness
+  trackOperatorEffectiveness(state, currentGen);
+  
+  // Log operator effectiveness (V1: logging only, no policy changes)
+  logOperatorEffectiveness(state);
+  
+  // Create mutations
+  for (let i = 0; i < mutationCount; i++) {
+    const parent = topPerformers[i % topPerformers.length];
+    
+    // Check if this lineage should be pruned
+    if (shouldPruneLineage(state, parent.id)) {
+      const node: CandidateNode = {
+        id: uuidv4(),
+        generation: nextGenNumber,
+        lineageParents: [parent.id],
+        status: 'skipped',
+        prompt: parent.prompt,
+        params: parent.params,
+        changeLog: [{ label: 'MUTATION', text: 'Skipped due to stagnation' }],
+      };
+      nextGen.push(node);
+      continue;
+    }
+    
+    try {
+      const mutated = await applyMutation(parent, state.config);
+      const node: CandidateNode = {
+        id: uuidv4(),
+        generation: nextGenNumber,
+        lineageParents: [parent.id],
+        status: 'awaiting',
+        prompt: mutated.prompt,
+        params: parent.params,
+        changeLog: mutated.changeLog,
+      };
+      nextGen.push(node);
+    } catch (error) {
+      console.error('Failed to create mutation:', error);
+    }
+  }
+  
+  // Create crossovers
+  for (let i = 0; i < crossoverCount; i++) {
+    const parentA = topPerformers[i % topPerformers.length];
+    const parentB = topPerformers[(i + 1) % topPerformers.length];
+    try {
+      const crossed = await applyCrossover(parentA, parentB, state.config);
+      const node: CandidateNode = {
+        id: uuidv4(),
+        generation: nextGenNumber,
+        lineageParents: [parentA.id, parentB.id],
+        status: 'awaiting',
+        prompt: crossed.prompt,
+        params: parentA.params,
+        changeLog: crossed.changeLog,
+      };
+      nextGen.push(node);
+    } catch (error) {
+      console.error('Failed to create crossover:', error);
+    }
+  }
+  
+  // Create meta-prompted
+  for (let i = 0; i < metaCount; i++) {
+    const parent = topPerformers[i % topPerformers.length];
+    try {
+      const metaed = await applyMetaPrompting(parent, state.config);
+      const node: CandidateNode = {
+        id: uuidv4(),
+        generation: nextGenNumber,
+        lineageParents: [parent.id],
+        status: 'awaiting',
+        prompt: metaed.prompt,
+        params: parent.params,
+        changeLog: metaed.changeLog,
+      };
+      nextGen.push(node);
+    } catch (error) {
+      console.error('Failed to create meta-prompted:', error);
+    }
+  }
+  
+  // Ensure we have at least some nodes
+  if (nextGen.length === 0) {
+    finishEvaluation(runId, state);
+    return;
+  }
+  
+  state.run.generations.push(nextGen);
+  state.currentGeneration++;
+  state.queue = [...nextGen];
+  
+  // Continue evaluation
+  evaluationLoop(runId);
+}
+
+function shouldStop(state: EvaluationState): boolean {
+  const targets = state.config.targets;
+  
+  // Check time limit
+  if (targets.timeLimitMs) {
+    const elapsed = Date.now() - state.run.startedAt;
+    if (elapsed >= targets.timeLimitMs) {
+      state.run.stopReason = 'time';
+      return true;
+    }
+  }
+  
+  // Check budget limit
+  if (targets.budgetUSD && state.run.totals.usd >= targets.budgetUSD) {
+    state.run.stopReason = 'budget';
+    return true;
+  }
+  
+  // Check fitness target
+  if (targets.targetFitness) {
+    const currentGen = state.run.generations[state.currentGeneration];
+    const maxFitness = Math.max(
+      ...currentGen
+        .filter(n => n.metrics?.fitness !== undefined)
+        .map(n => n.metrics!.fitness!)
+    );
+    
+    if (maxFitness >= targets.targetFitness) {
+      state.run.stopReason = 'target';
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<void> {
+  state.run.finishedAt = Date.now();
+  state.status = 'stopped';
+  
+  if (!state.run.stopReason) {
+    state.run.stopReason = 'exhausted';
+  }
+  
+  // Final persistence
+  await persistGeneration(runId, state);
+  
+  activeEvaluations.delete(runId);
+  sendUpdate(runId, { type: 'stop', reason: state.run.stopReason });
+}
+
+async function persistGeneration(runId: UUID, state: EvaluationState): Promise<void> {
+  const { getDatabase } = await import('../database/init.js');
+  const db = getDatabase();
+  
+  // Start transaction for atomic batch update
+  const transaction = db.transaction(() => {
+    // Update run
+    db.prepare(`
+      UPDATE evaluation_runs
+      SET run_json = ?, finished_at = ?, stop_reason = ?
+      WHERE id = ?
+    `).run(
+      JSON.stringify(state.run),
+      state.run.finishedAt || null,
+      state.run.stopReason || null,
+      runId
+    );
+    
+    // Insert/update nodes for current generation
+    const currentGen = state.run.generations[state.currentGeneration];
+    const nodeInsert = db.prepare(`
+      INSERT OR REPLACE INTO candidate_nodes (id, run_id, generation, status, fitness, node_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    
+    for (const node of currentGen) {
+      nodeInsert.run(
+        node.id,
+        runId,
+        node.generation,
+        node.status,
+        node.metrics?.fitness || null,
+        JSON.stringify(node)
+      );
+    }
+    
+    // Insert cost ledger entries for new nodes
+    const costInsert = db.prepare(`
+      INSERT INTO cost_ledger (run_id, node_id, provider, model, prompt_tokens, completion_tokens, usd, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    for (const node of currentGen) {
+      if (node.tests && node.metrics?.costUSD) {
+        const totalPromptTokens = node.tests.reduce((sum, t) => sum + t.promptTokens, 0);
+        const totalCompletionTokens = node.tests.reduce((sum, t) => sum + t.completionTokens, 0);
+        
+        costInsert.run(
+          runId,
+          node.id,
+          node.params.model.provider,
+          node.params.model.model,
+          totalPromptTokens,
+          totalCompletionTokens,
+          node.metrics.costUSD,
+          Date.now()
+        );
+      }
+    }
+  });
+  
+  transaction();
+}
+
+function getCacheKey(node: CandidateNode, testSet: TestCase[]): string {
+  const data = {
+    prompt: node.prompt,
+    model: node.params.model,
+    temperature: node.params.temperature,
+    testSet: testSet.map(t => ({ id: t.id, prompt: t.prompt })),
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
+}
+
+function sendUpdate(runId: UUID, data: any): void {
+  const mainWindow = BrowserWindow.getAllWindows()[0];
+  if (mainWindow) {
+    mainWindow.webContents.send(`eval:updates:${runId}`, data);
+  }
+}
+
+async function storeRawBlob(
+  nodeId: UUID,
+  testId: UUID,
+  result: any
+): Promise<string> {
+  const { getDatabase } = await import('../database/init.js');
+  const { v4: uuidv4 } = await import('uuid');
+  const db = getDatabase();
+  
+  const blobId = uuidv4();
+  const blobData = JSON.stringify({
+    output: result.output,
+    promptTokens: result.promptTokens,
+    completionTokens: result.completionTokens,
+    latencyMs: result.latencyMs,
+    timestamp: Date.now(),
+  });
+  
+  db.prepare(`
+    INSERT INTO raw_blobs (id, run_id, node_id, test_id, blob_data, timestamp)
+    VALUES (?, 'current', ?, ?, ?, ?)
+  `).run(blobId, nodeId, testId, blobData, Date.now());
+  
+  return blobId;
+}
+
+// Branch pruning: track lineage improvements
+const STAGNATION_THRESHOLD = 3; // Prune after 3 generations with no improvement
+
+function updateLineageHistory(
+  state: EvaluationState,
+  topPerformers: CandidateNode[]
+): void {
+  for (const node of topPerformers) {
+    const currentFitness = node.metrics?.fitness || 0;
+    
+    if (!state.lineageHistory.has(node.id)) {
+      state.lineageHistory.set(node.id, {
+        bestFitness: currentFitness,
+        stagnantGenerations: 0,
+      });
+    } else {
+      const history = state.lineageHistory.get(node.id)!;
+      
+      if (currentFitness > history.bestFitness) {
+        // Improvement detected
+        history.bestFitness = currentFitness;
+        history.stagnantGenerations = 0;
+      } else {
+        // No improvement
+        history.stagnantGenerations++;
+      }
+    }
+    
+    // Track parent lineages
+    for (const parentId of node.lineageParents) {
+      if (state.lineageHistory.has(parentId)) {
+        const parentHistory = state.lineageHistory.get(parentId)!;
+        if (currentFitness > parentHistory.bestFitness) {
+          state.lineageHistory.set(node.id, {
+            bestFitness: currentFitness,
+            stagnantGenerations: 0,
+          });
+        } else {
+          state.lineageHistory.set(node.id, {
+            bestFitness: parentHistory.bestFitness,
+            stagnantGenerations: parentHistory.stagnantGenerations + 1,
+          });
+        }
+      }
+    }
+  }
+}
+
+function shouldPruneLineage(state: EvaluationState, nodeId: UUID): boolean {
+  const history = state.lineageHistory.get(nodeId);
+  if (!history) return false;
+  
+  return history.stagnantGenerations >= STAGNATION_THRESHOLD;
+}
+
+// Track operator effectiveness: log average Δfitness per operator
+function trackOperatorEffectiveness(
+  state: EvaluationState,
+  currentGen: CandidateNode[]
+): void {
+  for (const node of currentGen) {
+    if (node.status !== 'finished' || !node.metrics?.fitness) continue;
+    
+    // Find parent fitness
+    if (node.lineageParents.length === 0) continue;
+    
+    const parentId = node.lineageParents[0];
+    let parentFitness = 0;
+    
+    // Look for parent in previous generation
+    if (state.currentGeneration > 0) {
+      const prevGen = state.run.generations[state.currentGeneration - 1];
+      const parent = prevGen.find(n => n.id === parentId);
+      if (parent && parent.metrics?.fitness) {
+        parentFitness = parent.metrics.fitness;
+      }
+    }
+    
+    const delta = node.metrics.fitness - parentFitness;
+    
+    // Determine primary operator from changelog
+    const primaryOp = node.changeLog[0]?.label;
+    switch (primaryOp) {
+      case 'MUTATION':
+        state.operatorEffectiveness.mutation.totalDelta += delta;
+        state.operatorEffectiveness.mutation.count++;
+        break;
+      case 'CROSSOVER':
+        state.operatorEffectiveness.crossover.totalDelta += delta;
+        state.operatorEffectiveness.crossover.count++;
+        break;
+      case 'META':
+        state.operatorEffectiveness.meta.totalDelta += delta;
+        state.operatorEffectiveness.meta.count++;
+        break;
+      case 'PARAM':
+        state.operatorEffectiveness.param.totalDelta += delta;
+        state.operatorEffectiveness.param.count++;
+        break;
+    }
+  }
+}
+
+function logOperatorEffectiveness(state: EvaluationState): void {
+  const eff = state.operatorEffectiveness;
+  
+  console.log('=== Operator Effectiveness (Generation', state.currentGeneration, ') ===');
+  
+  if (eff.mutation.count > 0) {
+    const avg = eff.mutation.totalDelta / eff.mutation.count;
+    console.log(`  MUTATION: Avg Δfitness = ${avg.toFixed(4)} (n=${eff.mutation.count})`);
+  }
+  
+  if (eff.crossover.count > 0) {
+    const avg = eff.crossover.totalDelta / eff.crossover.count;
+    console.log(`  CROSSOVER: Avg Δfitness = ${avg.toFixed(4)} (n=${eff.crossover.count})`);
+  }
+  
+  if (eff.meta.count > 0) {
+    const avg = eff.meta.totalDelta / eff.meta.count;
+    console.log(`  META: Avg Δfitness = ${avg.toFixed(4)} (n=${eff.meta.count})`);
+  }
+  
+  if (eff.param.count > 0) {
+    const avg = eff.param.totalDelta / eff.param.count;
+    console.log(`  PARAM: Avg Δfitness = ${avg.toFixed(4)} (n=${eff.param.count})`);
+  }
+}
+

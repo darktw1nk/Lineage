@@ -1,0 +1,238 @@
+import { useQuery } from '@tanstack/react-query';
+import { X, Copy, ChevronDown, ChevronRight } from 'lucide-react';
+import { Button } from './ui/button';
+import { useState } from 'react';
+import type { UUID, EvaluationRun, CandidateNode } from '../types';
+
+interface RightPanelProps {
+  evaluationId: UUID | null;
+  nodeId: UUID;
+  onClose: () => void;
+}
+
+export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
+  const [expandedTests, setExpandedTests] = useState<Set<UUID>>(new Set());
+
+  const { data: evaluation } = useQuery<EvaluationRun>({
+    queryKey: ['evaluation', evaluationId],
+    enabled: !!evaluationId,
+    queryFn: async () => {
+      const evals = await window.electronAPI.eval.list();
+      return evals.find(e => e.id === evaluationId) || null;
+    },
+  });
+
+  const node = findNode(evaluation, nodeId);
+
+  if (!node) {
+    return null;
+  }
+
+  const toggleTest = (testId: UUID) => {
+    const newExpanded = new Set(expandedTests);
+    if (newExpanded.has(testId)) {
+      newExpanded.delete(testId);
+    } else {
+      newExpanded.add(testId);
+    }
+    setExpandedTests(newExpanded);
+  };
+
+  const copyPrompt = () => {
+    navigator.clipboard.writeText(node.prompt);
+  };
+
+  const passedTests = node.tests?.filter(t => t.passed).length ?? 0;
+  const totalTests = node.tests?.length ?? 0;
+
+  return (
+    <div className="flex h-full w-96 flex-col border-l bg-card">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b p-4">
+        <h2 className="text-lg font-semibold">Node Details</h2>
+        <Button variant="ghost" size="icon" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        {/* Chips */}
+        <div className="flex flex-wrap gap-2">
+          <Chip label="ID" value={node.id.substring(0, 8)} />
+          <Chip label="Status" value={node.status} />
+          <Chip label="Model" value={node.params.model.model} />
+          <Chip label="Temp" value={node.params.temperature.toString()} />
+          {node.timings?.finishedAt && node.timings?.startedAt && (
+            <Chip
+              label="Time"
+              value={`${((node.timings.finishedAt - node.timings.startedAt) / 1000).toFixed(1)}s`}
+            />
+          )}
+          {node.metrics?.fitness !== undefined && (
+            <Chip label="Score" value={node.metrics.fitness.toFixed(2)} />
+          )}
+        </div>
+
+        {/* Prompt & Params */}
+        <Section title="Prompt & Parameters">
+          <div className="space-y-3">
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium">Prompt</span>
+                <Button variant="ghost" size="sm" onClick={copyPrompt}>
+                  <Copy className="h-3 w-3" />
+                </Button>
+              </div>
+              <div className="max-h-60 overflow-y-auto rounded-md border bg-muted p-3 text-sm">
+                {node.prompt}
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <span className="text-muted-foreground">Model:</span>{' '}
+                <span className="font-medium">{node.params.model.model}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Temperature:</span>{' '}
+                <span className="font-medium">{node.params.temperature}</span>
+              </div>
+              {node.params.seed && (
+                <div>
+                  <span className="text-muted-foreground">Seed:</span>{' '}
+                  <span className="font-medium">{node.params.seed}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </Section>
+
+        {/* Change Log */}
+        {node.changeLog.length > 0 && (
+          <Section title="Change Log">
+            <div className="space-y-2">
+              {node.changeLog.map((change, idx) => (
+                <div key={idx} className="rounded border bg-muted p-2 text-sm">
+                  <span className="font-semibold text-primary">[{change.label}]</span>{' '}
+                  {change.text}
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {/* Tests */}
+        {node.tests && node.tests.length > 0 && (
+          <Section title={`Tests (${passedTests}/${totalTests})`}>
+            <div className="space-y-2">
+              {node.tests.map((test) => (
+                <div key={test.testId} className="rounded border">
+                  <button
+                    onClick={() => toggleTest(test.testId)}
+                    className="flex w-full items-center justify-between p-3 text-left hover:bg-accent"
+                  >
+                    <div className="flex items-center space-x-2">
+                      {expandedTests.has(test.testId) ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                      <span className="text-sm font-medium">
+                        Test {test.testId.substring(0, 8)}
+                      </span>
+                      <span className={`text-xs ${test.passed ? 'text-green-600' : 'text-red-600'}`}>
+                        {test.passed ? '✓ Passed' : '✗ Failed'}
+                      </span>
+                    </div>
+                    <span className="text-sm font-semibold">{test.score}/10</span>
+                  </button>
+
+                  {expandedTests.has(test.testId) && (
+                    <div className="border-t p-3 space-y-2 text-sm">
+                      <div>
+                        <span className="font-medium">Output:</span>
+                        <div className="mt-1 max-h-32 overflow-y-auto rounded bg-muted p-2">
+                          {test.outputText || 'No output'}
+                        </div>
+                      </div>
+                      
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>Prompt tokens: {test.promptTokens}</span>
+                        <span>Completion tokens: {test.completionTokens}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {/* Metrics */}
+        {node.metrics && (
+          <Section title="Metrics">
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              {node.metrics.quality !== undefined && (
+                <Metric label="Quality" value={node.metrics.quality.toFixed(2)} />
+              )}
+              {node.metrics.safety !== undefined && (
+                <Metric label="Safety" value={node.metrics.safety.toFixed(2)} />
+              )}
+              {node.metrics.costUSD !== undefined && (
+                <Metric label="Cost" value={`$${node.metrics.costUSD.toFixed(4)}`} />
+              )}
+              {node.metrics.latencyMs !== undefined && (
+                <Metric label="Latency" value={`${node.metrics.latencyMs}ms`} />
+              )}
+              {node.metrics.stability !== undefined && (
+                <Metric label="Stability" value={node.metrics.stability.toFixed(2)} />
+              )}
+              {node.metrics.fitness !== undefined && (
+                <Metric label="Fitness" value={node.metrics.fitness.toFixed(2)} />
+              )}
+            </div>
+          </Section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-semibold">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function Chip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-full bg-secondary px-3 py-1 text-xs">
+      <span className="font-semibold">{label}:</span> {value}
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="text-muted-foreground">{label}:</span>{' '}
+      <span className="font-medium">{value}</span>
+    </div>
+  );
+}
+
+function findNode(evaluation: EvaluationRun | null | undefined, nodeId: UUID): CandidateNode | null {
+  if (!evaluation) return null;
+  
+  for (const generation of evaluation.generations) {
+    const node = generation.find(n => n.id === nodeId);
+    if (node) return node;
+  }
+  
+  return null;
+}
+

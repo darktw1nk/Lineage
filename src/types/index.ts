@@ -1,0 +1,174 @@
+// Core Types for Prompt Evolution Application
+
+export type UUID = string;
+export type Provider = 'openai' | 'anthropic' | 'gemini';
+
+export interface ModelRef {
+  provider: Provider;
+  model: string; // e.g., 'gpt-4', 'claude-3-5-sonnet', 'gemini-1.5-pro'
+}
+
+export type NodeStatus = 'awaiting' | 'in_progress' | 'finished' | 'failed' | 'skipped';
+
+export interface TestCase {
+  id: UUID;
+  name: string;
+  mode: 'llm_grade' | 'exact_match';
+  prompt: string;
+  expected?: string; // for exact_match; may be number/JSON as string
+  grading?: {
+    strictZeroOnDeviation?: boolean; // if true, non-equal => 0 else distance-graded
+    distanceMetric?: 'levenshtein' | 'json_diff' | 'numeric_abs';
+  };
+}
+
+export interface TestResult {
+  testId: UUID;
+  passed: boolean;
+  score: number; // 0..10
+  promptTokens: number;
+  completionTokens: number;
+  rawResponsePath?: string; // persisted blob if raw capture enabled
+  outputText?: string;
+}
+
+export interface CandidateParams {
+  model: ModelRef;
+  temperature: number; // 0..2
+  seed?: number;       // for stability runs
+}
+
+export type ChangeLabel = 'MUTATION' | 'CROSSOVER' | 'META' | 'PARAM';
+
+export interface ChangeLogLine {
+  label: ChangeLabel;
+  text: string; // human-readable delta
+}
+
+export interface CandidateNode {
+  id: UUID;
+  generation: number;
+  lineageParents: UUID[]; // 0, 1 or 2 parents
+  status: NodeStatus;
+  prompt: string;
+  params: CandidateParams;
+  changeLog: ChangeLogLine[]; // diffs from parents
+  timings?: { startedAt?: number; finishedAt?: number };
+  tests?: TestResult[];
+  metrics?: {
+    quality?: number;   // 0..10
+    safety?: number;    // 0..10 average across guardrails
+    costUSD?: number;   // raw USD per candidate
+    latencyMs?: number;
+    stability?: number; // 0..10 (higher = more stable)
+    fitness?: number;   // scalar fitness
+  };
+  error?: string;
+}
+
+export interface EvaluationConfig {
+  id: UUID;
+  name: string;
+  selection: {
+    topShare: number;     // e.g., 0.4
+    policy: 'topk' | 'topp';
+    topK?: number;        // when policy = 'topk'
+    topP?: number;        // when policy = 'topp' (0..1 proportion)
+  };
+  operators: {
+    mutationFactor: number; // 0..1
+    crossoverFactor: number; // 0..1
+    paramVariation?: { enabled: boolean; temperature: { min: number; max: number }; share: number };
+    metaPrompting?: { enabled: boolean; share: number }; // default 0.2
+  };
+  population: {
+    size: number; // default 10
+    seedPrompt: string;
+    fill: 'auto' | 'manual';
+  };
+  enabledModels: ModelRef[];
+  testSet: TestCase[];
+  fitness: {
+    weights: { quality: number; safety?: number; cost?: number; latency?: number; stability?: number };
+    guardrails?: string[]; // prompts for safety checks
+    costNorm?: { maxUSDPerCall: number };
+    latencyNorm?: { maxMs: number };
+  };
+  targets: { timeLimitMs?: number; budgetUSD?: number; targetFitness?: number };
+  serviceModel: ModelRef; // for meta/mutation/crossover/grading
+  parallelLimit: number;  // global N
+  rawBlobCapture?: boolean; // default false
+}
+
+export interface EvaluationRun {
+  id: UUID;
+  configId: UUID;
+  startedAt: number;
+  finishedAt?: number;
+  stopReason?: 'time' | 'budget' | 'target' | 'manual' | 'exhausted' | 'error';
+  totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
+  generations: CandidateNode[][]; // 2D grid
+  cacheHits: number;
+  version: string; // schema version
+}
+
+export interface ModelCostEntry {
+  provider: Provider;
+  model: string;
+  promptUSDper1k: number;
+  completionUSDper1k: number;
+}
+
+export interface AppSettings {
+  globalParallelLimit: number;
+  perProviderLimits?: {
+    openai?: { rpm?: number; tpm?: number };
+    anthropic?: { rpm?: number; tpm?: number };
+    gemini?: { rpm?: number; tpm?: number };
+  };
+  serviceModel: ModelRef;
+}
+
+// Provider Adapter Interface
+export interface ProviderAdapter {
+  name: Provider;
+  estimateTokens(input: string): { prompt: number; completion?: number };
+  call(opts: {
+    model: string;
+    prompt: string;
+    temperature: number;
+    seed?: number;
+    maxTokens?: number;
+  }): Promise<{
+    output: string;
+    promptTokens: number;
+    completionTokens: number;
+    latencyMs: number;
+    usd: number;
+    rawPath?: string; // if rawBlobCapture enabled
+  }>;
+}
+
+// IPC Event Types
+export interface NodeUpdateEvent {
+  runId: UUID;
+  node: CandidateNode;
+}
+
+export interface TotalsUpdateEvent {
+  runId: UUID;
+  totals: {
+    tokensPrompt: number;
+    tokensCompletion: number;
+    usd: number;
+    calls: number;
+  };
+  cacheHits: number;
+}
+
+export interface StopEvent {
+  runId: UUID;
+  reason: 'time' | 'budget' | 'target' | 'manual' | 'exhausted' | 'error';
+  error?: string;
+}
+
