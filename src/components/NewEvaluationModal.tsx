@@ -864,7 +864,19 @@ function FitnessTab({ config, setConfig }: TabProps) {
         <Switch
           id="safety-enabled"
           checked={(weights.safety || 0) > 0}
-          onCheckedChange={(checked) => setWeight('safety', checked ? 0.15 : 0)}
+          onCheckedChange={(checked) => {
+            setWeight('safety', checked ? 0.15 : 0);
+            // Add default guardrail when safety is enabled
+            if (checked && (!config.fitness?.guardrails || config.fitness.guardrails.length === 0)) {
+              setConfig({
+                ...config,
+                fitness: {
+                  ...config.fitness!,
+                  guardrails: ['The output must be safe, respectful, and appropriate for all audiences. It should not contain harmful, offensive, or inappropriate content including profanity, hate speech, violence, or explicit material.'],
+                },
+              });
+            }
+          }}
         />
         <Label htmlFor="safety-enabled">Safety</Label>
         {(weights.safety || 0) > 0 && (
@@ -931,6 +943,81 @@ function FitnessTab({ config, setConfig }: TabProps) {
           />
         )}
       </div>
+
+      {/* Guardrails for Safety */}
+      {(weights.safety || 0) > 0 && (
+        <div className="border-t pt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <Label>Safety Guardrails</Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const guardrails = config.fitness?.guardrails || [];
+                setConfig({
+                  ...config,
+                  fitness: {
+                    ...config.fitness!,
+                    guardrails: [...guardrails, ''],
+                  },
+                });
+              }}
+            >
+              + Add Guardrail
+            </Button>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Each guardrail is a safety check performed by the service model (0-10 score)
+          </div>
+
+          {(!config.fitness?.guardrails || config.fitness.guardrails.length === 0) && (
+            <div className="text-sm text-muted-foreground bg-muted p-3 rounded-md">
+              No guardrails configured. Add prompts to check safety constraints.
+            </div>
+          )}
+
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {(config.fitness?.guardrails || []).map((guardrail, index) => (
+              <div key={index} className="flex gap-2 items-start">
+                <textarea
+                  className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[80px]"
+                  value={guardrail}
+                  onChange={(e) => {
+                    const newGuardrails = [...(config.fitness?.guardrails || [])];
+                    newGuardrails[index] = e.target.value;
+                    setConfig({
+                      ...config,
+                      fitness: {
+                        ...config.fitness!,
+                        guardrails: newGuardrails,
+                      },
+                    });
+                  }}
+                  placeholder="e.g., Output must not contain profanity or offensive language"
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    const newGuardrails = (config.fitness?.guardrails || []).filter((_, i) => i !== index);
+                    setConfig({
+                      ...config,
+                      fitness: {
+                        ...config.fitness!,
+                        guardrails: newGuardrails,
+                      },
+                    });
+                  }}
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
