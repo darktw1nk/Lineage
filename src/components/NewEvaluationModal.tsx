@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -7,7 +7,7 @@ import { Label } from './ui/label';
 import { Switch } from './ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { v4 as uuidv4 } from 'uuid';
-import type { EvaluationConfig, TestCase, ModelRef } from '../types';
+import type { EvaluationConfig, TestCase, ModelRef, ModelCostEntry } from '../types';
 
 interface NewEvaluationModalProps {
   onClose: () => void;
@@ -487,16 +487,15 @@ function PopulationTab({ config, setConfig }: TabProps) {
 
 // Models Tab
 function ModelsTab({ config, setConfig }: TabProps) {
-  const availableModels: ModelRef[] = [
-    { provider: 'openai', model: 'gpt-4' },
-    { provider: 'openai', model: 'gpt-4-turbo' },
-    { provider: 'openai', model: 'gpt-3.5-turbo' },
-    { provider: 'anthropic', model: 'claude-3-opus' },
-    { provider: 'anthropic', model: 'claude-3-5-sonnet' },
-    { provider: 'anthropic', model: 'claude-3-haiku' },
-    { provider: 'gemini', model: 'gemini-1.5-pro' },
-    { provider: 'gemini', model: 'gemini-1.5-flash' },
-  ];
+  const { data: costs = [] } = useQuery<ModelCostEntry[]>({
+    queryKey: ['costs'],
+    queryFn: () => window.electronAPI.costs.getAll(),
+  });
+
+  const availableModels: ModelRef[] = costs.map(cost => ({
+    provider: cost.provider,
+    model: cost.model,
+  }));
 
   const toggleModel = (model: ModelRef) => {
     const enabled = config.enabledModels || [];
@@ -522,10 +521,16 @@ function ModelsTab({ config, setConfig }: TabProps) {
   return (
     <div className="space-y-4">
       <div className="text-sm text-muted-foreground">
-        Select models to use in the evaluation
+        Select models to use in the evaluation (loaded from Models & Costs settings)
       </div>
 
-      <div className="space-y-2">
+      {availableModels.length === 0 && (
+        <div className="text-sm text-yellow-600 bg-yellow-50 p-3 rounded-md">
+          No models configured. Please go to Settings → Models & Costs to add models.
+        </div>
+      )}
+
+      <div className="space-y-2 max-h-96 overflow-y-auto">
         {availableModels.map((model, idx) => {
           const isEnabled = (config.enabledModels || []).some(
             (m) => m.provider === model.provider && m.model === model.model
@@ -866,6 +871,11 @@ function TargetsTab({ config, setConfig }: TabProps) {
 
 // Advanced Tab
 function AdvancedTab({ config, setConfig }: TabProps) {
+  const { data: costs = [] } = useQuery<ModelCostEntry[]>({
+    queryKey: ['costs'],
+    queryFn: () => window.electronAPI.costs.getAll(),
+  });
+
   return (
     <div className="space-y-4">
       <div>
@@ -894,40 +904,30 @@ function AdvancedTab({ config, setConfig }: TabProps) {
       </div>
 
       <div className="space-y-2">
-        <Label>Service Model (for operations)</Label>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <Label htmlFor="serviceProvider">Provider</Label>
-            <Input
-              id="serviceProvider"
-              value={config.serviceModel?.provider || 'openai'}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  serviceModel: {
-                    ...config.serviceModel!,
-                    provider: e.target.value as any,
-                  },
-                })
-              }
-            />
-          </div>
-          <div>
-            <Label htmlFor="serviceModel">Model</Label>
-            <Input
-              id="serviceModel"
-              value={config.serviceModel?.model || 'gpt-4'}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  serviceModel: {
-                    ...config.serviceModel!,
-                    model: e.target.value,
-                  },
-                })
-              }
-            />
-          </div>
+        <Label htmlFor="serviceModel">Service Model (for mutations/crossover/grading)</Label>
+        <select
+          id="serviceModel"
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          value={`${config.serviceModel?.provider || 'openai'}:${config.serviceModel?.model || 'gpt-4'}`}
+          onChange={(e) => {
+            const [provider, model] = e.target.value.split(':');
+            setConfig({
+              ...config,
+              serviceModel: { provider: provider as any, model },
+            });
+          }}
+        >
+          {costs.length === 0 && (
+            <option value="">No models configured - go to Settings</option>
+          )}
+          {costs.map((cost, idx) => (
+            <option key={idx} value={`${cost.provider}:${cost.model}`}>
+              {cost.provider}/{cost.model}
+            </option>
+          ))}
+        </select>
+        <div className="text-xs text-muted-foreground">
+          Models are loaded from Settings → Models & Costs
         </div>
       </div>
     </div>

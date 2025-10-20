@@ -131,17 +131,25 @@ function createTables(db: Database.Database): void {
 
 function insertDefaultModelCosts(db: Database.Database): void {
   const defaults = [
-    // OpenAI
-    { provider: 'openai', model: 'gpt-4', promptUSD: 0.03, completionUSD: 0.06 },
-    { provider: 'openai', model: 'gpt-4-turbo', promptUSD: 0.01, completionUSD: 0.03 },
-    { provider: 'openai', model: 'gpt-3.5-turbo', promptUSD: 0.0005, completionUSD: 0.0015 },
-    // Anthropic
-    { provider: 'anthropic', model: 'claude-3-opus', promptUSD: 0.015, completionUSD: 0.075 },
-    { provider: 'anthropic', model: 'claude-3-5-sonnet', promptUSD: 0.003, completionUSD: 0.015 },
-    { provider: 'anthropic', model: 'claude-3-haiku', promptUSD: 0.00025, completionUSD: 0.00125 },
-    // Gemini
-    { provider: 'gemini', model: 'gemini-1.5-pro', promptUSD: 0.00125, completionUSD: 0.005 },
-    { provider: 'gemini', model: 'gemini-1.5-flash', promptUSD: 0.000075, completionUSD: 0.0003 },
+    // OpenAI (prices per million tokens)
+    { provider: 'openai', model: 'gpt-5', promptUSD: 1.25, completionUSD: 10.00 },
+    { provider: 'openai', model: 'gpt-5-mini', promptUSD: 0.25, completionUSD: 2.00 },
+    { provider: 'openai', model: 'gpt-5-nano', promptUSD: 0.05, completionUSD: 0.40 },
+    { provider: 'openai', model: 'gpt-4.1', promptUSD: 2.00, completionUSD: 8.00 },
+    { provider: 'openai', model: 'gpt-4.1-mini', promptUSD: 0.40, completionUSD: 1.60 },
+    { provider: 'openai', model: 'gpt-4.1-nano', promptUSD: 0.10, completionUSD: 0.40 },
+    { provider: 'openai', model: 'gpt-4o', promptUSD: 2.50, completionUSD: 10.00 },
+    { provider: 'openai', model: 'gpt-4o-mini', promptUSD: 0.15, completionUSD: 0.60 },
+    // Anthropic (prices per million tokens)
+    { provider: 'anthropic', model: 'claude-opus', promptUSD: 15.00, completionUSD: 75.00 },
+    { provider: 'anthropic', model: 'claude-sonnet-4.5', promptUSD: 3.00, completionUSD: 15.00 },
+    { provider: 'anthropic', model: 'claude-haiku-4.5', promptUSD: 1.00, completionUSD: 5.00 },
+    // Gemini (prices per million tokens)
+    { provider: 'gemini', model: 'gemini-2.5-pro', promptUSD: 1.25, completionUSD: 10.00 },
+    { provider: 'gemini', model: 'gemini-2.5-flash', promptUSD: 0.30, completionUSD: 2.50 },
+    { provider: 'gemini', model: 'gemini-2.5-flash-lite', promptUSD: 0.10, completionUSD: 0.40 },
+    { provider: 'gemini', model: 'gemini-2.0-flash', promptUSD: 0.10, completionUSD: 0.40 },
+    { provider: 'gemini', model: 'gemini-2.0-flash-lite', promptUSD: 0.075, completionUSD: 0.30 },
   ];
   
   const insert = db.prepare(`
@@ -149,8 +157,9 @@ function insertDefaultModelCosts(db: Database.Database): void {
     VALUES (?, ?, ?, ?)
   `);
   
+  // Note: Database still stores per 1k for backward compatibility, we divide by 1000
   for (const cost of defaults) {
-    insert.run(cost.provider, cost.model, cost.promptUSD, cost.completionUSD);
+    insert.run(cost.provider, cost.model, cost.promptUSD / 1000, cost.completionUSD / 1000);
   }
 }
 

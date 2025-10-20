@@ -116,7 +116,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="apikeys">API Keys</TabsTrigger>
-            <TabsTrigger value="costs">Model Costs</TabsTrigger>
+            <TabsTrigger value="costs">Models & Costs</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="space-y-4">
@@ -138,40 +138,29 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             </div>
 
             <div>
-              <Label>Service Model (for mutations/crossover/grading)</Label>
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                <div>
-                  <Label htmlFor="serviceProvider">Provider</Label>
-                  <Input
-                    id="serviceProvider"
-                    value={localSettings?.serviceModel?.provider || 'openai'}
-                    onChange={(e) =>
-                      setLocalSettings({
-                        ...localSettings,
-                        serviceModel: {
-                          ...localSettings.serviceModel,
-                          provider: e.target.value as any,
-                        },
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="serviceModel">Model</Label>
-                  <Input
-                    id="serviceModel"
-                    value={localSettings.serviceModel.model}
-                    onChange={(e) =>
-                      setLocalSettings({
-                        ...localSettings,
-                        serviceModel: {
-                          ...localSettings.serviceModel,
-                          model: e.target.value,
-                        },
-                      })
-                    }
-                  />
-                </div>
+              <Label htmlFor="serviceModel">Service Model (for mutations/crossover/grading)</Label>
+              <select
+                id="serviceModel"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-2"
+                value={`${localSettings.serviceModel.provider}:${localSettings.serviceModel.model}`}
+                onChange={(e) => {
+                  const [provider, model] = e.target.value.split(':');
+                  setLocalSettings({
+                    ...localSettings,
+                    serviceModel: { provider: provider as any, model },
+                  });
+                }}
+              >
+                <optgroup label="Available Models">
+                  {localCosts.map((cost, idx) => (
+                    <option key={idx} value={`${cost.provider}:${cost.model}`}>
+                      {cost.provider}/{cost.model}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+              <div className="text-xs text-muted-foreground mt-1">
+                Models are loaded from the Models & Costs tab
               </div>
             </div>
           </TabsContent>
@@ -213,25 +202,29 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
           <TabsContent value="costs" className="space-y-4">
             <div className="text-sm text-muted-foreground mb-4">
-              Configure cost per 1k tokens for each model (USD)
+              Configure cost per million tokens for each model (USD)
             </div>
 
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {localCosts.map((cost, idx) => (
-                <div key={idx} className="grid grid-cols-4 gap-2 items-end">
-                  <div>
+                <div key={idx} className="grid grid-cols-12 gap-2 items-center p-3 border rounded-lg">
+                  <div className="col-span-3">
                     <Label className="text-xs">Provider</Label>
-                    <Input
+                    <select
+                      className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
                       value={cost.provider}
                       onChange={(e) => {
                         const newCosts = [...localCosts];
                         newCosts[idx].provider = e.target.value as any;
                         setLocalCosts(newCosts);
                       }}
-                      size={10}
-                    />
+                    >
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="gemini">Gemini</option>
+                    </select>
                   </div>
-                  <div>
+                  <div className="col-span-3">
                     <Label className="text-xs">Model</Label>
                     <Input
                       value={cost.model}
@@ -242,31 +235,43 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                       }}
                     />
                   </div>
-                  <div>
-                    <Label className="text-xs">Prompt $/1k</Label>
+                  <div className="col-span-2">
+                    <Label className="text-xs">Prompt $/M</Label>
                     <Input
                       type="number"
-                      step="0.0001"
-                      value={cost.promptUSDper1k}
+                      step="0.01"
+                      value={(cost.promptUSDper1k * 1000).toFixed(2)}
                       onChange={(e) => {
                         const newCosts = [...localCosts];
-                        newCosts[idx].promptUSDper1k = parseFloat(e.target.value) || 0;
+                        newCosts[idx].promptUSDper1k = (parseFloat(e.target.value) || 0) / 1000;
                         setLocalCosts(newCosts);
                       }}
                     />
                   </div>
-                  <div>
-                    <Label className="text-xs">Completion $/1k</Label>
+                  <div className="col-span-2">
+                    <Label className="text-xs">Completion $/M</Label>
                     <Input
                       type="number"
-                      step="0.0001"
-                      value={cost.completionUSDper1k}
+                      step="0.01"
+                      value={(cost.completionUSDper1k * 1000).toFixed(2)}
                       onChange={(e) => {
                         const newCosts = [...localCosts];
-                        newCosts[idx].completionUSDper1k = parseFloat(e.target.value) || 0;
+                        newCosts[idx].completionUSDper1k = (parseFloat(e.target.value) || 0) / 1000;
                         setLocalCosts(newCosts);
                       }}
                     />
+                  </div>
+                  <div className="col-span-2">
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        const newCosts = localCosts.filter((_, i) => i !== idx);
+                        setLocalCosts(newCosts);
+                      }}
+                    >
+                      Delete
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -286,7 +291,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 ])
               }
             >
-              Add Model
+              + Add Model
             </Button>
           </TabsContent>
         </Tabs>
