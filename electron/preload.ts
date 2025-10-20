@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: () => ipcRenderer.invoke('eval:list'),
     export: (runId) => ipcRenderer.invoke('eval:export', runId),
     import: (filePath) => ipcRenderer.invoke('eval:import', filePath),
+    delete: (runId) => ipcRenderer.invoke('eval:delete', runId),
     subscribe: (runId, callback) => {
       const channel = `eval:updates:${runId}`;
       ipcRenderer.on(channel, (_event, data) => callback(data));

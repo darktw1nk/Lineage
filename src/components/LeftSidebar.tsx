@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from './ui/button';
-import { Plus, Settings, Download, Upload } from 'lucide-react';
+import { Plus, Settings, Download, Upload, Trash2 } from 'lucide-react';
 import type { UUID, EvaluationRun } from '../types';
 
 interface LeftSidebarProps {
@@ -54,6 +54,18 @@ export function LeftSidebar({
       alert(`Import failed: ${error.message}`);
     },
   });
+  
+  const deleteMutation = useMutation({
+    mutationFn: async (runId: string) => {
+      return await window.electronAPI.eval.delete(runId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['evaluations'] });
+    },
+    onError: (error: any) => {
+      alert(`Delete failed: ${error.message}`);
+    },
+  });
 
   return (
     <div className="flex h-full w-64 flex-col border-r bg-card">
@@ -90,18 +102,48 @@ export function LeftSidebar({
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="truncate font-medium">Eval {evaluation.id.slice(0, 8)}</span>
+                <span className="truncate font-medium">{getEvaluationName(evaluation)}</span>
                 <div className="flex items-center gap-1">
-                  <button
+                  <span
                     onClick={(e) => {
                       e.stopPropagation();
                       exportMutation.mutate(evaluation.id);
                     }}
-                    className="p-1 hover:bg-accent rounded"
+                    className="p-1 hover:bg-accent rounded cursor-pointer inline-flex"
                     title="Export"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.stopPropagation();
+                        exportMutation.mutate(evaluation.id);
+                      }
+                    }}
                   >
                     <Download className="h-3 w-3" />
-                  </button>
+                  </span>
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Delete evaluation ${evaluation.id.slice(0, 8)}?`)) {
+                        deleteMutation.mutate(evaluation.id);
+                      }
+                    }}
+                    className="p-1 hover:bg-destructive hover:text-destructive-foreground rounded cursor-pointer inline-flex"
+                    title="Delete"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.stopPropagation();
+                        if (confirm(`Delete evaluation ${evaluation.id.slice(0, 8)}?`)) {
+                          deleteMutation.mutate(evaluation.id);
+                        }
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </span>
                   <span className={`text-xs ${getStatusColor(status)}`}>
                     {status}
                   </span>
@@ -130,6 +172,12 @@ export function LeftSidebar({
       </div>
     </div>
   );
+}
+
+function getEvaluationName(evaluation: EvaluationRun): string {
+  // Try to get config name from evaluation config
+  // If not available, show ID
+  return `Eval ${evaluation.id.slice(0, 8)}`;
 }
 
 function getBestScore(evaluation: EvaluationRun): number | null {

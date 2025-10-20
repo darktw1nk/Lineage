@@ -70,10 +70,9 @@ export interface EvaluationConfig {
   id: UUID;
   name: string;
   selection: {
-    topShare: number;     // e.g., 0.4
     policy: 'topk' | 'topp';
-    topK?: number;        // when policy = 'topk'
-    topP?: number;        // when policy = 'topp' (0..1 proportion)
+    topK?: number;        // when policy = 'topk': fixed number (e.g., 4)
+    topP?: number;        // when policy = 'topp': cumulative probability (0..1, e.g., 0.8)
   };
   operators: {
     mutationFactor: number; // 0..1

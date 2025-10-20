@@ -42,6 +42,10 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
     return importEvaluation(filePath);
   });
   
+  ipcMain.handle('eval:delete', async (_event, runId: string) => {
+    return deleteEvaluation(runId);
+  });
+  
   // Settings handlers
   ipcMain.handle('settings:get', async () => {
     return getSettings();
@@ -172,6 +176,35 @@ async function listEvaluations(): Promise<EvaluationRun[]> {
   `).all() as { run_json: string }[];
   
   return rows.map(row => JSON.parse(row.run_json));
+}
+
+async function deleteEvaluation(runId: string): Promise<void> {
+  const db = getDatabase();
+  
+  // Delete from all related tables
+  const transaction = db.transaction(() => {
+    // Delete raw blobs
+    db.prepare('DELETE FROM raw_blobs WHERE run_id = ?').run(runId);
+    
+    // Delete cost ledger entries
+    db.prepare('DELETE FROM cost_ledger WHERE run_id = ?').run(runId);
+    
+    // Get config_id before deleting the run
+    const runRow = db.prepare('SELECT config_id FROM evaluation_runs WHERE id = ?').get(runId) as { config_id: string } | undefined;
+    
+    // Delete the run
+    db.prepare('DELETE FROM evaluation_runs WHERE id = ?').run(runId);
+    
+    // Optionally delete the config if no other runs reference it
+    if (runRow) {
+      const remainingRuns = db.prepare('SELECT COUNT(*) as count FROM evaluation_runs WHERE config_id = ?').get(runRow.config_id) as { count: number };
+      if (remainingRuns.count === 0) {
+        db.prepare('DELETE FROM evaluation_configs WHERE id = ?').run(runRow.config_id);
+      }
+    }
+  });
+  
+  transaction();
 }
 
 async function exportEvaluation(runId: string): Promise<string> {

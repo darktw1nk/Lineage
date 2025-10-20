@@ -10,6 +10,7 @@ export interface ElectronAPI {
     list: () => Promise<EvaluationRun[]>;
     export: (runId: string) => Promise<string>;
     import: (filePath: string) => Promise<EvaluationRun>;
+    delete: (runId: string) => Promise<void>;
     subscribe: (runId: string, callback: (data: any) => void) => () => void;
   };
   settings: {

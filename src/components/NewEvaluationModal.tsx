@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -20,7 +20,6 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
     id: uuidv4(),
     name: 'New Evaluation',
     selection: {
-      topShare: 0.4,
       policy: 'topk',
       topK: 4,
     },
@@ -71,10 +70,15 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
   const createEvaluation = useMutation({
     mutationFn: async (config: EvaluationConfig) => {
       const run = await window.electronAPI.eval.create(config);
+      // Start the evaluation immediately after creation
+      await window.electronAPI.eval.start(run.id);
       return run;
     },
     onSuccess: (run) => {
       onCreated(run.id);
+    },
+    onError: (error: any) => {
+      alert(`Failed to start evaluation: ${error.message || error}`);
     },
   });
 
@@ -128,6 +132,9 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>New Evaluation</DialogTitle>
+          <DialogDescription>
+            Configure and start a new prompt evolution evaluation
+          </DialogDescription>
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
@@ -262,41 +269,71 @@ function MainTab({ config, setConfig }: TabProps) {
               selection: {
                 ...config.selection!,
                 policy: e.target.value as 'topk' | 'topp',
+                topK: e.target.value === 'topk' ? 4 : undefined,
+                topP: e.target.value === 'topp' ? 0.8 : undefined,
               },
             })
           }
         >
-          <option value="topk">Top-K (select top K candidates)</option>
-          <option value="topp">Top-P (select top proportion)</option>
+          <option value="topk">Top-K (fixed number of best)</option>
+          <option value="topp">Top-P (cumulative probability)</option>
         </select>
-      </div>
-
-      <div>
-        <Label htmlFor="topShare">Top Share for Selection (0-1)</Label>
-        <Input
-          id="topShare"
-          type="number"
-          step="0.1"
-          min="0"
-          max="1"
-          value={config.selection?.topShare || 0.4}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              selection: {
-                ...config.selection!,
-                topShare: parseFloat(e.target.value) || 0.4,
-              },
-            })
-          }
-        />
         <div className="text-xs text-muted-foreground mt-1">
           {config.selection?.policy === 'topk' 
-            ? `Will select top ${Math.ceil((config.population?.size || 10) * (config.selection?.topShare || 0.4))} candidates`
-            : `Will select top ${((config.selection?.topShare || 0.4) * 100).toFixed(0)}% of candidates`
+            ? 'Select a fixed number of top performers'
+            : 'Select candidates until cumulative fitness probability reaches threshold'
           }
         </div>
       </div>
+
+      {config.selection?.policy === 'topk' ? (
+        <div>
+          <Label htmlFor="topK">Top K (number of candidates)</Label>
+          <Input
+            id="topK"
+            type="number"
+            min="1"
+            max={config.population?.size || 10}
+            value={config.selection?.topK || 4}
+            onChange={(e) =>
+              setConfig({
+                ...config,
+                selection: {
+                  ...config.selection!,
+                  topK: parseInt(e.target.value) || 4,
+                },
+              })
+            }
+          />
+          <div className="text-xs text-muted-foreground mt-1">
+            Will select top {config.selection?.topK || 4} candidates from each generation
+          </div>
+        </div>
+      ) : (
+        <div>
+          <Label htmlFor="topP">Top P (cumulative probability 0-1)</Label>
+          <Input
+            id="topP"
+            type="number"
+            step="0.05"
+            min="0.1"
+            max="1"
+            value={config.selection?.topP || 0.8}
+            onChange={(e) =>
+              setConfig({
+                ...config,
+                selection: {
+                  ...config.selection!,
+                  topP: parseFloat(e.target.value) || 0.8,
+                },
+              })
+            }
+          />
+          <div className="text-xs text-muted-foreground mt-1">
+            Will select candidates until {((config.selection?.topP || 0.8) * 100).toFixed(0)}% of total fitness is covered
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center space-x-2">
         <Switch

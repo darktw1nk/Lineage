@@ -346,9 +346,40 @@ async function moveToNextGeneration(
     return;
   }
   
-  // Select top performers
-  const topCount = Math.max(1, Math.ceil(sorted.length * state.config.selection.topShare));
-  const topPerformers = sorted.slice(0, topCount);
+  // Select top performers based on policy
+  let topPerformers: CandidateNode[];
+  
+  if (state.config.selection.policy === 'topk') {
+    // Top-K: Select fixed number of best candidates
+    const k = state.config.selection.topK || 4;
+    topPerformers = sorted.slice(0, Math.min(k, sorted.length));
+  } else {
+    // Top-P: Select candidates until cumulative probability reaches threshold
+    const p = state.config.selection.topP || 0.8;
+    const totalFitness = sorted.reduce((sum, n) => sum + (n.metrics?.fitness || 0), 0);
+    
+    if (totalFitness === 0) {
+      // Fallback: select at least one
+      topPerformers = [sorted[0]];
+    } else {
+      let cumulativeProbability = 0;
+      topPerformers = [];
+      
+      for (const node of sorted) {
+        topPerformers.push(node);
+        cumulativeProbability += (node.metrics?.fitness || 0) / totalFitness;
+        
+        if (cumulativeProbability >= p) {
+          break;
+        }
+      }
+      
+      // Ensure at least one is selected
+      if (topPerformers.length === 0) {
+        topPerformers = [sorted[0]];
+      }
+    }
+  }
   
   // Generate next generation
   const nextGen: CandidateNode[] = [];
