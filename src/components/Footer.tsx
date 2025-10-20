@@ -1,3 +1,4 @@
+import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from './ui/button';
 import { Pause, Play, Square } from 'lucide-react';
@@ -26,18 +27,16 @@ export function Footer({ evaluationId }: FooterProps) {
     );
   }
 
-  const isRunning = !evaluation.finishedAt;
   const currentGeneration = evaluation.generations.length;
-
-  const [isPaused, setIsPaused] = React.useState(false);
+  const status = evaluation.status || (evaluation.finishedAt ? 'stopped' : 'running');
+  const isPaused = status === 'paused';
+  const isStopped = status === 'stopped' || !!evaluation.stopReason;
   
   const handlePauseResume = async () => {
-    if (!isPaused) {
-      await window.electronAPI.eval.pause(evaluation.id);
-      setIsPaused(true);
-    } else {
+    if (isPaused) {
       await window.electronAPI.eval.resume(evaluation.id);
-      setIsPaused(false);
+    } else {
+      await window.electronAPI.eval.pause(evaluation.id);
     }
   };
 
@@ -54,6 +53,8 @@ export function Footer({ evaluationId }: FooterProps) {
           <div className="text-sm font-medium">
             {evaluation.stopReason
               ? `Stopped: ${evaluation.stopReason}`
+              : isPaused
+              ? 'Paused'
               : 'Running'}
           </div>
         </div>
@@ -89,17 +90,17 @@ export function Footer({ evaluationId }: FooterProps) {
           size="sm"
           variant="outline"
           onClick={handlePauseResume}
-          disabled={!!evaluation.stopReason}
+          disabled={isStopped}
         >
-          {isRunning ? (
-            <>
-              <Pause className="mr-2 h-4 w-4" />
-              Pause
-            </>
-          ) : (
+          {isPaused ? (
             <>
               <Play className="mr-2 h-4 w-4" />
               Resume
+            </>
+          ) : (
+            <>
+              <Pause className="mr-2 h-4 w-4" />
+              Pause
             </>
           )}
         </Button>
@@ -108,7 +109,7 @@ export function Footer({ evaluationId }: FooterProps) {
           size="sm"
           variant="destructive"
           onClick={handleStop}
-          disabled={!!evaluation.stopReason}
+          disabled={isStopped}
         >
           <Square className="mr-2 h-4 w-4" />
           Stop

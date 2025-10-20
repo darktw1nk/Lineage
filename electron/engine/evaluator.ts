@@ -64,6 +64,7 @@ export async function startEvaluation(
     run: {
       ...run,
       generations: [initialNodes],
+      status: 'running',
     },
     config,
     status: 'running',
@@ -90,6 +91,8 @@ export function pauseEvaluation(runId: UUID): void {
   const state = activeEvaluations.get(runId);
   if (state) {
     state.status = 'paused';
+    state.run.status = 'paused';
+    sendUpdate(runId, { type: 'status', status: 'paused' });
   }
 }
 
@@ -97,6 +100,8 @@ export function resumeEvaluation(runId: UUID): void {
   const state = activeEvaluations.get(runId);
   if (state) {
     state.status = 'running';
+    state.run.status = 'running';
+    sendUpdate(runId, { type: 'status', status: 'running' });
     evaluationLoop(runId);
   }
 }
@@ -105,6 +110,7 @@ export function stopEvaluation(runId: UUID): void {
   const state = activeEvaluations.get(runId);
   if (state) {
     state.status = 'stopped';
+    state.run.status = 'stopped';
     state.run.stopReason = 'manual';
     state.run.finishedAt = Date.now();
     activeEvaluations.delete(runId);

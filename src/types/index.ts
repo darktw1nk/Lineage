@@ -105,7 +105,8 @@ export interface EvaluationRun {
   configId: UUID;
   startedAt: number;
   finishedAt?: number;
-  stopReason?: 'time' | 'budget' | 'target' | 'manual' | 'exhausted' | 'error';
+  stopReason?: 'time' | 'budget' | 'target' | 'manual' | 'exhausted' | 'error' | 'generations';
+  status?: 'running' | 'paused' | 'stopped';
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
   generations: CandidateNode[][]; // 2D grid
   cacheHits: number;
