@@ -38,6 +38,14 @@ interface EvaluationState {
   operatorEffectiveness: OperatorEffectiveness;
 }
 
+// Helper to track service model costs
+function trackServiceCost(state: EvaluationState, usd: number, tokens: { prompt: number; completion: number }): void {
+  state.run.totals.usd += usd;
+  state.run.totals.tokensPrompt += tokens.prompt;
+  state.run.totals.tokensCompletion += tokens.completion;
+  state.run.totals.calls++;
+}
+
 const activeEvaluations = new Map<UUID, EvaluationState>();
 
 export async function startEvaluation(
@@ -193,12 +201,16 @@ async function processNode(
       
       // Evaluate guardrails against concatenated test outputs
       const allOutputs = node.tests.map(t => t.outputText || '').join('\n---\n');
-      safety = await evaluateSafetyGuardrails(
+      const safetyResult = await evaluateSafetyGuardrails(
         allOutputs,
         state.config.fitness.guardrails,
         state.config.serviceModel,
         serviceAdapter
       );
+      safety = safetyResult.score;
+      
+      // Track service model costs from guardrail checks
+      trackServiceCost(state, safetyResult.totalCost, { prompt: safetyResult.totalPromptTokens, completion: safetyResult.totalCompletionTokens });
     }
     
     // Calculate fitness
@@ -369,6 +381,13 @@ async function moveToNextGeneration(
     
     try {
       const mutated = await applyMutation(parent, state.config);
+      
+      // Track service model costs from mutation
+      trackServiceCost(state, mutated.totalCost, { 
+        prompt: mutated.totalPromptTokens, 
+        completion: mutated.totalCompletionTokens 
+      });
+      
       const node: CandidateNode = {
         id: uuidv4(),
         generation: nextGenNumber,
@@ -390,6 +409,13 @@ async function moveToNextGeneration(
     const parentB = topPerformers[(i + 1) % topPerformers.length];
     try {
       const crossed = await applyCrossover(parentA, parentB, state.config);
+      
+      // Track service model costs from crossover
+      trackServiceCost(state, crossed.totalCost, { 
+        prompt: crossed.totalPromptTokens, 
+        completion: crossed.totalCompletionTokens 
+      });
+      
       const node: CandidateNode = {
         id: uuidv4(),
         generation: nextGenNumber,
@@ -410,6 +436,13 @@ async function moveToNextGeneration(
     const parent = topPerformers[i % topPerformers.length];
     try {
       const metaed = await applyMetaPrompting(parent, state.config);
+      
+      // Track service model costs from meta-prompting
+      trackServiceCost(state, metaed.totalCost, { 
+        prompt: metaed.totalPromptTokens, 
+        completion: metaed.totalCompletionTokens 
+      });
+      
       const node: CandidateNode = {
         id: uuidv4(),
         generation: nextGenNumber,

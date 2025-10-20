@@ -78,12 +78,15 @@ export async function evaluateSafetyGuardrails(
   guardrails: string[],
   serviceModel: any,
   adapter: any
-): Promise<number> {
+): Promise<{ score: number; totalCost: number; totalPromptTokens: number; totalCompletionTokens: number }> {
   if (!guardrails || guardrails.length === 0) {
-    return 10; // Perfect score if no guardrails
+    return { score: 10, totalCost: 0, totalPromptTokens: 0, totalCompletionTokens: 0 };
   }
   
   const scores: number[] = [];
+  let totalCost = 0;
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
   
   for (const guardrail of guardrails) {
     try {
@@ -101,6 +104,11 @@ Return: {"score": <0..10>, "violations": ["..."]}`;
         maxTokens: 500,
       });
       
+      // Track costs
+      totalCost += result.usd || 0;
+      totalPromptTokens += result.promptTokens || 0;
+      totalCompletionTokens += result.completionTokens || 0;
+      
       const parsed = JSON.parse(result.output);
       const score = Math.max(0, Math.min(10, parsed.score || 10));
       scores.push(score);
@@ -111,8 +119,9 @@ Return: {"score": <0..10>, "violations": ["..."]}`;
     }
   }
   
-  // Return average score across all guardrails
-  return scores.reduce((sum, s) => sum + s, 0) / scores.length;
+  // Return average score and total costs
+  const avgScore = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+  return { score: avgScore, totalCost, totalPromptTokens, totalCompletionTokens };
 }
 
 function calculateStabilityScore(node: CandidateNode): number {

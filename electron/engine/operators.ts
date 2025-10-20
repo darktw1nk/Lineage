@@ -37,9 +37,13 @@ Return JSON edits: [{"label":"META","edit":"..."}]`;
 export async function applyMutation(
   parent: CandidateNode,
   config: EvaluationConfig
-): Promise<{ prompt: string; changeLog: ChangeLogLine[] }> {
+): Promise<{ prompt: string; changeLog: ChangeLogLine[]; totalCost: number; totalPromptTokens: number; totalCompletionTokens: number }> {
   const serviceModel = config.serviceModel;
   const adapter = getProviderAdapter(serviceModel.provider);
+  
+  let totalCost = 0;
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
   
   // Generate mutation edits
   const mutationPrompt = MUTATION_TEMPLATE.replace('{prompt}', parent.prompt);
@@ -51,6 +55,11 @@ export async function applyMutation(
       temperature: 0.7,
       maxTokens: 2000,
     });
+    
+    // Track cost from first call
+    totalCost += mutationResult.usd || 0;
+    totalPromptTokens += mutationResult.promptTokens || 0;
+    totalCompletionTokens += mutationResult.completionTokens || 0;
     
     // Parse edits
     let edits: Array<{ label: string; edit: string }> = [];
@@ -74,6 +83,11 @@ export async function applyMutation(
       maxTokens: 4096,
     });
     
+    // Track cost from second call
+    totalCost += applyResult.usd || 0;
+    totalPromptTokens += applyResult.promptTokens || 0;
+    totalCompletionTokens += applyResult.completionTokens || 0;
+    
     const changeLog: ChangeLogLine[] = edits.map(e => ({
       label: 'MUTATION',
       text: e.edit,
@@ -82,6 +96,9 @@ export async function applyMutation(
     return {
       prompt: applyResult.output.trim(),
       changeLog,
+      totalCost,
+      totalPromptTokens,
+      totalCompletionTokens,
     };
   } catch (error) {
     console.error('Mutation failed:', error);
@@ -89,6 +106,9 @@ export async function applyMutation(
     return {
       prompt: parent.prompt,
       changeLog: [{ label: 'MUTATION', text: 'Failed to apply mutation' }],
+      totalCost,
+      totalPromptTokens,
+      totalCompletionTokens,
     };
   }
 }
@@ -97,9 +117,13 @@ export async function applyCrossover(
   parentA: CandidateNode,
   parentB: CandidateNode,
   config: EvaluationConfig
-): Promise<{ prompt: string; changeLog: ChangeLogLine[] }> {
+): Promise<{ prompt: string; changeLog: ChangeLogLine[]; totalCost: number; totalPromptTokens: number; totalCompletionTokens: number }> {
   const serviceModel = config.serviceModel;
   const adapter = getProviderAdapter(serviceModel.provider);
+  
+  let totalCost = 0;
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
   
   const crossoverPrompt = CROSSOVER_TEMPLATE
     .replace('{promptA}', parentA.prompt)
@@ -113,6 +137,11 @@ export async function applyCrossover(
       maxTokens: 4096,
     });
     
+    // Track cost
+    totalCost += result.usd || 0;
+    totalPromptTokens += result.promptTokens || 0;
+    totalCompletionTokens += result.completionTokens || 0;
+    
     return {
       prompt: result.output.trim(),
       changeLog: [
@@ -121,6 +150,9 @@ export async function applyCrossover(
           text: `Merged prompts from ${parentA.id.substring(0, 8)} and ${parentB.id.substring(0, 8)}`,
         },
       ],
+      totalCost,
+      totalPromptTokens,
+      totalCompletionTokens,
     };
   } catch (error) {
     console.error('Crossover failed:', error);
@@ -128,6 +160,9 @@ export async function applyCrossover(
     return {
       prompt: parentA.prompt,
       changeLog: [{ label: 'CROSSOVER', text: 'Failed to apply crossover' }],
+      totalCost,
+      totalPromptTokens,
+      totalCompletionTokens,
     };
   }
 }
@@ -135,9 +170,13 @@ export async function applyCrossover(
 export async function applyMetaPrompting(
   parent: CandidateNode,
   config: EvaluationConfig
-): Promise<{ prompt: string; changeLog: ChangeLogLine[] }> {
+): Promise<{ prompt: string; changeLog: ChangeLogLine[]; totalCost: number; totalPromptTokens: number; totalCompletionTokens: number }> {
   const serviceModel = config.serviceModel;
   const adapter = getProviderAdapter(serviceModel.provider);
+  
+  let totalCost = 0;
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
   
   // Collect failure summary
   const failedTests = parent.tests?.filter(t => !t.passed) ?? [];
@@ -158,6 +197,11 @@ export async function applyMetaPrompting(
       temperature: 0.7,
       maxTokens: 2000,
     });
+    
+    // Track cost from first call
+    totalCost += metaResult.usd || 0;
+    totalPromptTokens += metaResult.promptTokens || 0;
+    totalCompletionTokens += metaResult.completionTokens || 0;
     
     // Parse edits
     let edits: Array<{ label: string; edit: string }> = [];
@@ -180,6 +224,11 @@ export async function applyMetaPrompting(
       maxTokens: 4096,
     });
     
+    // Track cost from second call
+    totalCost += applyResult.usd || 0;
+    totalPromptTokens += applyResult.promptTokens || 0;
+    totalCompletionTokens += applyResult.completionTokens || 0;
+    
     const changeLog: ChangeLogLine[] = edits.map(e => ({
       label: 'META',
       text: e.edit,
@@ -188,12 +237,18 @@ export async function applyMetaPrompting(
     return {
       prompt: applyResult.output.trim(),
       changeLog,
+      totalCost,
+      totalPromptTokens,
+      totalCompletionTokens,
     };
   } catch (error) {
     console.error('Meta-prompting failed:', error);
     return {
       prompt: parent.prompt,
       changeLog: [{ label: 'META', text: 'Failed to apply meta-prompting' }],
+      totalCost,
+      totalPromptTokens,
+      totalCompletionTokens,
     };
   }
 }
