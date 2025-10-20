@@ -781,14 +781,61 @@ function TestSetTab({ config, setConfig }: TabProps) {
             </div>
 
             {test.mode === 'exact_match' && (
-              <div>
-                <Label>Expected Output</Label>
-                <Input
-                  value={test.expected || ''}
-                  onChange={(e) => updateTest(test.id, { expected: e.target.value })}
-                  placeholder="Expected output..."
-                />
-              </div>
+              <>
+                <div>
+                  <Label>Expected Output</Label>
+                  <Input
+                    value={test.expected || ''}
+                    onChange={(e) => updateTest(test.id, { expected: e.target.value })}
+                    placeholder="Expected output..."
+                  />
+                </div>
+
+                <div className="border-t pt-3 space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id={`strict-${test.id}`}
+                      checked={test.grading?.strictZeroOnDeviation || false}
+                      onCheckedChange={(checked) =>
+                        updateTest(test.id, {
+                          grading: {
+                            ...test.grading,
+                            strictZeroOnDeviation: checked,
+                          },
+                        })
+                      }
+                    />
+                    <Label htmlFor={`strict-${test.id}`} className="text-sm">
+                      Strict Mode (0 or 10 only)
+                    </Label>
+                  </div>
+
+                  {!test.grading?.strictZeroOnDeviation && (
+                    <div>
+                      <Label className="text-sm">Distance Metric</Label>
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={test.grading?.distanceMetric || 'levenshtein'}
+                        onChange={(e) =>
+                          updateTest(test.id, {
+                            grading: {
+                              ...test.grading,
+                              distanceMetric: e.target.value as any,
+                            },
+                          })
+                        }
+                      >
+                        <option value="levenshtein">Levenshtein (text similarity)</option>
+                        <option value="json_diff">JSON Diff (structure similarity)</option>
+                        <option value="numeric_abs">Numeric Absolute (number closeness)</option>
+                      </select>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        Score 0-10 based on similarity. Pass threshold: ≥7
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
         ))}
