@@ -94,7 +94,7 @@ export interface EvaluationConfig {
     costNorm?: { maxUSDPerCall: number };
     latencyNorm?: { maxMs: number };
   };
-  targets: { timeLimitMs?: number; budgetUSD?: number; targetFitness?: number };
+  targets: { timeLimitMs?: number; budgetUSD?: number; targetFitness?: number; maxGenerations?: number };
   serviceModel: ModelRef; // for meta/mutation/crossover/grading
   parallelLimit: number;  // global N
   rawBlobCapture?: boolean; // default false

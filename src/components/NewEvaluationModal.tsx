@@ -109,7 +109,7 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
     if (!config.testSet || config.testSet.length === 0) {
       newErrors.testset = 'At least one test is required';
     }
-    if (!config.targets?.timeLimitMs && !config.targets?.budgetUSD && !config.targets?.targetFitness) {
+    if (!config.targets?.timeLimitMs && !config.targets?.budgetUSD && !config.targets?.targetFitness && !config.targets?.maxGenerations) {
       newErrors.targets = 'At least one target must be set';
     }
 
@@ -1024,72 +1024,176 @@ function FitnessTab({ config, setConfig }: TabProps) {
 
 // Targets Tab
 function TargetsTab({ config, setConfig }: TabProps) {
+  const hasTimeLimit = (config.targets?.timeLimitMs || 0) > 0;
+  const hasBudgetLimit = (config.targets?.budgetUSD || 0) > 0;
+  const hasTargetFitness = (config.targets?.targetFitness || 0) > 0;
+  const hasMaxGenerations = (config.targets?.maxGenerations || 0) > 0;
+
   return (
     <div className="space-y-4">
       <div className="text-sm text-muted-foreground">
-        Set stopping conditions (at least one required)
+        Set stopping conditions (at least one required). Evaluation stops when ANY condition is met.
       </div>
 
-      <div>
-        <Label htmlFor="timeLimit">Time Limit (minutes)</Label>
-        <Input
-          id="timeLimit"
-          type="number"
-          value={(config.targets?.timeLimitMs || 0) / 60000}
-          onChange={(e) =>
+      <div className="flex items-center space-x-2">
+        <Switch
+          id="time-enabled"
+          checked={hasTimeLimit}
+          onCheckedChange={(checked) => {
             setConfig({
               ...config,
               targets: {
                 ...config.targets!,
-                timeLimitMs: parseFloat(e.target.value) * 60000 || undefined,
+                timeLimitMs: checked ? 3600000 : undefined, // Default 1 hour
               },
-            })
-          }
-          placeholder="e.g., 60 for 1 hour"
+            });
+          }}
         />
+        <Label htmlFor="time-enabled">Time Limit</Label>
+        {hasTimeLimit && (
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              value={(config.targets?.timeLimitMs || 0) / 60000}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  targets: {
+                    ...config.targets!,
+                    timeLimitMs: parseFloat(e.target.value) * 60000 || undefined,
+                  },
+                })
+              }
+              placeholder="60"
+              className="w-24"
+            />
+            <span className="text-sm text-muted-foreground">minutes</span>
+          </div>
+        )}
       </div>
 
-      <div>
-        <Label htmlFor="budget">Budget Limit (USD)</Label>
-        <Input
-          id="budget"
-          type="number"
-          step="0.1"
-          value={config.targets?.budgetUSD || ''}
-          onChange={(e) =>
+      <div className="flex items-center space-x-2">
+        <Switch
+          id="budget-enabled"
+          checked={hasBudgetLimit}
+          onCheckedChange={(checked) => {
             setConfig({
               ...config,
               targets: {
                 ...config.targets!,
-                budgetUSD: parseFloat(e.target.value) || undefined,
+                budgetUSD: checked ? 10 : undefined, // Default $10
               },
-            })
-          }
-          placeholder="e.g., 10"
+            });
+          }}
         />
+        <Label htmlFor="budget-enabled">Budget Limit</Label>
+        {hasBudgetLimit && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm">$</span>
+            <Input
+              type="number"
+              step="0.1"
+              value={config.targets?.budgetUSD || ''}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  targets: {
+                    ...config.targets!,
+                    budgetUSD: parseFloat(e.target.value) || undefined,
+                  },
+                })
+              }
+              placeholder="10"
+              className="w-24"
+            />
+            <span className="text-sm text-muted-foreground">USD</span>
+          </div>
+        )}
       </div>
 
-      <div>
-        <Label htmlFor="targetFitness">Target Fitness Score</Label>
-        <Input
-          id="targetFitness"
-          type="number"
-          step="0.1"
-          min="0"
-          max="10"
-          value={config.targets?.targetFitness || ''}
-          onChange={(e) =>
+      <div className="flex items-center space-x-2">
+        <Switch
+          id="fitness-enabled"
+          checked={hasTargetFitness}
+          onCheckedChange={(checked) => {
             setConfig({
               ...config,
               targets: {
                 ...config.targets!,
-                targetFitness: parseFloat(e.target.value) || undefined,
+                targetFitness: checked ? 9.0 : undefined, // Default 9.0
               },
-            })
-          }
-          placeholder="e.g., 9.0"
+            });
+          }}
         />
+        <Label htmlFor="fitness-enabled">Target Fitness Score</Label>
+        {hasTargetFitness && (
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              step="0.1"
+              min="0"
+              max="10"
+              value={config.targets?.targetFitness || ''}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  targets: {
+                    ...config.targets!,
+                    targetFitness: parseFloat(e.target.value) || undefined,
+                  },
+                })
+              }
+              placeholder="9.0"
+              className="w-24"
+            />
+            <span className="text-sm text-muted-foreground">(0-10)</span>
+          </div>
+        )}
       </div>
+
+      <div className="flex items-center space-x-2">
+        <Switch
+          id="generations-enabled"
+          checked={hasMaxGenerations}
+          onCheckedChange={(checked) => {
+            setConfig({
+              ...config,
+              targets: {
+                ...config.targets!,
+                maxGenerations: checked ? 10 : undefined, // Default 10 generations
+              },
+            });
+          }}
+        />
+        <Label htmlFor="generations-enabled">Max Generations</Label>
+        {hasMaxGenerations && (
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min="1"
+              value={config.targets?.maxGenerations || ''}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  targets: {
+                    ...config.targets!,
+                    maxGenerations: parseInt(e.target.value) || undefined,
+                  },
+                })
+              }
+              placeholder="10"
+              className="w-24"
+            />
+            <span className="text-sm text-muted-foreground">generations</span>
+          </div>
+        )}
+      </div>
+
+      {!hasTimeLimit && !hasBudgetLimit && !hasTargetFitness && !hasMaxGenerations && (
+        <div className="text-sm text-yellow-600 bg-yellow-50 p-3 rounded-md">
+          ⚠ At least one stopping condition must be enabled
+        </div>
+      )}
     </div>
   );
 }

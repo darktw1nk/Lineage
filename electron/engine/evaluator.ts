@@ -472,6 +472,12 @@ function shouldStop(state: EvaluationState): boolean {
     }
   }
   
+  // Check max generations
+  if (targets.maxGenerations && state.currentGeneration >= targets.maxGenerations) {
+    state.run.stopReason = 'generations';
+    return true;
+  }
+  
   return false;
 }
 
