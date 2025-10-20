@@ -82,7 +82,27 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
     const newErrors: Record<string, string> = {};
 
     if (!config.name) newErrors.main = 'Name is required';
-    if (!config.population?.seedPrompt) newErrors.population = 'Seed prompt is required';
+    
+    // Validate population based on fill mode
+    if (config.population?.fill === 'manual') {
+      const manualPrompts = (config.population as any)?.manualPrompts || [];
+      if (manualPrompts.length === 0) {
+        newErrors.population = 'Manual mode requires at least one prompt';
+      } else if (manualPrompts.length < (config.population?.size || 10)) {
+        newErrors.population = `Manual mode requires ${config.population?.size || 10} prompts (you have ${manualPrompts.length})`;
+      } else {
+        // Check if any prompt is empty
+        for (let i = 0; i < manualPrompts.length; i++) {
+          if (!manualPrompts[i].prompt?.trim()) {
+            newErrors.population = `Prompt #${i + 1} is empty`;
+            break;
+          }
+        }
+      }
+    } else {
+      if (!config.population?.seedPrompt) newErrors.population = 'Seed prompt is required';
+    }
+    
     if (!config.enabledModels || config.enabledModels.length === 0) {
       newErrors.models = 'At least one model must be enabled';
     }
@@ -421,6 +441,53 @@ function MainTab({ config, setConfig }: TabProps) {
 
 // Population Tab
 function PopulationTab({ config, setConfig }: TabProps) {
+  const { data: costs = [] } = useQuery<ModelCostEntry[]>({
+    queryKey: ['costs'],
+    queryFn: () => window.electronAPI.costs.getAll(),
+  });
+
+  const isManualMode = config.population?.fill === 'manual';
+  const manualPrompts = (config.population as any)?.manualPrompts || [];
+
+  const addManualPrompt = () => {
+    const newPrompts = [...manualPrompts, { prompt: '', model: costs[0] ? { provider: costs[0].provider, model: costs[0].model } : { provider: 'openai', model: 'gpt-4' } }];
+    setConfig({
+      ...config,
+      population: {
+        ...config.population!,
+        manualPrompts: newPrompts,
+      } as any,
+    });
+  };
+
+  const updateManualPrompt = (index: number, field: 'prompt' | 'model', value: any) => {
+    const newPrompts = [...manualPrompts];
+    if (field === 'prompt') {
+      newPrompts[index].prompt = value;
+    } else {
+      const [provider, model] = value.split(':');
+      newPrompts[index].model = { provider, model };
+    }
+    setConfig({
+      ...config,
+      population: {
+        ...config.population!,
+        manualPrompts: newPrompts,
+      } as any,
+    });
+  };
+
+  const removeManualPrompt = (index: number) => {
+    const newPrompts = manualPrompts.filter((_: any, i: number) => i !== index);
+    setConfig({
+      ...config,
+      population: {
+        ...config.population!,
+        manualPrompts: newPrompts,
+      } as any,
+    });
+  };
+
   return (
     <div className="space-y-4">
       <div>
@@ -443,25 +510,6 @@ function PopulationTab({ config, setConfig }: TabProps) {
       </div>
 
       <div>
-        <Label htmlFor="seedPrompt">Seed Prompt</Label>
-        <textarea
-          id="seedPrompt"
-          className="w-full h-32 rounded-md border border-input bg-background px-3 py-2 text-sm"
-          value={config.population?.seedPrompt || ''}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              population: {
-                ...config.population!,
-                seedPrompt: e.target.value,
-              },
-            })
-          }
-          placeholder="Enter the initial prompt to evolve..."
-        />
-      </div>
-
-      <div>
         <Label htmlFor="fill">Population Fill Mode</Label>
         <select
           id="fill"
@@ -477,10 +525,100 @@ function PopulationTab({ config, setConfig }: TabProps) {
             })
           }
         >
-          <option value="auto">Auto (generate via mutations)</option>
-          <option value="manual">Manual</option>
+          <option value="auto">Auto (generate via mutations from seed)</option>
+          <option value="manual">Manual (specify each prompt)</option>
         </select>
       </div>
+
+      {!isManualMode ? (
+        <div>
+          <Label htmlFor="seedPrompt">Seed Prompt</Label>
+          <textarea
+            id="seedPrompt"
+            className="w-full h-32 rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={config.population?.seedPrompt || ''}
+            onChange={(e) =>
+              setConfig({
+                ...config,
+                population: {
+                  ...config.population!,
+                  seedPrompt: e.target.value,
+                },
+              })
+            }
+            placeholder="Enter the initial prompt to evolve..."
+          />
+          <div className="text-xs text-muted-foreground mt-1">
+            The seed prompt will be used to generate {config.population?.size || 10} variations
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label>Manual Prompts ({manualPrompts.length} / {config.population?.size || 10})</Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addManualPrompt}
+              disabled={manualPrompts.length >= (config.population?.size || 10)}
+            >
+              + Add Prompt
+            </Button>
+          </div>
+
+          {manualPrompts.length === 0 && (
+            <div className="text-sm text-muted-foreground bg-muted p-3 rounded-md">
+              Click "Add Prompt" to manually specify each initial prompt
+            </div>
+          )}
+
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            {manualPrompts.map((item: any, index: number) => (
+              <div key={index} className="border rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold">Prompt #{index + 1}</Label>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => removeManualPrompt(index)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+                <textarea
+                  className="w-full h-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={item.prompt}
+                  onChange={(e) => updateManualPrompt(index, 'prompt', e.target.value)}
+                  placeholder="Enter prompt text..."
+                />
+                <div>
+                  <Label className="text-xs">Model</Label>
+                  <select
+                    className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
+                    value={`${item.model.provider}:${item.model.model}`}
+                    onChange={(e) => updateManualPrompt(index, 'model', e.target.value)}
+                  >
+                    {costs.map((cost, idx) => (
+                      <option key={idx} value={`${cost.provider}:${cost.model}`}>
+                        {cost.provider}/{cost.model}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {manualPrompts.length < (config.population?.size || 10) && manualPrompts.length > 0 && (
+            <div className="text-sm text-yellow-600 bg-yellow-50 p-3 rounded-md">
+              ⚠ You have {manualPrompts.length} prompt(s), but population size is {config.population?.size || 10}. 
+              Add {(config.population?.size || 10) - manualPrompts.length} more prompt(s).
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

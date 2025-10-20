@@ -234,13 +234,47 @@ export async function generateInitialPopulation(
   config: EvaluationConfig
 ): Promise<CandidateNode[]> {
   const nodes: CandidateNode[] = [];
-  const seedPrompt = config.population.seedPrompt;
   
   if (config.population.fill === 'manual') {
-    // User fills manually - for now, just create one node with seed
-    nodes.push(createInitialNode(seedPrompt, config.enabledModels[0], 0));
+    // User-specified prompts
+    const manualPrompts = (config.population as any).manualPrompts || [];
+    
+    if (manualPrompts.length === 0) {
+      throw new Error('Manual mode requires at least one prompt');
+    }
+    
+    // Create a node for each manual prompt
+    for (let i = 0; i < manualPrompts.length; i++) {
+      const item = manualPrompts[i];
+      if (!item.prompt || !item.model) {
+        throw new Error(`Manual prompt #${i + 1} is incomplete`);
+      }
+      
+      const node: CandidateNode = {
+        id: uuidv4(),
+        generation: 0,
+        lineageParents: [],
+        status: 'awaiting',
+        prompt: item.prompt,
+        params: {
+          model: item.model,
+          temperature: 0.7, // Default temperature
+        },
+        changeLog: [{
+          label: 'initial',
+          description: `Manual prompt #${i + 1}`,
+        }],
+      };
+      nodes.push(node);
+    }
   } else {
-    // Auto-fill via mutations
+    // Auto-fill via mutations from seed
+    const seedPrompt = config.population.seedPrompt;
+    
+    if (!seedPrompt) {
+      throw new Error('Seed prompt is required for auto mode');
+    }
+    
     // First node is the seed
     nodes.push(createInitialNode(seedPrompt, config.enabledModels[0], 0));
     
