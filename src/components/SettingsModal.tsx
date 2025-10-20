@@ -59,20 +59,18 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   
   const [localCosts, setLocalCosts] = useState<ModelCostEntry[]>([]);
 
-  // Initialize from query data - only once when modal opens
+  // Initialize from query data when available
   useEffect(() => {
     if (settings) {
       setLocalSettings(settings);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [settings]);
 
   useEffect(() => {
-    if (costs && costs.length > 0) {
+    if (costs) {
       setLocalCosts(costs);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [costs]);
 
   const saveSettings = useMutation({
     mutationFn: async () => {

@@ -123,10 +123,8 @@ function createTables(db: Database.Database): void {
   `);
   
   // Insert default model costs if table is empty
-  const costCount = db.prepare('SELECT COUNT(*) as count FROM model_costs').get() as { count: number };
-  if (costCount.count === 0) {
-    insertDefaultModelCosts(db);
-  }
+  // Check and run migrations first - this will handle model costs
+  runMigrations(db);
 }
 
 function insertDefaultModelCosts(db: Database.Database): void {
@@ -168,15 +166,20 @@ function runMigrations(db: Database.Database): void {
   const versionRow = db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get() as { version: number } | undefined;
   const currentVersion = versionRow?.version ?? 0;
   
-  // Add migrations here as needed
-  // Example:
-  // if (currentVersion < 1) {
-  //   db.exec('ALTER TABLE ...');
-  //   db.prepare('INSERT INTO schema_version (version) VALUES (1)').run();
-  // }
-  
   if (currentVersion === 0) {
+    // Initial setup - insert default models
+    insertDefaultModelCosts(db);
     db.prepare('INSERT INTO schema_version (version) VALUES (1)').run();
+  }
+  
+  // Migration 2: Update to new model list
+  if (currentVersion < 2) {
+    console.log('Running migration 2: Updating model costs to new models...');
+    // Clear old models and insert new ones
+    db.prepare('DELETE FROM model_costs').run();
+    insertDefaultModelCosts(db);
+    db.prepare('INSERT INTO schema_version (version) VALUES (2)').run();
+    console.log('Migration 2 completed - new models loaded');
   }
 }
 
