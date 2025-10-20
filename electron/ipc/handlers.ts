@@ -306,13 +306,17 @@ async function importEvaluation(filePath: string): Promise<EvaluationRun> {
 }
 
 async function getSettings(): Promise<AppSettings> {
-  const db = getDatabase();
-  const row = db.prepare(`
-    SELECT value FROM app_settings WHERE key = 'app_settings'
-  `).get() as { value: string } | undefined;
-  
-  if (row) {
-    return JSON.parse(row.value);
+  try {
+    const db = getDatabase();
+    const row = db.prepare(`
+      SELECT value FROM app_settings WHERE key = 'app_settings'
+    `).get() as { value: string } | undefined;
+    
+    if (row) {
+      return JSON.parse(row.value);
+    }
+  } catch (error) {
+    console.error('Error getting settings from database:', error);
   }
   
   // Default settings
@@ -323,19 +327,34 @@ async function getSettings(): Promise<AppSettings> {
 }
 
 async function setSettings(settings: AppSettings): Promise<void> {
-  const db = getDatabase();
-  db.prepare(`
-    INSERT OR REPLACE INTO app_settings (key, value)
-    VALUES ('app_settings', ?)
-  `).run(JSON.stringify(settings));
+  try {
+    const db = getDatabase();
+    db.prepare(`
+      INSERT OR REPLACE INTO app_settings (key, value)
+      VALUES ('app_settings', ?)
+    `).run(JSON.stringify(settings));
+  } catch (error) {
+    console.error('Error saving settings to database:', error);
+    throw error;
+  }
 }
 
 async function saveApiKey(provider: string, key: string): Promise<void> {
-  store.set(`apiKey.${provider}`, key);
+  try {
+    store.set(`apiKey.${provider}`, key);
+  } catch (error) {
+    console.error(`Error saving API key for ${provider}:`, error);
+    throw error;
+  }
 }
 
 async function getApiKey(provider: string): Promise<string | null> {
-  return store.get(`apiKey.${provider}`, null) as string | null;
+  try {
+    return store.get(`apiKey.${provider}`, null) as string | null;
+  } catch (error) {
+    console.error(`Error getting API key for ${provider}:`, error);
+    return null;
+  }
 }
 
 async function testApiKey(provider: string): Promise<boolean> {

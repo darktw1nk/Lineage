@@ -30,6 +30,28 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     gemini: '',
   });
 
+  // Load API keys when modal opens
+  useEffect(() => {
+    const loadKeys = async () => {
+      try {
+        const [openaiKey, anthropicKey, geminiKey] = await Promise.all([
+          window.electronAPI.keys.get('openai'),
+          window.electronAPI.keys.get('anthropic'),
+          window.electronAPI.keys.get('gemini'),
+        ]);
+        
+        setApiKeys({
+          openai: openaiKey || '',
+          anthropic: anthropicKey || '',
+          gemini: geminiKey || '',
+        });
+      } catch (error) {
+        console.error('Failed to load API keys:', error);
+      }
+    };
+    loadKeys();
+  }, []);
+
   const [localSettings, setLocalSettings] = useState<AppSettings>({
     globalParallelLimit: 5,
     serviceModel: { provider: 'openai', model: 'gpt-4' },
@@ -54,50 +76,35 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   const saveSettings = useMutation({
     mutationFn: async () => {
-      console.log('Saving settings...', { apiKeys, localSettings, localCosts });
-      console.log('window.electronAPI:', window.electronAPI);
-      console.log('window.electronAPI.keys:', window.electronAPI?.keys);
-      
       // Save API keys
-      if (window.electronAPI?.keys) {
-        for (const [provider, key] of Object.entries(apiKeys)) {
-          if (key) {
-            console.log('Saving API key for', provider);
-            await window.electronAPI.keys.save(provider, key);
-          }
+      for (const [provider, key] of Object.entries(apiKeys)) {
+        if (key.trim()) {
+          await window.electronAPI.keys.save(provider, key);
         }
-      } else {
-        console.warn('keys API not available, skipping');
       }
 
       // Save settings
-      console.log('Saving app settings:', localSettings);
       await window.electronAPI.settings.set(localSettings);
 
       // Save costs
-      console.log('Saving costs:', localCosts.length, 'entries');
       for (const cost of localCosts) {
         await window.electronAPI.costs.set(cost);
       }
-      
-      console.log('All settings saved successfully');
     },
     onSuccess: () => {
-      console.log('Save success, closing modal');
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       queryClient.invalidateQueries({ queryKey: ['costs'] });
       onClose();
     },
-    onError: (error) => {
+    onError: (error: any) => {
       console.error('Save failed:', error);
-      alert('Failed to save settings: ' + error);
+      alert('Failed to save settings: ' + (error?.message || error));
     },
   });
 
 
   return (
     <Dialog open={true} onOpenChange={(open) => {
-      console.log('Dialog onOpenChange called with:', open);
       if (!open) onClose();
     }}>
       <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
