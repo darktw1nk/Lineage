@@ -30,51 +30,76 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     gemini: '',
   });
 
-  const [localSettings, setLocalSettings] = useState<AppSettings | null>(null);
+  const [localSettings, setLocalSettings] = useState<AppSettings>({
+    globalParallelLimit: 5,
+    serviceModel: { provider: 'openai', model: 'gpt-4' },
+  });
+  
   const [localCosts, setLocalCosts] = useState<ModelCostEntry[]>([]);
 
+  // Initialize from query data - only once when modal opens
   useEffect(() => {
     if (settings) {
       setLocalSettings(settings);
     }
-  }, [settings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
-    setLocalCosts(costs);
-  }, [costs]);
+    if (costs && costs.length > 0) {
+      setLocalCosts(costs);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const saveSettings = useMutation({
     mutationFn: async () => {
+      console.log('Saving settings...', { apiKeys, localSettings, localCosts });
+      console.log('window.electronAPI:', window.electronAPI);
+      console.log('window.electronAPI.keys:', window.electronAPI?.keys);
+      
       // Save API keys
-      for (const [provider, key] of Object.entries(apiKeys)) {
-        if (key) {
-          await window.electronAPI.keys.save(provider, key);
+      if (window.electronAPI?.keys) {
+        for (const [provider, key] of Object.entries(apiKeys)) {
+          if (key) {
+            console.log('Saving API key for', provider);
+            await window.electronAPI.keys.save(provider, key);
+          }
         }
+      } else {
+        console.warn('keys API not available, skipping');
       }
 
       // Save settings
-      if (localSettings) {
-        await window.electronAPI.settings.set(localSettings);
-      }
+      console.log('Saving app settings:', localSettings);
+      await window.electronAPI.settings.set(localSettings);
 
       // Save costs
+      console.log('Saving costs:', localCosts.length, 'entries');
       for (const cost of localCosts) {
         await window.electronAPI.costs.set(cost);
       }
+      
+      console.log('All settings saved successfully');
     },
     onSuccess: () => {
+      console.log('Save success, closing modal');
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       queryClient.invalidateQueries({ queryKey: ['costs'] });
       onClose();
     },
+    onError: (error) => {
+      console.error('Save failed:', error);
+      alert('Failed to save settings: ' + error);
+    },
   });
 
-  if (!localSettings) {
-    return null;
-  }
 
   return (
-    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={true} onOpenChange={(open) => {
+      console.log('Dialog onOpenChange called with:', open);
+      if (!open) onClose();
+    }}>
       <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
@@ -112,7 +137,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                   <Label htmlFor="serviceProvider">Provider</Label>
                   <Input
                     id="serviceProvider"
-                    value={localSettings.serviceModel.provider}
+                    value={localSettings?.serviceModel?.provider || 'openai'}
                     onChange={(e) =>
                       setLocalSettings({
                         ...localSettings,

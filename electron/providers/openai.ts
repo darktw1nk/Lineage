@@ -1,9 +1,6 @@
 import { BaseProviderAdapter } from './base.js';
 import type { Provider } from '../../src/types/index.js';
-import * as keytar from 'keytar';
 import { withRetry, RetryableError } from './retry.js';
-
-const SERVICE_NAME = 'PromptEvolution';
 
 export class OpenAIAdapter extends BaseProviderAdapter {
   name: Provider = 'openai';
@@ -69,7 +66,9 @@ export class OpenAIAdapter extends BaseProviderAdapter {
   }
   
   protected async getApiKey(): Promise<string | null> {
-    return await keytar.getPassword(SERVICE_NAME, 'openai');
+    // API key retrieval is handled by the main process
+    // Providers receive keys as parameters
+    return null;
   }
 }
 

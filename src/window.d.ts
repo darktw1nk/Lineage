@@ -1,0 +1,36 @@
+import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from './types';
+
+export interface ElectronAPI {
+  eval: {
+    create: (config: EvaluationConfig) => Promise<EvaluationRun>;
+    start: (runId: string) => Promise<void>;
+    pause: (runId: string) => Promise<void>;
+    resume: (runId: string) => Promise<void>;
+    stop: (runId: string) => Promise<void>;
+    list: () => Promise<EvaluationRun[]>;
+    export: (runId: string) => Promise<string>;
+    import: (filePath: string) => Promise<EvaluationRun>;
+    subscribe: (runId: string, callback: (data: any) => void) => () => void;
+  };
+  settings: {
+    get: () => Promise<AppSettings>;
+    set: (settings: AppSettings) => Promise<void>;
+  };
+  keys: {
+    save: (provider: string, key: string) => Promise<void>;
+    get: (provider: string) => Promise<string | null>;
+    test: (provider: string) => Promise<boolean>;
+  };
+  costs: {
+    get: (modelRef: ModelRef) => Promise<ModelCostEntry | null>;
+    set: (entry: ModelCostEntry) => Promise<void>;
+    getAll: () => Promise<ModelCostEntry[]>;
+  };
+}
+
+declare global {
+  interface Window {
+    electronAPI: ElectronAPI;
+  }
+}
+

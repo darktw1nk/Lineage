@@ -1,9 +1,6 @@
 import { BaseProviderAdapter } from './base.js';
 import type { Provider } from '../../src/types/index.js';
-import * as keytar from 'keytar';
 import { withRetry, RetryableError } from './retry.js';
-
-const SERVICE_NAME = 'PromptEvolution';
 
 export class GeminiAdapter extends BaseProviderAdapter {
   name: Provider = 'gemini';
@@ -76,7 +73,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
   }
   
   protected async getApiKey(): Promise<string | null> {
-    return await keytar.getPassword(SERVICE_NAME, 'gemini');
+    return null; // Keys are passed as parameters now
   }
 }
 

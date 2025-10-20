@@ -2,9 +2,11 @@ import { IpcMain } from 'electron';
 import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from '../../src/types/index.js';
 import { getDatabase } from '../database/init.js';
 import { v4 as uuidv4 } from 'uuid';
-import * as keytar from 'keytar';
+import Store from 'electron-store';
 
-const SERVICE_NAME = 'PromptEvolution';
+const store = new Store({
+  encryptionKey: 'prompt-evolution-secure-key', // In production, use process.env or generate
+});
 
 export function registerIPCHandlers(ipcMain: IpcMain): void {
   // Evaluation handlers
@@ -329,11 +331,11 @@ async function setSettings(settings: AppSettings): Promise<void> {
 }
 
 async function saveApiKey(provider: string, key: string): Promise<void> {
-  await keytar.setPassword(SERVICE_NAME, provider, key);
+  store.set(`apiKey.${provider}`, key);
 }
 
 async function getApiKey(provider: string): Promise<string | null> {
-  return await keytar.getPassword(SERVICE_NAME, provider);
+  return store.get(`apiKey.${provider}`, null) as string | null;
 }
 
 async function testApiKey(provider: string): Promise<boolean> {

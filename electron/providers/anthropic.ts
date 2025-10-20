@@ -1,9 +1,6 @@
 import { BaseProviderAdapter } from './base.js';
 import type { Provider } from '../../src/types/index.js';
-import * as keytar from 'keytar';
 import { withRetry, RetryableError } from './retry.js';
-
-const SERVICE_NAME = 'PromptEvolution';
 
 export class AnthropicAdapter extends BaseProviderAdapter {
   name: Provider = 'anthropic';
@@ -69,7 +66,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
   }
   
   protected async getApiKey(): Promise<string | null> {
-    return await keytar.getPassword(SERVICE_NAME, 'anthropic');
+    return null; // Keys are passed as parameters now
   }
 }
 
