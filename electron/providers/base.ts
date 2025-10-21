@@ -1,5 +1,6 @@
 import type { Provider, ProviderAdapter } from '../../src/types/index.js';
 import { getModelCost } from './costs.js';
+import { withGlobalSemaphore } from '../engine/semaphore.js';
 
 export abstract class BaseProviderAdapter implements ProviderAdapter {
   abstract name: Provider;
@@ -34,41 +35,44 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     usd: number;
     rawPath?: string;
   }> {
-    // Get API key from environment or keytar
-    const apiKey = await this.getApiKey();
-    if (!apiKey) {
-      throw new Error(`No API key found for provider: ${this.name}`);
-    }
-    
-    const startTime = Date.now();
-    
-    try {
-      const result = await this.callAPI({
-        apiKey,
-        ...opts,
-      });
+    // Wrap ALL API calls with global semaphore
+    return withGlobalSemaphore(async () => {
+      // Get API key from environment or keytar
+      const apiKey = await this.getApiKey();
+      if (!apiKey) {
+        throw new Error(`No API key found for provider: ${this.name}`);
+      }
       
-      const latencyMs = Date.now() - startTime;
+      const startTime = Date.now();
       
-      // Calculate cost
-      const cost = await getModelCost({
-        provider: this.name,
-        model: opts.model,
-      });
-      
-      const usd = cost
-        ? (result.promptTokens / 1000) * cost.promptUSDper1k +
-          (result.completionTokens / 1000) * cost.completionUSDper1k
-        : 0;
-      
-      return {
-        ...result,
-        latencyMs,
-        usd,
-      };
-    } catch (error) {
-      throw new Error(`Provider ${this.name} call failed: ${error}`);
-    }
+      try {
+        const result = await this.callAPI({
+          apiKey,
+          ...opts,
+        });
+        
+        const latencyMs = Date.now() - startTime;
+        
+        // Calculate cost
+        const cost = await getModelCost({
+          provider: this.name,
+          model: opts.model,
+        });
+        
+        const usd = cost
+          ? (result.promptTokens / 1000) * cost.promptUSDper1k +
+            (result.completionTokens / 1000) * cost.completionUSDper1k
+          : 0;
+        
+        return {
+          ...result,
+          latencyMs,
+          usd,
+        };
+      } catch (error) {
+        throw new Error(`Provider ${this.name} call failed: ${error}`);
+      }
+    }, `${this.name}/${opts.model}`);
   }
   
   protected abstract getApiKey(): Promise<string | null>;

@@ -17,7 +17,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showNewEvaluation, setShowNewEvaluation] = useState(false);
 
-  // Listen for evaluation errors from backend
+  // Listen for evaluation updates from backend (real-time)
   useEffect(() => {
     if (!selectedEvaluationId) return;
 
@@ -31,6 +31,11 @@ function App() {
         toast.error(data.message || 'Something went wrong', {
           duration: 5000,
         });
+      }
+      
+      // Invalidate query cache to trigger immediate re-render for node/generation updates
+      if (data.type === 'node' || data.type === 'generation' || data.type === 'totals') {
+        queryClient.invalidateQueries({ queryKey: ['evaluation', selectedEvaluationId] });
       }
     };
 
@@ -54,12 +59,14 @@ function App() {
         />
 
         {/* Main Content */}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <CenterView
-            evaluationId={selectedEvaluationId}
-            selectedNodeId={selectedNodeId}
-            onSelectNode={setSelectedNodeId}
-          />
+        <div className="flex flex-1 flex-col overflow-hidden" style={{ height: '100vh' }}>
+          <div className="flex-1 relative">
+            <CenterView
+              evaluationId={selectedEvaluationId}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={setSelectedNodeId}
+            />
+          </div>
           <Footer evaluationId={selectedEvaluationId} />
         </div>
 

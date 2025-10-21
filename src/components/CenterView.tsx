@@ -1,6 +1,17 @@
+import { useCallback, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { NodeCard } from './NodeCard';
-import { LineageGraph } from './LineageGraph';
+import ReactFlow, {
+  Node,
+  Edge,
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  MarkerType,
+  Position,
+} from 'reactflow';
+import 'reactflow/dist/style.css';
 import type { UUID, EvaluationRun, CandidateNode } from '../types';
 
 interface CenterViewProps {
@@ -17,8 +28,129 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
       const evals = await window.electronAPI.eval.list();
       return evals.find(e => e.id === evaluationId) || null;
     },
-    refetchInterval: 1000,
+    refetchInterval: 5000, // Poll every 5 seconds as backup (real-time updates are primary)
   });
+
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+  // Convert evaluation data to React Flow nodes and edges
+  useEffect(() => {
+    if (!evaluation || !evaluation.generations) {
+      setNodes([]);
+      setEdges([]);
+      return;
+    }
+
+    const flowNodes: Node[] = [];
+    const flowEdges: Edge[] = [];
+    const nodeSpacing = 250; // Vertical spacing between nodes
+    const generationSpacing = 350; // Horizontal spacing between generations
+
+    // Create nodes for each candidate
+    evaluation.generations.forEach((generation, genIndex) => {
+      generation.forEach((candidate, nodeIndex) => {
+        const x = genIndex * generationSpacing;
+        const y = nodeIndex * nodeSpacing;
+
+        // Determine node color based on status and fitness
+        let bgColor = '#1e1e1e'; // Dark card
+        let borderColor = '#3e3e3e';
+        let textColor = '#e0e0e0';
+        
+        if (candidate.status === 'finished' && candidate.metrics?.fitness !== undefined) {
+          const fitness = candidate.metrics.fitness;
+          if (fitness >= 9) {
+            bgColor = '#16a34a'; // Strong green
+            borderColor = '#15803d';
+            textColor = '#ffffff';
+          } else if (fitness >= 7) {
+            bgColor = '#ca8a04'; // Strong yellow/gold
+            borderColor = '#a16207';
+            textColor = '#ffffff';
+          } else {
+            bgColor = '#374151'; // Gray
+            borderColor = '#4b5563';
+            textColor = '#d1d5db';
+          }
+        } else if (candidate.status === 'running') {
+          bgColor = '#2563eb'; // Strong blue
+          borderColor = '#1d4ed8';
+          textColor = '#ffffff';
+        } else if (candidate.status === 'error') {
+          bgColor = '#dc2626'; // Strong red
+          borderColor = '#b91c1c';
+          textColor = '#ffffff';
+        } else if (candidate.status === 'pending') {
+          bgColor = '#6b7280'; // Lighter gray
+          borderColor = '#9ca3af';
+          textColor = '#e5e7eb';
+        }
+
+        flowNodes.push({
+          id: candidate.id,
+          type: 'default',
+          position: { x, y },
+          data: {
+            label: (
+              <div className="text-xs" style={{ color: textColor }}>
+                <div className="font-semibold text-sm">G{genIndex}</div>
+                <div className="opacity-70 text-xs">{candidate.id.slice(0, 8)}</div>
+                {candidate.metrics?.fitness !== undefined && (
+                  <div className="font-bold mt-1 text-sm">F: {candidate.metrics.fitness.toFixed(2)}</div>
+                )}
+                {candidate.status !== 'finished' && (
+                  <div className="opacity-80 capitalize text-xs mt-1">{candidate.status}</div>
+                )}
+              </div>
+            ),
+          },
+          style: {
+            background: bgColor,
+            borderColor: borderColor,
+            borderWidth: candidate.id === selectedNodeId ? 4 : 2,
+            color: textColor,
+            padding: '12px',
+            borderRadius: '8px',
+            width: 160,
+            boxShadow: candidate.id === selectedNodeId ? '0 0 0 2px #3b82f6' : 'none',
+          },
+        });
+
+        // Create edges from parents
+        if (candidate.lineageParents && candidate.lineageParents.length > 0) {
+          candidate.lineageParents.forEach((parentId) => {
+            const edgeColor = candidate.status === 'running' ? '#3b82f6' : '#4b5563';
+            flowEdges.push({
+              id: `${parentId}-${candidate.id}`,
+              source: parentId,
+              target: candidate.id,
+              type: 'smoothstep',
+              animated: candidate.status === 'running',
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                color: edgeColor,
+              },
+              style: {
+                stroke: edgeColor,
+                strokeWidth: candidate.status === 'running' ? 3 : 2,
+              },
+            });
+          });
+        }
+      });
+    });
+
+    setNodes(flowNodes);
+    setEdges(flowEdges);
+  }, [evaluation, selectedNodeId, setNodes, setEdges]);
+
+  const onNodeClick = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      onSelectNode(node.id);
+    },
+    [onSelectNode]
+  );
 
   if (!evaluationId) {
     return (
@@ -46,60 +178,34 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-background p-6">
-      {/* D3 Lineage Graph */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold mb-4">Lineage Graph</h2>
-        <LineageGraph
-          generations={evaluation.generations}
-          onNodeClick={onSelectNode}
-          selectedNodeId={selectedNodeId}
+    <div className="flex-1 w-full h-full bg-background">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodeClick={onNodeClick}
+        fitView
+        fitViewOptions={{ padding: 0.2 }}
+        minZoom={0.1}
+        maxZoom={2}
+        defaultEdgeOptions={{
+          type: 'smoothstep',
+        }}
+      >
+        <Background color="#333" gap={16} />
+        <Controls />
+        <MiniMap
+          nodeColor={(node) => {
+            const style = node.style as any;
+            return style?.background || '#1e1e1e';
+          }}
+          maskColor="rgba(0, 0, 0, 0.3)"
+          style={{
+            backgroundColor: '#1a1a1a',
+          }}
         />
-      </div>
-      
-      <div className="mx-auto max-w-7xl space-y-8">
-        {evaluation.generations.map((generation, genIndex) => {
-          const topNodes = getTopNodes(generation, 3);
-          
-          return (
-            <div
-              key={genIndex}
-              className="rounded-lg border bg-card p-6"
-              style={{
-                backgroundColor: genIndex % 2 === 0 ? 'hsl(var(--card))' : 'hsl(var(--muted) / 0.3)',
-              }}
-            >
-              <h3 className="mb-4 text-lg font-semibold">
-                Generation {genIndex}
-              </h3>
-              
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {generation.map((node, nodeIndex) => {
-                  const rank = topNodes.findIndex(n => n.id === node.id) + 1;
-                  
-                  return (
-                    <NodeCard
-                      key={node.id}
-                      node={node}
-                      rank={rank > 0 ? rank : undefined}
-                      isSelected={node.id === selectedNodeId}
-                      onClick={() => onSelectNode(node.id)}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      </ReactFlow>
     </div>
   );
 }
-
-function getTopNodes(generation: CandidateNode[], count: number): CandidateNode[] {
-  return generation
-    .filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
-    .sort((a, b) => (b.metrics!.fitness! - a.metrics!.fitness!))
-    .slice(0, count);
-}
-

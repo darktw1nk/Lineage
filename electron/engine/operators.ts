@@ -71,7 +71,7 @@ export async function applyMutation(
       console.error('[Mutation] Empty response from service model! Returning parent prompt unchanged.');
       return {
         prompt: parent.prompt,
-        changeLog: [{ label: 'MUTATION', change: 'Service model returned empty response' }],
+        changeLog: [{ label: 'MUTATION', text: 'Service model returned empty response' }],
         totalCost,
         totalPromptTokens,
         totalCompletionTokens,
@@ -237,7 +237,7 @@ export async function applyMetaPrompting(
       console.error('[Meta-prompting] Empty response from service model! Returning parent prompt unchanged.');
       return {
         prompt: parent.prompt,
-        changeLog: [{ label: 'META_PROMPTING', change: 'Service model returned empty response' }],
+        changeLog: [{ label: 'META', text: 'Service model returned empty response' }],
         totalCost,
         totalPromptTokens,
         totalCompletionTokens,
@@ -332,9 +332,9 @@ export function selectModelsForOffspring(config: EvaluationConfig): ModelRef[] {
 }
 
 export async function generateInitialPopulation(
-  config: EvaluationConfig
-): Promise<CandidateNode[]> {
-  const nodes: CandidateNode[] = [];
+  config: EvaluationConfig,
+  onNodeCreated?: (node: CandidateNode) => void
+): Promise<void> {
   
   if (config.population.fill === 'manual') {
     // User-specified prompts
@@ -362,11 +362,13 @@ export async function generateInitialPopulation(
           temperature: 0.7, // Default temperature
         },
         changeLog: [{
-          label: 'initial',
-          description: `Manual prompt #${i + 1}`,
+          label: 'MUTATION',
+          text: `Manual prompt #${i + 1}`,
         }],
       };
-      nodes.push(node);
+      
+      // Send node immediately
+      if (onNodeCreated) onNodeCreated(node);
     }
   } else {
     // Auto-fill via mutations from seed
@@ -376,32 +378,51 @@ export async function generateInitialPopulation(
       throw new Error('Seed prompt is required for auto mode');
     }
     
-    // First node is the seed
-    nodes.push(createInitialNode(seedPrompt, config.enabledModels[0], 0));
+    // First node is the seed - send immediately
+    const seedNode = createInitialNode(seedPrompt, config.enabledModels[0], 0);
+    if (onNodeCreated) onNodeCreated(seedNode);
     
-    // Generate variations
-    for (let i = 1; i < config.population.size; i++) {
+    // Second node (seed with different model) - send immediately
+    if (config.population.size > 1) {
+      const model = config.enabledModels[1 % config.enabledModels.length];
+      const secondNode = createInitialNode(seedPrompt, model, 1);
+      if (onNodeCreated) onNodeCreated(secondNode);
+    }
+    
+    // Generate variations in parallel
+    const variationPromises = [];
+    
+    for (let i = 2; i < config.population.size; i++) {
       const model = config.enabledModels[i % config.enabledModels.length];
       
-      if (i === 1) {
-        // Just add seed with different model
-        nodes.push(createInitialNode(seedPrompt, model, i));
-      } else {
-        // Create mutations of the seed
-        try {
-          const mutated = await applyMutation(nodes[0], config);
-          const node = createInitialNode(mutated.prompt, model, i);
-          node.changeLog = mutated.changeLog;
-          nodes.push(node);
-        } catch {
-          // Fallback to seed
-          nodes.push(createInitialNode(seedPrompt, model, i));
-        }
-      }
+      // Create mutations of the seed in parallel
+      variationPromises.push(
+        (async () => {
+          try {
+            const mutated = await applyMutation(seedNode, config);
+            const node = createInitialNode(mutated.prompt, model, i);
+            node.changeLog = mutated.changeLog;
+            
+            // Send node as soon as it's created!
+            if (onNodeCreated) onNodeCreated(node);
+            
+            return node;
+          } catch {
+            // Fallback to seed
+            const node = createInitialNode(seedPrompt, model, i);
+            
+            // Send fallback node too
+            if (onNodeCreated) onNodeCreated(node);
+            
+            return node;
+          }
+        })()
+      );
     }
+    
+    // Wait for all mutations to complete
+    await Promise.all(variationPromises);
   }
-  
-  return nodes;
 }
 
 function createInitialNode(

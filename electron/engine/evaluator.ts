@@ -16,6 +16,7 @@ import {
   applyParameterVariation,
   generateInitialPopulation,
 } from './operators.js';
+import { initGlobalSemaphore } from './semaphore.js';
 import { BrowserWindow } from 'electron';
 import crypto from 'crypto';
 
@@ -57,19 +58,23 @@ export async function startEvaluation(
     throw new Error('Evaluation already running');
   }
   
-  // Generate initial population
-  const initialNodes = await generateInitialPopulation(config);
+  // Initialize global semaphore with parallelLimit from config
+  // This limits ALL API calls (service model + candidate models) to this limit
+  const globalLimit = config.parallelLimit || 5;
+  console.log(`[Evaluation] Initializing global API call limit: ${globalLimit}`);
+  initGlobalSemaphore(globalLimit);
   
+  // Create state FIRST (before generating population)
   const state: EvaluationState = {
     run: {
       ...run,
-      generations: [initialNodes],
+      generations: [[]],  // Start with empty generation
       status: 'running',
     },
     config,
     status: 'running',
     currentGeneration: 0,
-    queue: [...initialNodes],
+    queue: [],
     inProgress: new Set(),
     cache: new Map(),
     lineageHistory: new Map(),
@@ -83,8 +88,43 @@ export async function startEvaluation(
   
   activeEvaluations.set(runId, state);
   
-  // Start evaluation loop
-  evaluationLoop(runId);
+  // Send initial status update to UI immediately
+  sendUpdate(runId, { type: 'status', status: 'running' });
+  sendUpdate(runId, { type: 'generation', generation: 0, nodes: [] });
+  
+  // Generate initial population asynchronously (non-blocking)
+  console.log('[Evaluation] Generating initial population...');
+  
+  // Callback to add nodes as they're created (real-time!)
+  const onNodeCreated = (node: CandidateNode) => {
+    console.log(`[Evaluation] Node created: ${node.id.slice(0, 8)}`);
+    
+    // Add to generation
+    state.run.generations[0].push(node);
+    
+    // Add to queue
+    state.queue.push(node);
+    
+    // Send node update immediately
+    sendUpdate(runId, { type: 'node', node });
+    
+    // Trigger evaluation loop (it will pick up queued nodes)
+    if (state.status === 'running') {
+      evaluationLoop(runId);
+    }
+  };
+  
+  generateInitialPopulation(config, onNodeCreated).then(() => {
+    console.log(`[Evaluation] Initial population generation complete`);
+  }).catch((error) => {
+    console.error('[Evaluation] Failed to generate initial population:', error);
+    sendUpdate(runId, { 
+      type: 'error', 
+      message: `Failed to generate initial population: ${error instanceof Error ? error.message : String(error)}`,
+      severity: 'error'
+    });
+    finishEvaluation(runId, state);
+  });
 }
 
 export function pauseEvaluation(runId: UUID): void {
@@ -132,10 +172,10 @@ async function evaluationLoop(runId: UUID): Promise<void> {
     return;
   }
   
-  // Process queue up to parallel limit
+  // Process ALL queued nodes (global semaphore limits actual API calls)
+  // No need to limit nodes here since semaphore controls ALL API concurrency
   while (
     state.queue.length > 0 &&
-    state.inProgress.size < state.config.parallelLimit &&
     state.status === 'running'
   ) {
     const node = state.queue.shift()!;
@@ -293,22 +333,22 @@ async function runTests(
   config: EvaluationConfig
 ): Promise<{ results: TestResult[]; serviceCosts?: { usd: number; promptTokens: number; completionTokens: number } }> {
   const adapter = getProviderAdapter(node.params.model.provider);
-  const results: TestResult[] = [];
   let runTestsServiceCosts: { usd: number; promptTokens: number; completionTokens: number } | undefined;
   
-  for (const test of config.testSet) {
+  // Run ALL tests in parallel for this node
+  const testPromises = config.testSet.map(async (test) => {
     try {
       // Combine candidate prompt (evolved system/instruction) with test input
       const combinedPrompt = `${node.prompt}\n\n${test.prompt}`;
       
-        const maxTokens = (config as any).serviceModelMaxTokens || 20000;
-        const result = await adapter.call({
-          model: node.params.model.model,
-          prompt: combinedPrompt,
-          temperature: node.params.temperature,
-          seed: node.params.seed,
-          maxTokens, // Apply same max tokens to candidate models
-        });
+      const maxTokens = (config as any).serviceModelMaxTokens || 20000;
+      const result = await adapter.call({
+        model: node.params.model.model,
+        prompt: combinedPrompt,
+        temperature: node.params.temperature,
+        seed: node.params.seed,
+        maxTokens, // Apply same max tokens to candidate models
+      });
       
       let evaluation: { passed: boolean; score: number };
       
@@ -330,14 +370,21 @@ async function runTests(
         
         evaluation = { passed: gradingResult.passed, score: gradingResult.score };
         
-        // Track service model costs from LLM grading (need state access)
-        // We'll accumulate these and track them at the end of runTests
-        if (!runTestsServiceCosts) {
-          runTestsServiceCosts = { usd: 0, promptTokens: 0, completionTokens: 0 };
-        }
-        runTestsServiceCosts.usd += gradingResult.usd;
-        runTestsServiceCosts.promptTokens += gradingResult.promptTokens;
-        runTestsServiceCosts.completionTokens += gradingResult.completionTokens;
+        // Return service costs to accumulate later
+        return {
+          testId: test.id,
+          passed: evaluation.passed,
+          score: evaluation.score,
+          promptTokens: result.promptTokens,
+          completionTokens: result.completionTokens,
+          outputText: result.output,
+          rawResponsePath: undefined,
+          serviceCosts: {
+            usd: gradingResult.usd,
+            promptTokens: gradingResult.promptTokens,
+            completionTokens: gradingResult.completionTokens,
+          },
+        };
       } else {
         // Use exact match evaluation
         evaluation = evaluateTestResult(test, result.output, test.mode);
@@ -354,7 +401,7 @@ async function runTests(
         );
       }
       
-      results.push({
+      return {
         testId: test.id,
         passed: evaluation.passed,
         score: evaluation.score,
@@ -362,7 +409,8 @@ async function runTests(
         completionTokens: result.completionTokens,
         outputText: result.output,
         rawResponsePath,
-      });
+        serviceCosts: undefined,
+      };
     } catch (error) {
       console.error(`Test failed for ${test.id}:`, error);
       
@@ -374,16 +422,36 @@ async function runTests(
         severity: 'error'
       });
       
-      results.push({
+      return {
         testId: test.id,
         passed: false,
         score: 0,
         promptTokens: 0,
         completionTokens: 0,
         outputText: `Error: ${errorMsg}`,
-      });
+        rawResponsePath: undefined,
+        serviceCosts: undefined,
+      };
+    }
+  });
+  
+  // Wait for all tests to complete in parallel
+  const testResults = await Promise.all(testPromises);
+  
+  // Accumulate service costs from LLM grading
+  for (const testResult of testResults) {
+    if (testResult.serviceCosts) {
+      if (!runTestsServiceCosts) {
+        runTestsServiceCosts = { usd: 0, promptTokens: 0, completionTokens: 0 };
+      }
+      runTestsServiceCosts.usd += testResult.serviceCosts.usd;
+      runTestsServiceCosts.promptTokens += testResult.serviceCosts.promptTokens;
+      runTestsServiceCosts.completionTokens += testResult.serviceCosts.completionTokens;
     }
   }
+  
+  // Convert to TestResult[] (remove serviceCosts field)
+  const results: TestResult[] = testResults.map(({ serviceCosts, ...rest }) => rest);
   
   return { results, serviceCosts: runTestsServiceCosts };
 }
@@ -461,8 +529,8 @@ async function moveToNextGeneration(
   // Log operator effectiveness (V1: logging only, no policy changes)
   logOperatorEffectiveness(state);
   
-  // Create mutations
-  for (let i = 0; i < mutationCount; i++) {
+  // Create mutations in parallel
+  const mutationPromises = Array.from({ length: mutationCount }, async (_, i) => {
     const parent = topPerformers[i % topPerformers.length];
     
     // Check if this lineage should be pruned
@@ -474,10 +542,9 @@ async function moveToNextGeneration(
         status: 'skipped',
         prompt: parent.prompt,
         params: parent.params,
-        changeLog: [{ label: 'MUTATION', text: 'Skipped due to stagnation' }],
+        changeLog: [{ label: 'MUTATION' as const, text: 'Skipped due to stagnation' }],
       };
-      nextGen.push(node);
-      continue;
+      return node;
     }
     
     try {
@@ -501,7 +568,7 @@ async function moveToNextGeneration(
         params: parent.params,
         changeLog: mutated.changeLog,
       };
-      nextGen.push(node);
+      return node;
     } catch (error) {
       console.error('Mutation failed:', error);
       sendUpdate(runId, { 
@@ -509,11 +576,12 @@ async function moveToNextGeneration(
         message: `Mutation failed: ${error instanceof Error ? error.message : String(error)}`,
         severity: 'warning'
       });
+      return null;
     }
-  }
+  });
   
-  // Create crossovers
-  for (let i = 0; i < crossoverCount; i++) {
+  // Create crossovers in parallel
+  const crossoverPromises = Array.from({ length: crossoverCount }, async (_, i) => {
     const parentA = topPerformers[i % topPerformers.length];
     const parentB = topPerformers[(i + 1) % topPerformers.length];
     try {
@@ -537,7 +605,7 @@ async function moveToNextGeneration(
         params: parentA.params,
         changeLog: crossed.changeLog,
       };
-      nextGen.push(node);
+      return node;
     } catch (error) {
       console.error('Crossover failed:', error);
       sendUpdate(runId, { 
@@ -545,11 +613,12 @@ async function moveToNextGeneration(
         message: `Crossover failed: ${error instanceof Error ? error.message : String(error)}`,
         severity: 'warning'
       });
+      return null;
     }
-  }
+  });
   
-  // Create meta-prompted
-  for (let i = 0; i < metaCount; i++) {
+  // Create meta-prompted nodes in parallel
+  const metaPromises = Array.from({ length: metaCount }, async (_, i) => {
     const parent = topPerformers[i % topPerformers.length];
     try {
       const metaed = await applyMetaPrompting(parent, state.config);
@@ -572,7 +641,7 @@ async function moveToNextGeneration(
         params: parent.params,
         changeLog: metaed.changeLog,
       };
-      nextGen.push(node);
+      return node;
     } catch (error) {
       console.error('Meta-prompting failed:', error);
       sendUpdate(runId, { 
@@ -580,8 +649,21 @@ async function moveToNextGeneration(
         message: `Meta-prompting failed: ${error instanceof Error ? error.message : String(error)}`,
         severity: 'warning'
       });
+      return null;
     }
-  }
+  });
+  
+  // Wait for all genetic operators to complete in parallel
+  const [mutatedNodes, crossedNodes, metaNodes] = await Promise.all([
+    Promise.all(mutationPromises),
+    Promise.all(crossoverPromises),
+    Promise.all(metaPromises),
+  ]);
+  
+  // Add all successful nodes to next generation (filter out nulls from errors)
+  nextGen.push(...mutatedNodes.filter((n): n is CandidateNode => n !== null));
+  nextGen.push(...crossedNodes.filter((n): n is CandidateNode => n !== null));
+  nextGen.push(...metaNodes.filter((n): n is CandidateNode => n !== null));
   
   // Ensure we have at least some nodes
   if (nextGen.length === 0) {
