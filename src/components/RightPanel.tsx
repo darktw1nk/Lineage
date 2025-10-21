@@ -2,7 +2,7 @@ import { X, Copy, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from './ui/button';
 import { useState } from 'react';
 import type { UUID, EvaluationRun, CandidateNode } from '../types';
-import { useEvaluationState } from '../hooks/useEvaluationState';
+import { useEvaluationState } from '../hooks/useEvaluationState_v2';
 
 interface RightPanelProps {
   evaluationId: UUID | null;

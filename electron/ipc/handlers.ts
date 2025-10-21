@@ -172,13 +172,13 @@ async function startEvaluation(runId: string): Promise<void> {
       throw new Error('Evaluation config not found');
     }
     
-    console.log('[IPC] Found config, importing evaluator...');
+    console.log('[IPC] Found config, importing evaluator_v2...');
     const config: EvaluationConfig = JSON.parse(configRow.config_json);
     
-    const { startEvaluation: startEval } = await import('../engine/evaluator.js');
-    console.log('[IPC] Calling engine startEvaluation...');
+    const { startEvaluation: startEval } = await import('../engine/evaluator_v2.js');
+    console.log('[IPC] Calling engine startEvaluation (V2)...');
     await startEval(runId, config, run);
-    console.log('[IPC] Engine startEvaluation completed');
+    console.log('[IPC] Engine startEvaluation (V2) completed');
   } catch (error) {
     console.error('[IPC] startEvaluation failed:', error);
     throw error;
@@ -186,17 +186,17 @@ async function startEvaluation(runId: string): Promise<void> {
 }
 
 async function pauseEvaluation(runId: string): Promise<void> {
-  const { pauseEvaluation: pauseEval } = await import('../engine/evaluator.js');
+  const { pauseEvaluation: pauseEval } = await import('../engine/evaluator_v2.js');
   pauseEval(runId);
 }
 
 async function resumeEvaluation(runId: string): Promise<void> {
-  const { resumeEvaluation: resumeEval } = await import('../engine/evaluator.js');
+  const { resumeEvaluation: resumeEval } = await import('../engine/evaluator_v2.js');
   resumeEval(runId);
 }
 
 async function stopEvaluation(runId: string): Promise<void> {
-  const { stopEvaluation: stopEval } = await import('../engine/evaluator.js');
+  const { stopEvaluation: stopEval } = await import('../engine/evaluator_v2.js');
   stopEval(runId);
 }
 

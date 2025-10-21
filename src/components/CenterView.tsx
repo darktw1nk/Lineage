@@ -11,7 +11,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import type { UUID } from '../types';
-import { useEvaluationState } from '../hooks/useEvaluationState';
+import { useEvaluationState } from '../hooks/useEvaluationState_v2';
 
 interface CenterViewProps {
   evaluationId: UUID | null;

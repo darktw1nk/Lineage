@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Button } from './ui/button';
 import { Pause, Play, Square, Loader2 } from 'lucide-react';
 import type { UUID } from '../types';
-import { useEvaluationState } from '../hooks/useEvaluationState';
+import { useEvaluationState } from '../hooks/useEvaluationState_v2';
 
 interface FooterProps {
   evaluationId: UUID | null;
