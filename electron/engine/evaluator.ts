@@ -252,6 +252,13 @@ async function processNode(
     console.error(`Node processing failed for ${node.id}:`, error);
     node.status = 'failed';
     node.error = error instanceof Error ? error.message : String(error);
+    
+    // Send error notification
+    sendUpdate(runId, { 
+      type: 'error', 
+      message: `Node ${node.id.slice(0, 8)} failed: ${node.error}`,
+      severity: 'warning'
+    });
   }
   
   sendUpdate(runId, { type: 'node', node });
@@ -446,7 +453,12 @@ async function moveToNextGeneration(
       };
       nextGen.push(node);
     } catch (error) {
-      console.error('Failed to create mutation:', error);
+      console.error('Mutation failed:', error);
+      sendUpdate(runId, { 
+        type: 'error', 
+        message: `Mutation failed: ${error instanceof Error ? error.message : String(error)}`,
+        severity: 'warning'
+      });
     }
   }
   
@@ -474,7 +486,12 @@ async function moveToNextGeneration(
       };
       nextGen.push(node);
     } catch (error) {
-      console.error('Failed to create crossover:', error);
+      console.error('Crossover failed:', error);
+      sendUpdate(runId, { 
+        type: 'error', 
+        message: `Crossover failed: ${error instanceof Error ? error.message : String(error)}`,
+        severity: 'warning'
+      });
     }
   }
   
@@ -501,7 +518,12 @@ async function moveToNextGeneration(
       };
       nextGen.push(node);
     } catch (error) {
-      console.error('Failed to create meta-prompted:', error);
+      console.error('Meta-prompting failed:', error);
+      sendUpdate(runId, { 
+        type: 'error', 
+        message: `Meta-prompting failed: ${error instanceof Error ? error.message : String(error)}`,
+        severity: 'warning'
+      });
     }
   }
   

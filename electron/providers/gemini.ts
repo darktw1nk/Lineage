@@ -28,6 +28,8 @@ export class GeminiAdapter extends BaseProviderAdapter {
     return withRetry(async () => {
       const startTime = Date.now();
       
+      console.log(`[Gemini] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
+      
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent?key=${opts.apiKey}`,
         {

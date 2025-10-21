@@ -28,6 +28,8 @@ export class AnthropicAdapter extends BaseProviderAdapter {
     return withRetry(async () => {
       const startTime = Date.now();
       
+      console.log(`[Anthropic] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
+      
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
