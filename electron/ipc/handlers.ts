@@ -2,11 +2,7 @@ import { IpcMain } from 'electron';
 import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from '../../src/types/index.js';
 import { getDatabase } from '../database/init.js';
 import { v4 as uuidv4 } from 'uuid';
-import Store from 'electron-store';
-
-const store = new Store({
-  encryptionKey: 'prompt-evolution-secure-key', // In production, use process.env or generate
-});
+import { store } from '../store.js';
 
 export function registerIPCHandlers(ipcMain: IpcMain): void {
   // Evaluation handlers
@@ -68,6 +64,13 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
     return testApiKey(provider);
   });
   
+  ipcMain.handle('keys:debug', async () => {
+    return {
+      allKeys: Object.keys(store.store),
+      allData: store.store,
+    };
+  });
+  
   // Cost table handlers
   ipcMain.handle('costs:get', async (_event, modelRef: ModelRef) => {
     return getModelCost(modelRef);
@@ -87,18 +90,35 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
 async function createEvaluation(config: EvaluationConfig): Promise<EvaluationRun> {
   const db = getDatabase();
   
-  // Save config
-  const configInsert = db.prepare(`
-    INSERT INTO evaluation_configs (id, name, config_json, created_at)
-    VALUES (?, ?, ?, ?)
-  `);
+  // Ensure unique ID (in case of conflicts, generate a new one)
+  let configId = config.id;
+  let attempts = 0;
+  while (attempts < 10) {
+    try {
+      // Save config
+      db.prepare(`
+        INSERT INTO evaluation_configs (id, name, config_json, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(
+        configId,
+        config.name,
+        JSON.stringify({ ...config, id: configId }),
+        Date.now()
+      );
+      break; // Success, exit loop
+    } catch (error: any) {
+      if (error.code === 'SQLITE_CONSTRAINT' && attempts < 9) {
+        // ID conflict, generate new one and retry
+        console.log(`[CreateEval] Config ID ${configId} already exists, generating new one...`);
+        configId = uuidv4();
+        attempts++;
+      } else {
+        throw error; // Not a constraint error or too many retries
+      }
+    }
+  }
   
-  configInsert.run(
-    config.id,
-    config.name,
-    JSON.stringify(config),
-    Date.now()
-  );
+  config.id = configId; // Update with final ID
   
   // Create run
   const run: EvaluationRun = {
@@ -171,31 +191,37 @@ async function stopEvaluation(runId: string): Promise<void> {
 async function listEvaluations(): Promise<EvaluationRun[]> {
   const db = getDatabase();
   const rows = db.prepare(`
-    SELECT run_json FROM evaluation_runs
-    ORDER BY started_at DESC
-  `).all() as { run_json: string }[];
+    SELECT r.run_json, c.name as config_name 
+    FROM evaluation_runs r
+    LEFT JOIN evaluation_configs c ON r.config_id = c.id
+    ORDER BY r.started_at DESC
+  `).all() as { run_json: string; config_name: string }[];
   
-  return rows.map(row => JSON.parse(row.run_json));
+  return rows.map(row => {
+    const run = JSON.parse(row.run_json);
+    // Add the config name to the run object for display
+    (run as any).configName = row.config_name;
+    return run;
+  });
 }
 
 async function deleteEvaluation(runId: string): Promise<void> {
   const db = getDatabase();
   
-  // Delete from all related tables
+  // Delete from all related tables in correct order (children first, then parents)
   const transaction = db.transaction(() => {
-    // Delete raw blobs
-    db.prepare('DELETE FROM raw_blobs WHERE run_id = ?').run(runId);
-    
-    // Delete cost ledger entries
-    db.prepare('DELETE FROM cost_ledger WHERE run_id = ?').run(runId);
-    
     // Get config_id before deleting the run
     const runRow = db.prepare('SELECT config_id FROM evaluation_runs WHERE id = ?').get(runId) as { config_id: string } | undefined;
     
-    // Delete the run
+    // Delete child tables first (all tables with FOREIGN KEY to evaluation_runs)
+    db.prepare('DELETE FROM candidate_nodes WHERE run_id = ?').run(runId);
+    db.prepare('DELETE FROM raw_blobs WHERE run_id = ?').run(runId);
+    db.prepare('DELETE FROM cost_ledger WHERE run_id = ?').run(runId);
+    
+    // Now delete the run itself
     db.prepare('DELETE FROM evaluation_runs WHERE id = ?').run(runId);
     
-    // Optionally delete the config if no other runs reference it
+    // Finally, delete the config if no other runs reference it
     if (runRow) {
       const remainingRuns = db.prepare('SELECT COUNT(*) as count FROM evaluation_runs WHERE config_id = ?').get(runRow.config_id) as { count: number };
       if (remainingRuns.count === 0) {
@@ -374,7 +400,15 @@ async function setSettings(settings: AppSettings): Promise<void> {
 
 async function saveApiKey(provider: string, key: string): Promise<void> {
   try {
-    store.set(`apiKey.${provider}`, key);
+    console.log(`[Handlers] Saving API key for ${provider} as: apiKey.${provider}, value: ${key ? '***' + key.slice(-4) : 'EMPTY'}`);
+    if (key && key.trim()) {
+      store.set(`apiKey.${provider}`, key);
+    } else {
+      // Delete the key if empty
+      store.delete(`apiKey.${provider}`);
+      console.log(`[Handlers] Deleted empty key for ${provider}`);
+    }
+    console.log(`[Handlers] All keys in store:`, Object.keys(store.store));
   } catch (error) {
     console.error(`Error saving API key for ${provider}:`, error);
     throw error;

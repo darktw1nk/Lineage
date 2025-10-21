@@ -74,11 +74,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   const saveSettings = useMutation({
     mutationFn: async () => {
-      // Save API keys
+      // Save API keys (or delete if empty)
       for (const [provider, key] of Object.entries(apiKeys)) {
-        if (key.trim()) {
-          await window.electronAPI.keys.save(provider, key);
-        }
+        await window.electronAPI.keys.save(provider, key); // Save empty string to effectively clear
       }
 
       // Save settings

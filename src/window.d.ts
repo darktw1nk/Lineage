@@ -21,6 +21,7 @@ export interface ElectronAPI {
     save: (provider: string, key: string) => Promise<void>;
     get: (provider: string) => Promise<string | null>;
     test: (provider: string) => Promise<boolean>;
+    debug: () => Promise<{ allKeys: string[]; allData: any }>;
   };
   costs: {
     get: (modelRef: ModelRef) => Promise<ModelCostEntry | null>;

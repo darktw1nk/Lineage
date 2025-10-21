@@ -175,8 +175,13 @@ export function LeftSidebar({
 }
 
 function getEvaluationName(evaluation: EvaluationRun): string {
-  // Try to get config name from evaluation config
-  // If not available, show ID
+  // Try to get config name from evaluation (added by backend)
+  const configName = (evaluation as any).configName;
+  console.log(`[LeftSidebar] Eval ${evaluation.id.slice(0, 8)}: configName =`, configName);
+  if (configName) {
+    return configName;
+  }
+  // Fallback to ID
   return `Eval ${evaluation.id.slice(0, 8)}`;
 }
 

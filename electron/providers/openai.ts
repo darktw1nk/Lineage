@@ -1,6 +1,7 @@
 import { BaseProviderAdapter } from './base.js';
 import type { Provider } from '../../src/types/index.js';
 import { withRetry, RetryableError } from './retry.js';
+import { store } from '../store.js';
 
 export class OpenAIAdapter extends BaseProviderAdapter {
   name: Provider = 'openai';
@@ -27,19 +28,31 @@ export class OpenAIAdapter extends BaseProviderAdapter {
     return withRetry(async () => {
       const startTime = Date.now();
       
+      // Use max_completion_tokens for newer models (o1, gpt-4, gpt-5 series)
+      const useCompletionTokens = opts.model.includes('o1') || 
+                                   opts.model.includes('gpt-4') || 
+                                   opts.model.includes('gpt-5');
+      
+      const body: any = {
+        model: opts.model,
+        messages: [{ role: 'user', content: opts.prompt }],
+        temperature: opts.temperature,
+        seed: opts.seed,
+      };
+      
+      if (useCompletionTokens) {
+        body.max_completion_tokens = opts.maxTokens ?? 4096;
+      } else {
+        body.max_tokens = opts.maxTokens ?? 4096;
+      }
+      
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${opts.apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: opts.model,
-          messages: [{ role: 'user', content: opts.prompt }],
-          temperature: opts.temperature,
-          seed: opts.seed,
-          max_tokens: opts.maxTokens ?? 4096,
-        }),
+        body: JSON.stringify(body),
       });
       
       if (!response.ok) {
@@ -66,9 +79,10 @@ export class OpenAIAdapter extends BaseProviderAdapter {
   }
   
   protected async getApiKey(): Promise<string | null> {
-    // API key retrieval is handled by the main process
-    // Providers receive keys as parameters
-    return null;
+    const key = store.get(`apiKey.${this.name}`) as string | null;
+    console.log(`[OpenAI] Looking for key: apiKey.${this.name}, found: ${key ? 'YES (length: ' + key.length + ')' : 'NO'}`);
+    console.log(`[OpenAI] All store keys:`, store.store);
+    return key;
   }
 }
 

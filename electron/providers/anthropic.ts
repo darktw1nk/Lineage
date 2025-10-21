@@ -1,6 +1,7 @@
 import { BaseProviderAdapter } from './base.js';
 import type { Provider } from '../../src/types/index.js';
 import { withRetry, RetryableError } from './retry.js';
+import { store } from '../store.js';
 
 export class AnthropicAdapter extends BaseProviderAdapter {
   name: Provider = 'anthropic';
@@ -66,7 +67,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
   }
   
   protected async getApiKey(): Promise<string | null> {
-    return null; // Keys are passed as parameters now
+    return store.get(`apiKey.${this.name}`) as string | null;
   }
 }
 

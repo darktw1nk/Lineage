@@ -92,6 +92,7 @@ export function pauseEvaluation(runId: UUID): void {
   if (state) {
     state.status = 'paused';
     state.run.status = 'paused';
+    saveRunStatus(runId, state.run); // Save to DB
     sendUpdate(runId, { type: 'status', status: 'paused' });
   }
 }
@@ -101,6 +102,7 @@ export function resumeEvaluation(runId: UUID): void {
   if (state) {
     state.status = 'running';
     state.run.status = 'running';
+    saveRunStatus(runId, state.run); // Save to DB
     sendUpdate(runId, { type: 'status', status: 'running' });
     evaluationLoop(runId);
   }
@@ -113,6 +115,7 @@ export function stopEvaluation(runId: UUID): void {
     state.run.status = 'stopped';
     state.run.stopReason = 'manual';
     state.run.finishedAt = Date.now();
+    saveRunStatus(runId, state.run); // Save to DB
     activeEvaluations.delete(runId);
     
     sendUpdate(runId, { type: 'stop', reason: 'manual' });
@@ -246,8 +249,9 @@ async function processNode(
     node.status = 'finished';
     node.timings.finishedAt = Date.now();
   } catch (error) {
+    console.error(`Node processing failed for ${node.id}:`, error);
     node.status = 'failed';
-    node.error = String(error);
+    node.error = error instanceof Error ? error.message : String(error);
   }
   
   sendUpdate(runId, { type: 'node', node });
@@ -297,6 +301,7 @@ async function runTests(
       let rawResponsePath: string | undefined;
       if (config.rawBlobCapture) {
         rawResponsePath = await storeRawBlob(
+          state.run.id,
           node.id,
           test.id,
           result
@@ -313,13 +318,14 @@ async function runTests(
         rawResponsePath,
       });
     } catch (error) {
+      console.error(`Test failed for ${test.id}:`, error);
       results.push({
         testId: test.id,
         passed: false,
         score: 0,
         promptTokens: 0,
         completionTokens: 0,
-        outputText: `Error: ${error}`,
+        outputText: `Error: ${error instanceof Error ? error.message : String(error)}`,
       });
     }
   }
@@ -650,7 +656,25 @@ function sendUpdate(runId: UUID, data: any): void {
   }
 }
 
+// Helper to save just the run status to DB (for pause/resume/stop)
+function saveRunStatus(runId: UUID, run: EvaluationRun): void {
+  import('../database/init.js').then(({ getDatabase }) => {
+    const db = getDatabase();
+    db.prepare(`
+      UPDATE evaluation_runs
+      SET run_json = ?, finished_at = ?, stop_reason = ?
+      WHERE id = ?
+    `).run(
+      JSON.stringify(run),
+      run.finishedAt || null,
+      run.stopReason || null,
+      runId
+    );
+  });
+}
+
 async function storeRawBlob(
+  runId: UUID,
   nodeId: UUID,
   testId: UUID,
   result: any
@@ -670,8 +694,8 @@ async function storeRawBlob(
   
   db.prepare(`
     INSERT INTO raw_blobs (id, run_id, node_id, test_id, blob_data, timestamp)
-    VALUES (?, 'current', ?, ?, ?, ?)
-  `).run(blobId, nodeId, testId, blobData, Date.now());
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(blobId, runId, nodeId, testId, blobData, Date.now());
   
   return blobId;
 }

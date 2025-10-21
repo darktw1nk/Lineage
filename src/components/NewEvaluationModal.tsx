@@ -16,8 +16,12 @@ interface NewEvaluationModalProps {
 
 export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalProps) {
   const [activeTab, setActiveTab] = useState('main');
+  
+  // Generate new ID each time modal is opened to avoid conflicts
+  const [configId] = useState(() => uuidv4());
+  
   const [config, setConfig] = useState<Partial<EvaluationConfig>>({
-    id: uuidv4(),
+    id: configId,
     name: 'New Evaluation',
     selection: {
       policy: 'topk',
