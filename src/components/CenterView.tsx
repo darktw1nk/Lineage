@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -9,10 +8,10 @@ import ReactFlow, {
   useNodesState,
   useEdgesState,
   MarkerType,
-  Position,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import type { UUID, EvaluationRun, CandidateNode } from '../types';
+import type { UUID } from '../types';
+import { useEvaluationState } from '../hooks/useEvaluationState';
 
 interface CenterViewProps {
   evaluationId: UUID | null;
@@ -21,15 +20,8 @@ interface CenterViewProps {
 }
 
 export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: CenterViewProps) {
-  const { data: evaluation, dataUpdatedAt } = useQuery<EvaluationRun>({
-    queryKey: ['evaluation', evaluationId],
-    enabled: !!evaluationId,
-    queryFn: async () => {
-      const evals = await window.electronAPI.eval.list();
-      return evals.find(e => e.id === evaluationId) || null;
-    },
-    refetchInterval: 5000, // Poll every 5 seconds as backup (real-time updates are primary)
-  });
+  // Pure IPC-driven state - NO POLLING!
+  const { evaluation, isLoading } = useEvaluationState(evaluationId);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -43,7 +35,7 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
     }
 
     const totalNodes = evaluation.generations.reduce((sum, gen) => sum + gen.length, 0);
-    console.log(`[CenterView] Rendering ${totalNodes} nodes across ${evaluation.generations.length} generations (dataUpdatedAt: ${dataUpdatedAt})`);
+    console.log(`[CenterView] Rendering ${totalNodes} nodes across ${evaluation.generations.length} generations`);
     evaluation.generations.forEach((gen, idx) => {
       console.log(`  Gen ${idx}: ${gen.length} nodes`);
     });
@@ -149,7 +141,7 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
 
     setNodes(flowNodes);
     setEdges(flowEdges);
-  }, [evaluation, selectedNodeId, setNodes, setEdges, dataUpdatedAt]);
+  }, [evaluation, selectedNodeId, setNodes, setEdges]);
 
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
@@ -173,11 +165,21 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
     );
   }
 
-  if (!evaluation) {
+  if (isLoading) {
     return (
       <div className="flex flex-1 items-center justify-center bg-background">
         <div className="text-center">
           <h2 className="text-xl font-semibold text-muted-foreground">Loading...</h2>
+        </div>
+      </div>
+    );
+  }
+
+  if (!evaluation) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-background">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-muted-foreground">Evaluation not found</h2>
         </div>
       </div>
     );

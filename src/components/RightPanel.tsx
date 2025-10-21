@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
 import { X, Copy, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from './ui/button';
 import { useState } from 'react';
 import type { UUID, EvaluationRun, CandidateNode } from '../types';
+import { useEvaluationState } from '../hooks/useEvaluationState';
 
 interface RightPanelProps {
   evaluationId: UUID | null;
@@ -13,14 +13,8 @@ interface RightPanelProps {
 export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
   const [expandedTests, setExpandedTests] = useState<Set<UUID>>(new Set());
 
-  const { data: evaluation } = useQuery<EvaluationRun>({
-    queryKey: ['evaluation', evaluationId],
-    enabled: !!evaluationId,
-    queryFn: async () => {
-      const evals = await window.electronAPI.eval.list();
-      return evals.find(e => e.id === evaluationId) || null;
-    },
-  });
+  // Pure IPC-driven state - NO POLLING!
+  const { evaluation } = useEvaluationState(evaluationId);
 
   const node = findNode(evaluation, nodeId);
 

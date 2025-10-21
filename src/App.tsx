@@ -17,42 +17,25 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showNewEvaluation, setShowNewEvaluation] = useState(false);
 
-  // Listen for evaluation updates from backend (real-time)
+  // Listen for error notifications from backend
   useEffect(() => {
     if (!selectedEvaluationId) return;
 
     const handleUpdate = (_event: any, data: any) => {
       if (!data) return;
       
-      // Log specific update types with details
-      if (data.type === 'node') {
-        console.log(`[App] Node update: ${data.node?.id?.slice(0, 8)} (status: ${data.node?.status})`);
-      } else if (data.type === 'generation') {
-        console.log(`[App] Generation update: ${data.generation}, nodes: ${data.nodes?.length || 0}`);
-      } else if (data.type === 'totals') {
-        console.log(`[App] Totals update: $${data.totals?.spentUSD?.toFixed(4)}, ${data.totals?.promptTokens + data.totals?.completionTokens} tokens`);
-      } else {
-        console.log('[App] Evaluation update:', data.type, data);
-      }
-      
-      // Handle error updates
+      // Only handle errors at this level - all other updates handled by useEvaluationState hook
       if (data.type === 'error') {
         toast.error(data.message || 'Something went wrong', {
           duration: 5000,
         });
       }
-      
-      // Invalidate query cache to trigger immediate re-render for node/generation updates
-      if (data.type === 'node' || data.type === 'generation' || data.type === 'totals') {
-        console.log(`[App] Invalidating query cache for evaluation ${selectedEvaluationId.slice(0, 8)}`);
-        queryClient.invalidateQueries({ queryKey: ['evaluation', selectedEvaluationId] });
-      }
     };
 
-    window.electronAPI.eval.subscribe(selectedEvaluationId, handleUpdate);
+    const unsubscribe = window.electronAPI.eval.subscribe(selectedEvaluationId, handleUpdate);
     
     return () => {
-      // Cleanup listeners when evaluation changes
+      if (unsubscribe) unsubscribe();
     };
   }, [selectedEvaluationId]);
 

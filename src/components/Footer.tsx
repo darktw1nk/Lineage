@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Button } from './ui/button';
 import { Pause, Play, Square, Loader2 } from 'lucide-react';
-import type { UUID, EvaluationRun } from '../types';
+import type { UUID } from '../types';
+import { useEvaluationState } from '../hooks/useEvaluationState';
 
 interface FooterProps {
   evaluationId: UUID | null;
@@ -12,15 +12,9 @@ export function Footer({ evaluationId }: FooterProps) {
   const [isPausing, setIsPausing] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
-  const { data: evaluation } = useQuery<EvaluationRun>({
-    queryKey: ['evaluation', evaluationId],
-    enabled: !!evaluationId,
-    queryFn: async () => {
-      const evals = await window.electronAPI.eval.list();
-      return evals.find(e => e.id === evaluationId) || null;
-    },
-    refetchInterval: 1000,
-  });
+  
+  // Pure IPC-driven state - NO POLLING!
+  const { evaluation } = useEvaluationState(evaluationId);
 
   if (!evaluation) {
     return (
