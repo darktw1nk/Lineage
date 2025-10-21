@@ -378,10 +378,10 @@ async function getSettings(): Promise<AppSettings> {
     console.error('Error getting settings from database:', error);
   }
   
-  // Default settings
+  // Default settings - user must configure service model
   return {
     globalParallelLimit: 5,
-    serviceModel: { provider: 'openai', model: 'gpt-4' },
+    serviceModel: { provider: 'openai', model: '' },
   };
 }
 

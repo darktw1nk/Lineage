@@ -54,7 +54,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   const [localSettings, setLocalSettings] = useState<AppSettings>({
     globalParallelLimit: 5,
-    serviceModel: { provider: 'openai', model: 'gpt-4' },
+    serviceModel: { provider: 'openai', model: '' },
   });
   
   const [localCosts, setLocalCosts] = useState<ModelCostEntry[]>([]);

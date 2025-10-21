@@ -20,6 +20,12 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
   // Generate new ID each time modal is opened to avoid conflicts
   const [configId] = useState(() => uuidv4());
   
+  // Load settings to get service model
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => window.electronAPI.settings.get(),
+  });
+  
   const [config, setConfig] = useState<Partial<EvaluationConfig>>({
     id: configId,
     name: 'New Evaluation',
@@ -64,8 +70,8 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
       budgetUSD: 10,
       targetFitness: 9.0,
     },
-    serviceModel: { provider: 'openai', model: 'gpt-4' },
-    parallelLimit: 5,
+    serviceModel: settings?.serviceModel || undefined,
+    parallelLimit: settings?.globalParallelLimit || 5,
     rawBlobCapture: false,
   });
 
@@ -90,6 +96,9 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
     const newErrors: Record<string, string> = {};
 
     if (!config.name) newErrors.main = 'Name is required';
+    if (!config.serviceModel || !config.serviceModel.model) {
+      newErrors.main = 'Service Model is required - please set it in Settings first';
+    }
     
     // Validate population based on fill mode
     if (config.population?.fill === 'manual') {
@@ -126,8 +135,17 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
   };
 
   const handleStart = () => {
-    if (validate()) {
+    console.log('[NewEval] Start button clicked');
+    console.log('[NewEval] Config:', config);
+    const isValid = validate();
+    console.log('[NewEval] Validation result:', isValid);
+    console.log('[NewEval] Errors:', errors);
+    if (isValid) {
+      console.log('[NewEval] Starting evaluation...');
       createEvaluation.mutate(config as EvaluationConfig);
+    } else {
+      console.error('[NewEval] Validation failed:', errors);
+      alert('Please fix the errors highlighted in red tabs: ' + Object.entries(errors).map(([k, v]) => `${k}: ${v}`).join(', '));
     }
   };
 
@@ -491,7 +509,11 @@ function PopulationTab({ config, setConfig }: TabProps) {
   const manualPrompts = (config.population as any)?.manualPrompts || [];
 
   const addManualPrompt = () => {
-    const newPrompts = [...manualPrompts, { prompt: '', model: costs[0] ? { provider: costs[0].provider, model: costs[0].model } : { provider: 'openai', model: 'gpt-4' } }];
+    if (!costs || costs.length === 0) {
+      alert('No models configured. Please add models in Settings first.');
+      return;
+    }
+    const newPrompts = [...manualPrompts, { prompt: '', model: { provider: costs[0].provider, model: costs[0].model } }];
     setConfig({
       ...config,
       population: {
@@ -1325,7 +1347,7 @@ function AdvancedTab({ config, setConfig }: TabProps) {
         <select
           id="serviceModel"
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          value={`${config.serviceModel?.provider || 'openai'}:${config.serviceModel?.model || 'gpt-4'}`}
+          value={config.serviceModel ? `${config.serviceModel.provider}:${config.serviceModel.model}` : ''}
           onChange={(e) => {
             const [provider, model] = e.target.value.split(':');
             setConfig({
