@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from './ui/button';
-import { Pause, Play, Square } from 'lucide-react';
+import { Pause, Play, Square, Loader2 } from 'lucide-react';
 import type { UUID, EvaluationRun } from '../types';
 
 interface FooterProps {
@@ -9,6 +9,9 @@ interface FooterProps {
 }
 
 export function Footer({ evaluationId }: FooterProps) {
+  const [isPausing, setIsPausing] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const { data: evaluation } = useQuery<EvaluationRun>({
     queryKey: ['evaluation', evaluationId],
     enabled: !!evaluationId,
@@ -34,14 +37,29 @@ export function Footer({ evaluationId }: FooterProps) {
   
   const handlePauseResume = async () => {
     if (isPaused) {
-      await window.electronAPI.eval.resume(evaluation.id);
+      setIsResuming(true);
+      try {
+        await window.electronAPI.eval.resume(evaluation.id);
+      } finally {
+        setTimeout(() => setIsResuming(false), 1000); // Clear after status updates
+      }
     } else {
-      await window.electronAPI.eval.pause(evaluation.id);
+      setIsPausing(true);
+      try {
+        await window.electronAPI.eval.pause(evaluation.id);
+      } finally {
+        setTimeout(() => setIsPausing(false), 1000); // Clear after status updates
+      }
     }
   };
 
   const handleStop = async () => {
-    await window.electronAPI.eval.stop(evaluation.id);
+    setIsStopping(true);
+    try {
+      await window.electronAPI.eval.stop(evaluation.id);
+    } finally {
+      setTimeout(() => setIsStopping(false), 1000); // Clear after status updates
+    }
   };
 
   return (
@@ -90,9 +108,19 @@ export function Footer({ evaluationId }: FooterProps) {
           size="sm"
           variant="outline"
           onClick={handlePauseResume}
-          disabled={isStopped}
+          disabled={isStopped || isPausing || isResuming}
         >
-          {isPaused ? (
+          {isPausing ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Pausing...
+            </>
+          ) : isResuming ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Resuming...
+            </>
+          ) : isPaused ? (
             <>
               <Play className="mr-2 h-4 w-4" />
               Resume
@@ -109,10 +137,19 @@ export function Footer({ evaluationId }: FooterProps) {
           size="sm"
           variant="destructive"
           onClick={handleStop}
-          disabled={isStopped}
+          disabled={isStopped || isStopping}
         >
-          <Square className="mr-2 h-4 w-4" />
-          Stop
+          {isStopping ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Stopping...
+            </>
+          ) : (
+            <>
+              <Square className="mr-2 h-4 w-4" />
+              Stop
+            </>
+          )}
         </Button>
       </div>
     </div>

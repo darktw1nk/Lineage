@@ -167,10 +167,10 @@ function runMigrations(db: Database.Database): void {
   const currentVersion = versionRow?.version ?? 0;
   
   if (currentVersion === 0) {
-    // Fresh install - set up with latest schema (version 2) and new models
+    // Fresh install - set up with latest schema (version 2) and models
     insertDefaultModelCosts(db);
     db.prepare('INSERT INTO schema_version (version) VALUES (2)').run();
-    console.log('Fresh install: Initialized with latest models (schema v2)');
+    console.log('Fresh install: Initialized with models (schema v2)');
     return; // No need to run migrations for fresh install
   }
   
@@ -180,11 +180,11 @@ function runMigrations(db: Database.Database): void {
     // Clear old models and insert new ones
     db.prepare('DELETE FROM model_costs').run();
     insertDefaultModelCosts(db);
-    db.prepare('INSERT INTO schema_version (version) VALUES (2)').run();
+    db.prepare('UPDATE schema_version SET version = 2').run();
     console.log('Migration 2 completed - new models loaded');
   }
   
   // Future migrations go here
-  // if (currentVersion === 2) { ... }
+  // if (currentVersion === 3) { ... }
 }
 

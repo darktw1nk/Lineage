@@ -47,12 +47,23 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
       },
     },
     population: {
-      size: 10,
-      seedPrompt: '',
+      size: 3,
+      seedPrompt: `Please read the following bug report and extract the key information into a JSON format.
+
+The JSON should have the bug id, a summary, the priority, if it is a UI bug, and a list of components that are affected.
+
+Here is the bug report:
+-----------`,
       fill: 'auto',
     },
     enabledModels: [],
-    testSet: [],
+    testSet: [
+      {
+        id: uuidv4(),
+        prompt: `Okay, so my user ID is 952. When I click the 'Export' button on the main dashboard, the whole app crashes. It's super frustrating. I'd say this is a high priority issue. It seems to affect the Reporting and Dashboard modules.`,
+        mode: 'llm_grade',
+      },
+    ],
     fitness: {
       weights: {
         quality: 1.0,

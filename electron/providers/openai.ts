@@ -59,17 +59,31 @@ export class OpenAIAdapter extends BaseProviderAdapter {
         body.max_tokens = opts.maxTokens ?? 4096;
       }
       
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${opts.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
+      let response;
+      try {
+        response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${opts.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+      } catch (fetchError: any) {
+        console.error(`[OpenAI] Fetch failed:`, fetchError);
+        console.error(`[OpenAI] Error details:`, {
+          message: fetchError.message,
+          cause: fetchError.cause,
+          code: fetchError.code,
+          errno: fetchError.errno,
+          syscall: fetchError.syscall,
+        });
+        throw new Error(`OpenAI fetch failed: ${fetchError.message} (cause: ${fetchError.cause?.message || 'unknown'})`);
+      }
       
       if (!response.ok) {
         const error = await response.text();
+        console.error(`[OpenAI] API error ${response.status}:`, error);
         if (response.status === 429 || response.status >= 500) {
           throw new RetryableError(`OpenAI API error: ${response.status} - ${error}`, response.status);
         }
