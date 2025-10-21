@@ -56,20 +56,26 @@ Here is the bug report:
 -----------`,
       fill: 'auto',
     },
-    enabledModels: [],
+    enabledModels: [
+      { provider: 'openai', model: 'gpt-5-mini' },
+      { provider: 'openai', model: 'gpt-5-nano' },
+      { provider: 'openai', model: 'gpt-4.1-mini' },
+      { provider: 'openai', model: 'gpt-4.1-nano' },
+    ],
     testSet: [
       {
         id: uuidv4(),
+        name: 'Bug Report Test',
         prompt: `Okay, so my user ID is 952. When I click the 'Export' button on the main dashboard, the whole app crashes. It's super frustrating. I'd say this is a high priority issue. It seems to affect the Reporting and Dashboard modules.`,
         mode: 'llm_grade',
       },
     ],
     fitness: {
       weights: {
-        quality: 1.0,
+        quality: 0.4,
         safety: 0,
-        cost: 0,
-        latency: 0,
+        cost: 0.3,
+        latency: 0.3,
         stability: 0,
       },
       guardrails: [],
@@ -80,11 +86,12 @@ Here is the bug report:
       timeLimitMs: 3600000, // 1 hour
       budgetUSD: 10,
       targetFitness: 9.0,
+      maxGenerations: 3,
     },
     serviceModel: settings?.serviceModel || undefined,
     parallelLimit: settings?.globalParallelLimit || 5,
     serviceModelMaxTokens: settings?.serviceModelMaxTokens || 20000, // Load from settings - applies to ALL models
-    rawBlobCapture: false,
+    rawBlobCapture: true,
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
