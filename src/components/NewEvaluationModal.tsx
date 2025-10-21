@@ -111,16 +111,27 @@ Here is the bug report:
 
   const createEvaluation = useMutation({
     mutationFn: async (config: EvaluationConfig) => {
+      console.log('[NewEval] Creating evaluation...');
       const run = await window.electronAPI.eval.create(config);
-      // Start the evaluation immediately after creation
+      console.log('[NewEval] Evaluation created:', run.id);
+      
+      // CRITICAL: Select the evaluation BEFORE starting it
+      // This ensures IPC subscription is set up before backend sends updates
+      console.log('[NewEval] Selecting evaluation (to set up IPC subscription)...');
+      onCreated(run.id);
+      
+      // Wait a tiny bit for React to process the state change and subscribe
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // NOW start the evaluation - subscription is ready!
+      console.log('[NewEval] Starting evaluation on backend...');
       await window.electronAPI.eval.start(run.id);
+      console.log('[NewEval] Backend start call completed');
       return run;
     },
-    onSuccess: (run) => {
-      onCreated(run.id);
-    },
     onError: (error: any) => {
-      alert(`Failed to start evaluation: ${error.message || error}`);
+      console.error('[NewEval] Mutation failed:', error);
+      toast.error(`Failed to create evaluation: ${error instanceof Error ? error.message : String(error)}`);
     },
   });
 

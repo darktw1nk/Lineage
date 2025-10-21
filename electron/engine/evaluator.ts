@@ -108,14 +108,16 @@ export async function startEvaluation(
     // Send node update immediately
     sendUpdate(runId, { type: 'node', node });
     
-    // Trigger evaluation loop (it will pick up queued nodes)
-    if (state.status === 'running') {
-      evaluationLoop(runId);
-    }
+    // DON'T start evaluation loop yet - wait for ALL initial population to be ready
   };
   
   generateInitialPopulation(config, onNodeCreated).then(() => {
-    console.log(`[Evaluation] Initial population generation complete`);
+    console.log(`[Evaluation] Initial population generation complete - ${state.queue.length} nodes ready`);
+    // NOW start the evaluation loop with ALL initial nodes
+    if (state.status === 'running') {
+      console.log(`[Evaluation] Starting evaluation loop...`);
+      evaluationLoop(runId);
+    }
   }).catch((error) => {
     console.error('[Evaluation] Failed to generate initial population:', error);
     sendUpdate(runId, { 

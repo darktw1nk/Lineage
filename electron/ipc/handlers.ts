@@ -148,29 +148,41 @@ async function createEvaluation(config: EvaluationConfig): Promise<EvaluationRun
 }
 
 async function startEvaluation(runId: string): Promise<void> {
-  const db = getDatabase();
-  const row = db.prepare(`
-    SELECT run_json, config_id FROM evaluation_runs WHERE id = ?
-  `).get(runId) as { run_json: string; config_id: string } | undefined;
-  
-  if (!row) {
-    throw new Error('Evaluation run not found');
+  try {
+    console.log('[IPC] startEvaluation called for runId:', runId);
+    const db = getDatabase();
+    const row = db.prepare(`
+      SELECT run_json, config_id FROM evaluation_runs WHERE id = ?
+    `).get(runId) as { run_json: string; config_id: string } | undefined;
+    
+    if (!row) {
+      console.error('[IPC] Evaluation run not found:', runId);
+      throw new Error('Evaluation run not found');
+    }
+    
+    console.log('[IPC] Found run, config_id:', row.config_id);
+    const run: EvaluationRun = JSON.parse(row.run_json);
+    
+    const configRow = db.prepare(`
+      SELECT config_json FROM evaluation_configs WHERE id = ?
+    `).get(row.config_id) as { config_json: string } | undefined;
+    
+    if (!configRow) {
+      console.error('[IPC] Evaluation config not found:', row.config_id);
+      throw new Error('Evaluation config not found');
+    }
+    
+    console.log('[IPC] Found config, importing evaluator...');
+    const config: EvaluationConfig = JSON.parse(configRow.config_json);
+    
+    const { startEvaluation: startEval } = await import('../engine/evaluator.js');
+    console.log('[IPC] Calling engine startEvaluation...');
+    await startEval(runId, config, run);
+    console.log('[IPC] Engine startEvaluation completed');
+  } catch (error) {
+    console.error('[IPC] startEvaluation failed:', error);
+    throw error;
   }
-  
-  const run: EvaluationRun = JSON.parse(row.run_json);
-  
-  const configRow = db.prepare(`
-    SELECT config_json FROM evaluation_configs WHERE id = ?
-  `).get(row.config_id) as { config_json: string } | undefined;
-  
-  if (!configRow) {
-    throw new Error('Evaluation config not found');
-  }
-  
-  const config: EvaluationConfig = JSON.parse(configRow.config_json);
-  
-  const { startEvaluation: startEval } = await import('../engine/evaluator.js');
-  await startEval(runId, config, run);
 }
 
 async function pauseEvaluation(runId: string): Promise<void> {

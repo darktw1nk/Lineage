@@ -185,9 +185,12 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
     );
   }
 
+  const totalNodes = evaluation?.generations.reduce((sum, gen) => sum + gen.length, 0) || 0;
+
   return (
     <div className="flex-1 w-full h-full bg-background">
       <ReactFlow
+        key={`flow-${evaluationId}-${totalNodes}`}
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}

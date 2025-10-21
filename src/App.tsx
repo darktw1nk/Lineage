@@ -18,13 +18,14 @@ function App() {
   const [showNewEvaluation, setShowNewEvaluation] = useState(false);
 
   // Listen for error notifications from backend
+  // Note: useEvaluationState hook handles all other IPC updates
   useEffect(() => {
     if (!selectedEvaluationId) return;
 
     const handleUpdate = (_event: any, data: any) => {
       if (!data) return;
       
-      // Only handle errors at this level - all other updates handled by useEvaluationState hook
+      // Only handle errors at App level
       if (data.type === 'error') {
         toast.error(data.message || 'Something went wrong', {
           duration: 5000,
