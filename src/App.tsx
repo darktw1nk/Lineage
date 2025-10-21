@@ -24,7 +24,16 @@ function App() {
     const handleUpdate = (_event: any, data: any) => {
       if (!data) return;
       
-      console.log('[App] Evaluation update:', data);
+      // Log specific update types with details
+      if (data.type === 'node') {
+        console.log(`[App] Node update: ${data.node?.id?.slice(0, 8)} (status: ${data.node?.status})`);
+      } else if (data.type === 'generation') {
+        console.log(`[App] Generation update: ${data.generation}, nodes: ${data.nodes?.length || 0}`);
+      } else if (data.type === 'totals') {
+        console.log(`[App] Totals update: $${data.totals?.spentUSD?.toFixed(4)}, ${data.totals?.promptTokens + data.totals?.completionTokens} tokens`);
+      } else {
+        console.log('[App] Evaluation update:', data.type, data);
+      }
       
       // Handle error updates
       if (data.type === 'error') {
@@ -35,6 +44,7 @@ function App() {
       
       // Invalidate query cache to trigger immediate re-render for node/generation updates
       if (data.type === 'node' || data.type === 'generation' || data.type === 'totals') {
+        console.log(`[App] Invalidating query cache for evaluation ${selectedEvaluationId.slice(0, 8)}`);
         queryClient.invalidateQueries({ queryKey: ['evaluation', selectedEvaluationId] });
       }
     };

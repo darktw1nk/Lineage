@@ -21,7 +21,7 @@ interface CenterViewProps {
 }
 
 export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: CenterViewProps) {
-  const { data: evaluation } = useQuery<EvaluationRun>({
+  const { data: evaluation, dataUpdatedAt } = useQuery<EvaluationRun>({
     queryKey: ['evaluation', evaluationId],
     enabled: !!evaluationId,
     queryFn: async () => {
@@ -41,6 +41,12 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
       setEdges([]);
       return;
     }
+
+    const totalNodes = evaluation.generations.reduce((sum, gen) => sum + gen.length, 0);
+    console.log(`[CenterView] Rendering ${totalNodes} nodes across ${evaluation.generations.length} generations (dataUpdatedAt: ${dataUpdatedAt})`);
+    evaluation.generations.forEach((gen, idx) => {
+      console.log(`  Gen ${idx}: ${gen.length} nodes`);
+    });
 
     const flowNodes: Node[] = [];
     const flowEdges: Edge[] = [];
@@ -143,7 +149,7 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
 
     setNodes(flowNodes);
     setEdges(flowEdges);
-  }, [evaluation, selectedNodeId, setNodes, setEdges]);
+  }, [evaluation, selectedNodeId, setNodes, setEdges, dataUpdatedAt]);
 
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {

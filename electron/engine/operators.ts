@@ -378,14 +378,18 @@ export async function generateInitialPopulation(
       throw new Error('Seed prompt is required for auto mode');
     }
     
+    console.log(`[PopGen] Generating ${config.population.size} nodes with ${config.enabledModels.length} models`);
+    
     // First node is the seed - send immediately
     const seedNode = createInitialNode(seedPrompt, config.enabledModels[0], 0);
+    console.log(`[PopGen] Creating seed node #0 with model ${config.enabledModels[0].model}`);
     if (onNodeCreated) onNodeCreated(seedNode);
     
     // Second node (seed with different model) - send immediately
     if (config.population.size > 1) {
       const model = config.enabledModels[1 % config.enabledModels.length];
       const secondNode = createInitialNode(seedPrompt, model, 1);
+      console.log(`[PopGen] Creating seed node #1 with model ${model.model}`);
       if (onNodeCreated) onNodeCreated(secondNode);
     }
     
@@ -394,23 +398,28 @@ export async function generateInitialPopulation(
     
     for (let i = 2; i < config.population.size; i++) {
       const model = config.enabledModels[i % config.enabledModels.length];
+      console.log(`[PopGen] Queueing mutation for node #${i} with model ${model.model}`);
       
       // Create mutations of the seed in parallel
       variationPromises.push(
         (async () => {
           try {
+            console.log(`[PopGen] Starting mutation for node #${i}`);
             const mutated = await applyMutation(seedNode, config);
             const node = createInitialNode(mutated.prompt, model, i);
             node.changeLog = mutated.changeLog;
             
+            console.log(`[PopGen] Mutation complete for node #${i}, sending to UI`);
             // Send node as soon as it's created!
             if (onNodeCreated) onNodeCreated(node);
             
             return node;
-          } catch {
+          } catch (error) {
+            console.error(`[PopGen] Mutation failed for node #${i}:`, error);
             // Fallback to seed
             const node = createInitialNode(seedPrompt, model, i);
             
+            console.log(`[PopGen] Using fallback seed for node #${i}`);
             // Send fallback node too
             if (onNodeCreated) onNodeCreated(node);
             
@@ -420,8 +429,10 @@ export async function generateInitialPopulation(
       );
     }
     
+    console.log(`[PopGen] Waiting for ${variationPromises.length} mutations to complete...`);
     // Wait for all mutations to complete
     await Promise.all(variationPromises);
+    console.log(`[PopGen] All ${config.population.size} nodes created!`);
   }
 }
 
