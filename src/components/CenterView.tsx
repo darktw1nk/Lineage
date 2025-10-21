@@ -11,7 +11,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import type { UUID } from '../types';
-import { useEvaluationState } from '../hooks/useEvaluationState_v2';
+import { useEvaluation } from '../hooks/useEvaluation';
 
 interface CenterViewProps {
   evaluationId: UUID | null;
@@ -20,8 +20,8 @@ interface CenterViewProps {
 }
 
 export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: CenterViewProps) {
-  // Pure IPC-driven state - NO POLLING!
-  const { evaluation, isLoading } = useEvaluationState(evaluationId);
+  // Centralized store - single source of truth!
+  const { evaluation, isLoading } = useEvaluation(evaluationId);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);

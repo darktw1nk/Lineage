@@ -2,7 +2,7 @@ import { X, Copy, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from './ui/button';
 import { useState } from 'react';
 import type { UUID, EvaluationRun, CandidateNode } from '../types';
-import { useEvaluationState } from '../hooks/useEvaluationState_v2';
+import { useEvaluation } from '../hooks/useEvaluation';
 
 interface RightPanelProps {
   evaluationId: UUID | null;
@@ -13,8 +13,8 @@ interface RightPanelProps {
 export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
   const [expandedTests, setExpandedTests] = useState<Set<UUID>>(new Set());
 
-  // Pure IPC-driven state - NO POLLING!
-  const { evaluation } = useEvaluationState(evaluationId);
+  // Centralized store - single source of truth!
+  const { evaluation } = useEvaluation(evaluationId);
 
   const node = findNode(evaluation, nodeId);
 

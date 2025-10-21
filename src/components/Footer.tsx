@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Button } from './ui/button';
 import { Pause, Play, Square, Loader2 } from 'lucide-react';
 import type { UUID } from '../types';
-import { useEvaluationState } from '../hooks/useEvaluationState_v2';
+import { useEvaluation } from '../hooks/useEvaluation';
 
 interface FooterProps {
   evaluationId: UUID | null;
@@ -13,8 +13,8 @@ export function Footer({ evaluationId }: FooterProps) {
   const [isResuming, setIsResuming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   
-  // Pure IPC-driven state - NO POLLING!
-  const { evaluation } = useEvaluationState(evaluationId);
+  // Centralized store - single source of truth!
+  const { evaluation } = useEvaluation(evaluationId);
 
   if (!evaluation) {
     return (
