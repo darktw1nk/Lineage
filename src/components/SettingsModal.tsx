@@ -172,7 +172,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 min="1000"
                 max="200000"
                 step="1000"
-                value={localSettings.serviceModelMaxTokens}
+                value={localSettings.serviceModelMaxTokens ?? 20000}
                 onChange={(e) =>
                   setLocalSettings({
                     ...localSettings,
