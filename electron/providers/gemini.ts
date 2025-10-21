@@ -30,6 +30,16 @@ export class GeminiAdapter extends BaseProviderAdapter {
       
       console.log(`[Gemini] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
       
+      const body = {
+        contents: [{ parts: [{ text: opts.prompt }] }],
+        generationConfig: {
+          temperature: opts.temperature,
+          maxOutputTokens: opts.maxTokens ?? 4096,
+        },
+      };
+      
+      console.log(`[Gemini] REQUEST:`, JSON.stringify(body, null, 2));
+      
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent?key=${opts.apiKey}`,
         {
@@ -37,15 +47,11 @@ export class GeminiAdapter extends BaseProviderAdapter {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: opts.prompt }] }],
-            generationConfig: {
-              temperature: opts.temperature,
-              maxOutputTokens: opts.maxTokens ?? 4096,
-            },
-          }),
+          body: JSON.stringify(body),
         }
       );
+      
+      console.log(`[Gemini] Response status: ${response.status} ${response.statusText}`);
       
       if (!response.ok) {
         const error = await response.text();
@@ -56,6 +62,8 @@ export class GeminiAdapter extends BaseProviderAdapter {
       }
       
       const data = await response.json();
+      console.log(`[Gemini] RESPONSE:`, JSON.stringify(data, null, 2));
+      
       const latencyMs = Date.now() - startTime;
       
       // Gemini token counting is approximate
@@ -63,12 +71,16 @@ export class GeminiAdapter extends BaseProviderAdapter {
       const promptTokens = this.estimateTokens(opts.prompt).prompt;
       const completionTokens = this.estimateTokens(output).prompt;
       
-      return {
+      const result = {
         output,
         promptTokens,
         completionTokens,
         latencyMs,
       };
+      
+      console.log(`[Gemini] Parsed result - output length: ${result.output.length}, tokens: ${result.promptTokens}/${result.completionTokens}, latency: ${result.latencyMs}ms`);
+      
+      return result;
     }, {
       maxRetries: 3,
       initialDelayMs: 1000,

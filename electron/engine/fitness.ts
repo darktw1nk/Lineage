@@ -289,11 +289,15 @@ Return:
       maxTokens: 500,
     });
     
+    console.log(`[LLM Grading] Raw response:`, result.output);
+    
     // Strip markdown code blocks if present
     let jsonText = result.output.trim();
     if (jsonText.startsWith('```')) {
       jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
     }
+    
+    console.log(`[LLM Grading] Cleaned JSON:`, jsonText);
     
     // Parse JSON response
     const parsed = JSON.parse(jsonText);
@@ -305,6 +309,7 @@ Return:
     };
   } catch (error) {
     console.error('LLM grading failed:', error);
+    console.error('[LLM Grading] Failed on output:', result?.output);
     // Fallback to neutral score
     return { passed: false, score: 5 };
   }

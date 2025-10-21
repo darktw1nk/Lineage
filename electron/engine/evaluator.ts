@@ -682,9 +682,12 @@ function getCacheKey(node: CandidateNode, testSet: TestCase[]): string {
 }
 
 function sendUpdate(runId: UUID, data: any): void {
+  console.log(`[sendUpdate] Sending to eval:updates:${runId}:`, data.type);
   const mainWindow = BrowserWindow.getAllWindows()[0];
   if (mainWindow) {
     mainWindow.webContents.send(`eval:updates:${runId}`, data);
+  } else {
+    console.warn('[sendUpdate] No main window found!');
   }
 }
 

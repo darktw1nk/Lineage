@@ -59,6 +59,8 @@ export class OpenAIAdapter extends BaseProviderAdapter {
         body.max_tokens = opts.maxTokens ?? 4096;
       }
       
+      console.log(`[OpenAI] REQUEST:`, JSON.stringify(body, null, 2));
+      
       let response;
       try {
         response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -81,6 +83,8 @@ export class OpenAIAdapter extends BaseProviderAdapter {
         throw new Error(`OpenAI fetch failed: ${fetchError.message} (cause: ${fetchError.cause?.message || 'unknown'})`);
       }
       
+      console.log(`[OpenAI] Response status: ${response.status} ${response.statusText}`);
+      
       if (!response.ok) {
         const error = await response.text();
         console.error(`[OpenAI] API error ${response.status}:`, error);
@@ -91,6 +95,8 @@ export class OpenAIAdapter extends BaseProviderAdapter {
       }
       
       const data = await response.json();
+      console.log(`[OpenAI] RESPONSE:`, JSON.stringify(data, null, 2));
+      
       const latencyMs = Date.now() - startTime;
       
       return {
