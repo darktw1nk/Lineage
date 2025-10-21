@@ -79,9 +79,9 @@ export async function evaluateSafetyGuardrails(
   serviceModel: any,
   adapter: any,
   maxTokens: number = 20000
-): Promise<{ score: number; totalCost: number; totalPromptTokens: number; totalCompletionTokens: number }> {
+): Promise<{ score: number; totalCost: number; totalPromptTokens: number; totalCompletionTokens: number; calls: number }> {
   if (!guardrails || guardrails.length === 0) {
-    return { score: 10, totalCost: 0, totalPromptTokens: 0, totalCompletionTokens: 0 };
+    return { score: 10, totalCost: 0, totalPromptTokens: 0, totalCompletionTokens: 0, calls: 0 };
   }
   
   console.log(`[Safety Check] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
@@ -90,6 +90,7 @@ export async function evaluateSafetyGuardrails(
   let totalCost = 0;
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
+  let calls = 0;
   
   for (const guardrail of guardrails) {
     try {
@@ -111,6 +112,7 @@ Return: {"score": <0..10>, "violations": ["..."]}`;
       totalCost += result.usd || 0;
       totalPromptTokens += result.promptTokens || 0;
       totalCompletionTokens += result.completionTokens || 0;
+      calls++;
       
       // Check for empty response
       if (!result.output || result.output.trim() === '') {
@@ -137,7 +139,7 @@ Return: {"score": <0..10>, "violations": ["..."]}`;
   
   // Return average score and total costs
   const avgScore = scores.reduce((sum, s) => sum + s, 0) / scores.length;
-  return { score: avgScore, totalCost, totalPromptTokens, totalCompletionTokens };
+  return { score: avgScore, totalCost, totalPromptTokens, totalCompletionTokens, calls };
 }
 
 function calculateStabilityScore(node: CandidateNode): number {
@@ -154,10 +156,14 @@ export async function calculateStabilityAcrossSeeds(
   testSet: any[],
   adapter: any,
   numSeeds: number = 3
-): Promise<number> {
+): Promise<{ score: number; totalCost: number; totalPromptTokens: number; totalCompletionTokens: number; calls: number }> {
   // Run the same prompt with different seeds
   const results: number[] = [];
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
+  let totalCost = 0;
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
+  let calls = 0;
   
   for (let i = 0; i < numSeeds; i++) {
     try {
@@ -169,6 +175,12 @@ export async function calculateStabilityAcrossSeeds(
         maxTokens, // Use configurable max tokens
       });
       
+      // Track costs
+      totalCost += result.usd || 0;
+      totalPromptTokens += result.promptTokens || 0;
+      totalCompletionTokens += result.completionTokens || 0;
+      calls++;
+      
       // Get quality score for this run
       // For simplicity, use output length as proxy for consistency
       results.push(result.output.length);
@@ -177,7 +189,9 @@ export async function calculateStabilityAcrossSeeds(
     }
   }
   
-  if (results.length < 2) return 10; // Can't measure variance
+  if (results.length < 2) {
+    return { score: 10, totalCost, totalPromptTokens, totalCompletionTokens, calls }; // Can't measure variance
+  }
   
   // Calculate coefficient of variation (inverse = stability)
   const mean = results.reduce((a, b) => a + b, 0) / results.length;
@@ -187,7 +201,7 @@ export async function calculateStabilityAcrossSeeds(
   
   // Convert to 0-10 score (lower CV = higher stability)
   const stabilityScore = Math.max(0, Math.min(10, 10 * (1 - cv)));
-  return stabilityScore;
+  return { score: stabilityScore, totalCost, totalPromptTokens, totalCompletionTokens, calls };
 }
 
 function normalizeWeights(weights: {

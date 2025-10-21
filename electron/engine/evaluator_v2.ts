@@ -243,6 +243,16 @@ async function evaluationLoop(runId: UUID): Promise<void> {
         return;
       }
       
+      // Check if we would exceed maxGenerations by creating the next one
+      if (state.config.targets.maxGenerations) {
+        if (state.currentGeneration + 1 >= state.config.targets.maxGenerations) {
+          console.log(`[Evaluator] Reached max generations (${state.config.targets.maxGenerations})`);
+          state.run.stopReason = 'target';
+          finishEvaluation(runId, state);
+          return;
+        }
+      }
+      
       // Move to next generation
       await moveToNextGeneration(runId, state);
     }
@@ -272,21 +282,106 @@ async function processNode(
     // Run all tests
     node.tests = await runTests(runId, node, state);
     
-    // Calculate fitness
+    // Mark as finished to calculate latency
+    node.timings.finishedAt = Date.now();
+    
+    // Calculate cost and latency from test results
+    const { getCostForModel } = await import('../providers/costs.js');
+    let totalCost = 0;
+    for (const test of node.tests) {
+      const costEntry = getCostForModel(node.params.model);
+      if (costEntry) {
+        totalCost += (test.promptTokens / 1000) * costEntry.prompt_usd_per_1k;
+        totalCost += (test.completionTokens / 1000) * costEntry.completion_usd_per_1k;
+      }
+    }
+    const avgLatency = node.timings.finishedAt - (node.timings.startedAt || 0);
+    
+    // Safety guardrails (if enabled)
+    let safetyScore: number | undefined = undefined;
+    if (state.config.fitness.weights.safety && state.config.fitness.guardrails && state.config.fitness.guardrails.length > 0) {
+      const { evaluateSafetyGuardrails } = await import('./fitness.js');
+      const serviceAdapter = getProviderAdapter(state.config.serviceModel.provider);
+      const maxTokens = (state.config as any).serviceModelMaxTokens || 20000;
+      
+      // Collect all outputs from tests
+      const outputs = node.tests.map(t => t.outputText || '').join('\n\n');
+      
+      const safetyResult = await evaluateSafetyGuardrails(
+        outputs,
+        state.config.fitness.guardrails,
+        state.config.serviceModel,
+        serviceAdapter,
+        maxTokens
+      );
+      
+      safetyScore = safetyResult.score;
+      
+      // Track service model costs from safety checks
+      state.run.totals.tokensPrompt += safetyResult.totalPromptTokens;
+      state.run.totals.tokensCompletion += safetyResult.totalCompletionTokens;
+      state.run.totals.usd += safetyResult.totalCost;
+      state.run.totals.calls += safetyResult.calls;
+      
+      sendUpdate(runId, {
+        type: 'totals',
+        totals: state.run.totals,
+        cacheHits: state.run.cacheHits,
+      });
+    }
+    
+    // Stability (if enabled)
+    let stabilityScore: number | undefined = undefined;
+    if (state.config.fitness.weights.stability) {
+      const { calculateStabilityAcrossSeeds } = await import('./fitness.js');
+      const adapter = getProviderAdapter(node.params.model.provider);
+      
+      const stabilityResult = await calculateStabilityAcrossSeeds(
+        node.prompt,
+        node.params,
+        state.config,
+        state.config.testSet,
+        adapter,
+        3 // numSeeds
+      );
+      
+      stabilityScore = stabilityResult.score;
+      
+      // Track candidate model costs from stability runs
+      state.run.totals.tokensPrompt += stabilityResult.totalPromptTokens;
+      state.run.totals.tokensCompletion += stabilityResult.totalCompletionTokens;
+      state.run.totals.usd += stabilityResult.totalCost;
+      state.run.totals.calls += stabilityResult.calls;
+      
+      sendUpdate(runId, {
+        type: 'totals',
+        totals: state.run.totals,
+        cacheHits: state.run.cacheHits,
+      });
+    }
+    
+    // Set metrics before calculating fitness
+    node.metrics = {
+      costUSD: totalCost,
+      latencyMs: avgLatency,
+      safety: safetyScore,
+      stability: stabilityScore,
+    };
+    
+    // Calculate fitness (uses node.tests and node.metrics)
     const fitnessResult = calculateFitness(node, state.config);
     node.metrics = {
       quality: fitnessResult.quality,
-      safety: fitnessResult.safety,
-      costUSD: fitnessResult.costUSD,
-      latencyMs: fitnessResult.latencyMs,
-      stability: fitnessResult.stability,
+      safety: safetyScore,
+      costUSD: totalCost,
+      latencyMs: avgLatency,
+      stability: stabilityScore,
       fitness: fitnessResult.fitness,
     };
     
     node.status = 'finished';
-    node.timings.finishedAt = Date.now();
     
-    console.log(`[Evaluator] Node ${node.id.slice(0, 8)} finished, fitness=${node.metrics.fitness?.toFixed(2)}`);
+    console.log(`[Evaluator] Node ${node.id.slice(0, 8)} finished, quality=${fitnessResult.quality.toFixed(2)}, cost=$${totalCost.toFixed(4)}, latency=${avgLatency}ms, fitness=${node.metrics.fitness?.toFixed(2)}`);
   } catch (error) {
     console.error(`[Evaluator] Node ${node.id.slice(0, 8)} failed:`, error);
     node.status = 'failed';
@@ -321,7 +416,7 @@ async function runTests(
       maxTokens,
     });
     
-    // Update totals immediately
+    // Update totals immediately for candidate model call
     state.run.totals.tokensPrompt += result.promptTokens;
     state.run.totals.tokensCompletion += result.completionTokens;
     state.run.totals.usd += result.usd;
@@ -333,11 +428,77 @@ async function runTests(
       cacheHits: state.run.cacheHits,
     });
     
-    // For now, simple scoring (will implement LLM grading later)
+    // Grade the output using LLM grading
+    let score = 5.0; // Default fallback
+    let passed = false;
+    
+    if (test.mode === 'llm_grade') {
+      const { evaluateTestResultLLM } = await import('./fitness.js');
+      const serviceAdapter = getProviderAdapter(state.config.serviceModel.provider);
+      
+      const gradingResult = await evaluateTestResultLLM(
+        test,
+        node.prompt,
+        test.prompt,
+        result.output,
+        state.config.serviceModel,
+        serviceAdapter,
+        maxTokens
+      );
+      
+      score = gradingResult.score;
+      passed = gradingResult.passed;
+      
+      // Track service model costs from LLM grading
+      state.run.totals.tokensPrompt += gradingResult.promptTokens;
+      state.run.totals.tokensCompletion += gradingResult.completionTokens;
+      state.run.totals.usd += gradingResult.usd;
+      state.run.totals.calls++;
+      
+      sendUpdate(runId, {
+        type: 'totals',
+        totals: state.run.totals,
+        cacheHits: state.run.cacheHits,
+      });
+    } else if (test.mode === 'exact_match') {
+      // Exact match scoring with distance metrics
+      if (!test.expected) {
+        console.warn(`[Test] exact_match test ${test.id} has no expected value`);
+        score = 0;
+        passed = false;
+      } else if (test.grading?.strictZeroOnDeviation) {
+        // Strict mode: 0 or 10 only
+        const isExactMatch = result.output.trim() === test.expected.trim();
+        score = isExactMatch ? 10 : 0;
+        passed = isExactMatch;
+      } else {
+        // Distance-based grading
+        const distanceMetric = test.grading?.distanceMetric || 'levenshtein';
+        
+        if (distanceMetric === 'levenshtein') {
+          const { levenshteinScore0to10 } = await import('../../src/utils/distance.js');
+          score = levenshteinScore0to10(test.expected, result.output);
+          passed = score >= 7; // 70% threshold
+        } else if (distanceMetric === 'json_diff') {
+          const { jsonDiffScore0to10 } = await import('../../src/utils/distance.js');
+          score = jsonDiffScore0to10(test.expected, result.output);
+          passed = score >= 7;
+        } else if (distanceMetric === 'numeric_abs') {
+          const { numericAbsScore0to10 } = await import('../../src/utils/distance.js');
+          score = numericAbsScore0to10(test.expected, result.output);
+          passed = score >= 7;
+        } else {
+          console.warn(`[Test] Unknown distance metric: ${distanceMetric}`);
+          score = 5.0;
+          passed = false;
+        }
+      }
+    }
+    
     const testResult: TestResult = {
       testId: test.id,
-      passed: true,
-      score: 8.0,
+      passed,
+      score,
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
       outputText: result.output,
@@ -387,7 +548,7 @@ function shouldStop(state: EvaluationState): boolean {
     }
   }
   
-  // Max generations
+  // Max generations (counting from 0, so if maxGenerations=3, we want gen 0, 1, 2 only)
   if (config.targets.maxGenerations) {
     if (state.currentGeneration >= config.targets.maxGenerations) {
       state.run.stopReason = 'target';
