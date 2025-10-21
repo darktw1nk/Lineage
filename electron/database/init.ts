@@ -155,7 +155,9 @@ function insertDefaultModelCosts(db: Database.Database): void {
     VALUES (?, ?, ?, ?)
   `);
   
-  // Note: Database still stores per 1k for backward compatibility, we divide by 1000
+  // Database column is per_1k, defaults are per MILLION
+  // To convert million → 1k: divide by 1000
+  // Example: $0.05 per million = $0.00005 per 1k
   for (const cost of defaults) {
     insert.run(cost.provider, cost.model, cost.promptUSD / 1000, cost.completionUSD / 1000);
   }

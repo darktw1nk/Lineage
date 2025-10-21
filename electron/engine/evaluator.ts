@@ -178,8 +178,19 @@ async function processNode(
       state.run.cacheHits++;
     } else {
       // Run tests
-      node.tests = await runTests(runId, node, state.config);
+      const testResult = await runTests(runId, node, state.config);
+      node.tests = testResult.results;
       state.cache.set(cacheKey, node.tests);
+      
+      // Track service model costs from LLM grading (if any)
+      if (testResult.serviceCosts) {
+        trackServiceCost(state, testResult.serviceCosts.usd, {
+          prompt: testResult.serviceCosts.promptTokens,
+          completion: testResult.serviceCosts.completionTokens
+        });
+        // Send totals update after service model use
+        sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+      }
     }
     
     // Calculate costs using actual cost table
@@ -191,10 +202,16 @@ async function processNode(
       const { getModelCost } = await import('../providers/costs.js');
       const costEntry = await getModelCost(node.params.model);
       
+      console.log(`[Cost Calc] Model: ${node.params.model.provider}/${node.params.model.model}, CostEntry:`, costEntry);
+      console.log(`[Cost Calc] Test tokens: prompt=${test.promptTokens}, completion=${test.completionTokens}`);
+      
       if (costEntry) {
         const promptCost = (test.promptTokens / 1000) * costEntry.promptUSDper1k;
         const completionCost = (test.completionTokens / 1000) * costEntry.completionUSDper1k;
+        console.log(`[Cost Calc] Calculated: prompt=$${promptCost.toFixed(6)}, completion=$${completionCost.toFixed(6)}, total=$${(promptCost + completionCost).toFixed(6)}`);
         totalCost += promptCost + completionCost;
+      } else {
+        console.warn(`[Cost Calc] No cost entry found for model ${node.params.model.provider}/${node.params.model.model}!`);
       }
       
       // Latency is tracked during API call, stored in result
@@ -222,6 +239,9 @@ async function processNode(
       
       // Track service model costs from guardrail checks
       trackServiceCost(state, safetyResult.totalCost, { prompt: safetyResult.totalPromptTokens, completion: safetyResult.totalCompletionTokens });
+      
+      // Send totals update after service model use
+      sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
     }
     
     // Calculate fitness
@@ -271,9 +291,10 @@ async function runTests(
   runId: UUID,
   node: CandidateNode,
   config: EvaluationConfig
-): Promise<TestResult[]> {
+): Promise<{ results: TestResult[]; serviceCosts?: { usd: number; promptTokens: number; completionTokens: number } }> {
   const adapter = getProviderAdapter(node.params.model.provider);
   const results: TestResult[] = [];
+  let runTestsServiceCosts: { usd: number; promptTokens: number; completionTokens: number } | undefined;
   
   for (const test of config.testSet) {
     try {
@@ -297,7 +318,7 @@ async function runTests(
         const { evaluateTestResultLLM } = await import('./fitness.js');
         const maxTokens = (config as any).serviceModelMaxTokens || 20000;
         
-        evaluation = await evaluateTestResultLLM(
+        const gradingResult = await evaluateTestResultLLM(
           test,
           node.prompt,
           test.prompt,
@@ -306,6 +327,17 @@ async function runTests(
           serviceAdapter,
           maxTokens
         );
+        
+        evaluation = { passed: gradingResult.passed, score: gradingResult.score };
+        
+        // Track service model costs from LLM grading (need state access)
+        // We'll accumulate these and track them at the end of runTests
+        if (!runTestsServiceCosts) {
+          runTestsServiceCosts = { usd: 0, promptTokens: 0, completionTokens: 0 };
+        }
+        runTestsServiceCosts.usd += gradingResult.usd;
+        runTestsServiceCosts.promptTokens += gradingResult.promptTokens;
+        runTestsServiceCosts.completionTokens += gradingResult.completionTokens;
       } else {
         // Use exact match evaluation
         evaluation = evaluateTestResult(test, result.output, test.mode);
@@ -353,7 +385,7 @@ async function runTests(
     }
   }
   
-  return results;
+  return { results, serviceCosts: runTestsServiceCosts };
 }
 
 async function moveToNextGeneration(
@@ -457,6 +489,9 @@ async function moveToNextGeneration(
         completion: mutated.totalCompletionTokens 
       });
       
+      // Send totals update after service model use
+      sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+      
       const node: CandidateNode = {
         id: uuidv4(),
         generation: nextGenNumber,
@@ -490,6 +525,9 @@ async function moveToNextGeneration(
         completion: crossed.totalCompletionTokens 
       });
       
+      // Send totals update after service model use
+      sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+      
       const node: CandidateNode = {
         id: uuidv4(),
         generation: nextGenNumber,
@@ -519,8 +557,11 @@ async function moveToNextGeneration(
       // Track service model costs from meta-prompting
       trackServiceCost(state, metaed.totalCost, { 
         prompt: metaed.totalPromptTokens, 
-        completion: metaed.totalCompletionTokens 
+        completion: metaed.totalCompletionTokens
       });
+      
+      // Send totals update after service model use
+      sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
       
       const node: CandidateNode = {
         id: uuidv4(),

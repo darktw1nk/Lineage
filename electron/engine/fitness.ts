@@ -267,7 +267,7 @@ export async function evaluateTestResultLLM(
   serviceModel: any,
   adapter: any,
   maxTokens: number = 20000
-): Promise<{ passed: boolean; score: number }> {
+): Promise<{ passed: boolean; score: number; usd: number; promptTokens: number; completionTokens: number }> {
   console.log(`[LLM Grading] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
   
   const evaluationPrompt = `SYSTEM: You are a strict evaluator. Return ONLY a JSON object.
@@ -305,7 +305,13 @@ Return:
     // Check for empty response
     if (!result.output || result.output.trim() === '') {
       console.error('[LLM Grading] Empty response from service model!');
-      return { passed: false, score: 5 };
+      return { 
+        passed: false, 
+        score: 5,
+        usd: result?.usd || 0,
+        promptTokens: result?.promptTokens || 0,
+        completionTokens: result?.completionTokens || 0,
+      };
     }
     
     // Strip markdown code blocks if present
@@ -323,12 +329,21 @@ Return:
     return {
       passed: score >= 7,
       score,
+      usd: result.usd || 0,
+      promptTokens: result.promptTokens || 0,
+      completionTokens: result.completionTokens || 0,
     };
   } catch (error) {
     console.error('LLM grading failed:', error);
     console.error('[LLM Grading] Failed on output:', result?.output);
     // Fallback to neutral score
-    return { passed: false, score: 5 };
+    return { 
+      passed: false, 
+      score: 5,
+      usd: result?.usd || 0,
+      promptTokens: result?.promptTokens || 0,
+      completionTokens: result?.completionTokens || 0,
+    };
   }
 }
 
