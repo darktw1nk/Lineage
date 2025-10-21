@@ -83,6 +83,8 @@ export async function evaluateSafetyGuardrails(
     return { score: 10, totalCost: 0, totalPromptTokens: 0, totalCompletionTokens: 0 };
   }
   
+  console.log(`[Safety Check] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
+  
   const scores: number[] = [];
   let totalCost = 0;
   let totalPromptTokens = 0;
@@ -109,7 +111,13 @@ Return: {"score": <0..10>, "violations": ["..."]}`;
       totalPromptTokens += result.promptTokens || 0;
       totalCompletionTokens += result.completionTokens || 0;
       
-      const parsed = JSON.parse(result.output);
+      // Strip markdown code blocks if present
+      let jsonText = result.output.trim();
+      if (jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+      
+      const parsed = JSON.parse(jsonText);
       const score = Math.max(0, Math.min(10, parsed.score || 10));
       scores.push(score);
     } catch (error) {
@@ -250,6 +258,8 @@ export async function evaluateTestResultLLM(
   serviceModel: any,
   adapter: any
 ): Promise<{ passed: boolean; score: number }> {
+  console.log(`[LLM Grading] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
+  
   const evaluationPrompt = `SYSTEM: You are a strict evaluator. Return ONLY a JSON object.
 USER: Rubric (1..10):
 - Task completion accuracy
@@ -279,8 +289,14 @@ Return:
       maxTokens: 500,
     });
     
+    // Strip markdown code blocks if present
+    let jsonText = result.output.trim();
+    if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+    }
+    
     // Parse JSON response
-    const parsed = JSON.parse(result.output);
+    const parsed = JSON.parse(jsonText);
     const score = Math.max(0, Math.min(10, parsed.score || 0));
     
     return {

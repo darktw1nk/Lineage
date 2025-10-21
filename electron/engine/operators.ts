@@ -41,6 +41,8 @@ export async function applyMutation(
   const serviceModel = config.serviceModel;
   const adapter = getProviderAdapter(serviceModel.provider);
   
+  console.log(`[Mutation] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
+  
   let totalCost = 0;
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
@@ -64,7 +66,12 @@ export async function applyMutation(
     // Parse edits
     let edits: Array<{ label: string; edit: string }> = [];
     try {
-      const parsed = JSON.parse(mutationResult.output);
+      // Strip markdown code blocks if present
+      let jsonText = mutationResult.output.trim();
+      if (jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+      const parsed = JSON.parse(jsonText);
       edits = Array.isArray(parsed) ? parsed : [parsed];
     } catch {
       // If JSON parsing fails, treat the whole response as a single edit
@@ -121,6 +128,8 @@ export async function applyCrossover(
   const serviceModel = config.serviceModel;
   const adapter = getProviderAdapter(serviceModel.provider);
   
+  console.log(`[Crossover] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
+  
   let totalCost = 0;
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
@@ -174,6 +183,8 @@ export async function applyMetaPrompting(
   const serviceModel = config.serviceModel;
   const adapter = getProviderAdapter(serviceModel.provider);
   
+  console.log(`[Meta-prompting] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
+  
   let totalCost = 0;
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
@@ -206,7 +217,12 @@ export async function applyMetaPrompting(
     // Parse edits
     let edits: Array<{ label: string; edit: string }> = [];
     try {
-      const parsed = JSON.parse(metaResult.output);
+      // Strip markdown code blocks if present
+      let jsonText = metaResult.output.trim();
+      if (jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+      const parsed = JSON.parse(jsonText);
       edits = Array.isArray(parsed) ? parsed : [parsed];
     } catch {
       edits = [{ label: 'META', edit: metaResult.output }];
