@@ -178,7 +178,7 @@ async function processNode(
       state.run.cacheHits++;
     } else {
       // Run tests
-      node.tests = await runTests(node, state.config);
+      node.tests = await runTests(runId, node, state.config);
       state.cache.set(cacheKey, node.tests);
     }
     
@@ -259,6 +259,7 @@ async function processNode(
 }
 
 async function runTests(
+  runId: UUID,
   node: CandidateNode,
   config: EvaluationConfig
 ): Promise<TestResult[]> {
@@ -301,7 +302,7 @@ async function runTests(
       let rawResponsePath: string | undefined;
       if (config.rawBlobCapture) {
         rawResponsePath = await storeRawBlob(
-          state.run.id,
+          runId,
           node.id,
           test.id,
           result

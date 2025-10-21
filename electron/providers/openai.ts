@@ -28,17 +28,31 @@ export class OpenAIAdapter extends BaseProviderAdapter {
     return withRetry(async () => {
       const startTime = Date.now();
       
+      console.log(`[OpenAI] Calling model: ${opts.model}, temperature: ${opts.temperature}`);
+      
       // Use max_completion_tokens for newer models (o1, gpt-4, gpt-5 series)
       const useCompletionTokens = opts.model.includes('o1') || 
                                    opts.model.includes('gpt-4') || 
                                    opts.model.includes('gpt-5');
       
+      // o1 and gpt-5 models have strict temperature requirements
+      const hasTemperatureRestrictions = opts.model.includes('o1') || opts.model.includes('gpt-5');
+      
       const body: any = {
         model: opts.model,
         messages: [{ role: 'user', content: opts.prompt }],
-        temperature: opts.temperature,
-        seed: opts.seed,
       };
+      
+      // Handle temperature/seed based on model capabilities
+      if (hasTemperatureRestrictions) {
+        // These models only support temperature = 1 (default)
+        body.temperature = 1;
+        console.log(`[OpenAI] Model ${opts.model} requires temperature=1, overriding user setting`);
+        // Don't include seed for restricted models
+      } else {
+        body.temperature = opts.temperature;
+        body.seed = opts.seed;
+      }
       
       if (useCompletionTokens) {
         body.max_completion_tokens = opts.maxTokens ?? 4096;
