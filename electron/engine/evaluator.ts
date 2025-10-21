@@ -327,13 +327,22 @@ async function runTests(
       });
     } catch (error) {
       console.error(`Test failed for ${test.id}:`, error);
+      
+      // Send error notification for ALL errors
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      sendUpdate(runId, { 
+        type: 'error', 
+        message: `Test failed: ${errorMsg.substring(0, 150)}`,
+        severity: 'error'
+      });
+      
       results.push({
         testId: test.id,
         passed: false,
         score: 0,
         promptTokens: 0,
         completionTokens: 0,
-        outputText: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        outputText: `Error: ${errorMsg}`,
       });
     }
   }
