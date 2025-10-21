@@ -55,6 +55,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [localSettings, setLocalSettings] = useState<AppSettings>({
     globalParallelLimit: 5,
     serviceModel: { provider: 'openai', model: '' },
+    serviceModelMaxTokens: 20000, // Default 20k tokens for ALL models
   });
   
   const [localCosts, setLocalCosts] = useState<ModelCostEntry[]>([]);
@@ -160,6 +161,27 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               </select>
               <div className="text-xs text-muted-foreground mt-1">
                 Models are loaded from the Models & Costs tab
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="serviceModelMaxTokens">Max Tokens (All Models)</Label>
+              <Input
+                id="serviceModelMaxTokens"
+                type="number"
+                min="1000"
+                max="200000"
+                step="1000"
+                value={localSettings.serviceModelMaxTokens}
+                onChange={(e) =>
+                  setLocalSettings({
+                    ...localSettings,
+                    serviceModelMaxTokens: parseInt(e.target.value) || 20000,
+                  })
+                }
+              />
+              <div className="text-xs text-muted-foreground mt-1">
+                Maximum tokens for ALL model calls (service model AND candidate models). Essential for reasoning models like o1/gpt-5 which need space to think.
               </div>
             </div>
           </TabsContent>

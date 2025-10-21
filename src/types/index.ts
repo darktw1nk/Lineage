@@ -96,6 +96,7 @@ export interface EvaluationConfig {
   targets: { timeLimitMs?: number; budgetUSD?: number; targetFitness?: number; maxGenerations?: number };
   serviceModel: ModelRef; // for meta/mutation/crossover/grading
   parallelLimit: number;  // global N
+  serviceModelMaxTokens: number; // Max tokens for ALL model calls (service + candidate)
   rawBlobCapture?: boolean; // default false
 }
 
@@ -127,6 +128,7 @@ export interface AppSettings {
     gemini?: { rpm?: number; tpm?: number };
   };
   serviceModel: ModelRef;
+  serviceModelMaxTokens: number; // Max tokens for service model calls (mutations, grading, safety)
 }
 
 // Provider Adapter Interface

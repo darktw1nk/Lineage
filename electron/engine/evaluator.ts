@@ -210,11 +210,13 @@ async function processNode(
       
       // Evaluate guardrails against concatenated test outputs
       const allOutputs = node.tests.map(t => t.outputText || '').join('\n---\n');
+      const maxTokens = (state.config as any).serviceModelMaxTokens || 20000;
       const safetyResult = await evaluateSafetyGuardrails(
         allOutputs,
         state.config.fitness.guardrails,
         state.config.serviceModel,
-        serviceAdapter
+        serviceAdapter,
+        maxTokens
       );
       safety = safetyResult.score;
       
@@ -278,12 +280,14 @@ async function runTests(
       // Combine candidate prompt (evolved system/instruction) with test input
       const combinedPrompt = `${node.prompt}\n\n${test.prompt}`;
       
-      const result = await adapter.call({
-        model: node.params.model.model,
-        prompt: combinedPrompt,
-        temperature: node.params.temperature,
-        seed: node.params.seed,
-      });
+        const maxTokens = (config as any).serviceModelMaxTokens || 20000;
+        const result = await adapter.call({
+          model: node.params.model.model,
+          prompt: combinedPrompt,
+          temperature: node.params.temperature,
+          seed: node.params.seed,
+          maxTokens, // Apply same max tokens to candidate models
+        });
       
       let evaluation: { passed: boolean; score: number };
       
@@ -291,6 +295,7 @@ async function runTests(
         // Use LLM grading via service model
         const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
         const { evaluateTestResultLLM } = await import('./fitness.js');
+        const maxTokens = (config as any).serviceModelMaxTokens || 20000;
         
         evaluation = await evaluateTestResultLLM(
           test,
@@ -298,7 +303,8 @@ async function runTests(
           test.prompt,
           result.output,
           config.serviceModel,
-          serviceAdapter
+          serviceAdapter,
+          maxTokens
         );
       } else {
         // Use exact match evaluation

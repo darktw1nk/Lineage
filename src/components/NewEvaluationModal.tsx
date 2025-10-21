@@ -83,6 +83,7 @@ Here is the bug report:
     },
     serviceModel: settings?.serviceModel || undefined,
     parallelLimit: settings?.globalParallelLimit || 5,
+    serviceModelMaxTokens: settings?.serviceModelMaxTokens || 20000, // Load from settings - applies to ALL models
     rawBlobCapture: false,
   });
 
@@ -96,6 +97,7 @@ Here is the bug report:
         ...prev,
         serviceModel: settings.serviceModel,
         parallelLimit: settings.globalParallelLimit || 5,
+        serviceModelMaxTokens: settings.serviceModelMaxTokens || 20000,
       }));
     }
   }, [settings]);

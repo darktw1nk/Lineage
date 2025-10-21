@@ -43,6 +43,9 @@ export async function applyMutation(
   
   console.log(`[Mutation] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
   
+  // Get maxTokens from config settings (default 20k if not set)
+  const maxTokens = (config as any).serviceModelMaxTokens || 20000;
+  
   let totalCost = 0;
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
@@ -55,13 +58,25 @@ export async function applyMutation(
       model: serviceModel.model,
       prompt: mutationPrompt,
       temperature: 0.7,
-      maxTokens: 2000,
+      maxTokens,
     });
     
     // Track cost from first call
     totalCost += mutationResult.usd || 0;
     totalPromptTokens += mutationResult.promptTokens || 0;
     totalCompletionTokens += mutationResult.completionTokens || 0;
+    
+    // Check for empty response
+    if (!mutationResult.output || mutationResult.output.trim() === '') {
+      console.error('[Mutation] Empty response from service model! Returning parent prompt unchanged.');
+      return {
+        prompt: parent.prompt,
+        changeLog: [{ label: 'MUTATION', change: 'Service model returned empty response' }],
+        totalCost,
+        totalPromptTokens,
+        totalCompletionTokens,
+      };
+    }
     
     // Parse edits
     let edits: Array<{ label: string; edit: string }> = [];
@@ -87,7 +102,7 @@ export async function applyMutation(
       model: serviceModel.model,
       prompt: applyPrompt,
       temperature: 0.3,
-      maxTokens: 4096,
+      maxTokens,
     });
     
     // Track cost from second call
@@ -143,7 +158,7 @@ export async function applyCrossover(
       model: serviceModel.model,
       prompt: crossoverPrompt,
       temperature: 0.5,
-      maxTokens: 4096,
+      maxTokens: (config as any).serviceModelMaxTokens || 20000,
     });
     
     // Track cost
@@ -185,6 +200,9 @@ export async function applyMetaPrompting(
   
   console.log(`[Meta-prompting] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
   
+  // Get maxTokens from config settings (default 20k if not set)
+  const maxTokens = (config as any).serviceModelMaxTokens || 20000;
+  
   let totalCost = 0;
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
@@ -206,13 +224,25 @@ export async function applyMetaPrompting(
       model: serviceModel.model,
       prompt: metaPrompt,
       temperature: 0.7,
-      maxTokens: 2000,
+      maxTokens,
     });
     
     // Track cost from first call
     totalCost += metaResult.usd || 0;
     totalPromptTokens += metaResult.promptTokens || 0;
     totalCompletionTokens += metaResult.completionTokens || 0;
+    
+    // Check for empty response
+    if (!metaResult.output || metaResult.output.trim() === '') {
+      console.error('[Meta-prompting] Empty response from service model! Returning parent prompt unchanged.');
+      return {
+        prompt: parent.prompt,
+        changeLog: [{ label: 'META_PROMPTING', change: 'Service model returned empty response' }],
+        totalCost,
+        totalPromptTokens,
+        totalCompletionTokens,
+      };
+    }
     
     // Parse edits
     let edits: Array<{ label: string; edit: string }> = [];
@@ -237,7 +267,7 @@ export async function applyMetaPrompting(
       model: serviceModel.model,
       prompt: applyPrompt,
       temperature: 0.3,
-      maxTokens: 4096,
+      maxTokens,
     });
     
     // Track cost from second call

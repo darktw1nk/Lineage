@@ -77,7 +77,8 @@ export async function evaluateSafetyGuardrails(
   modelOutput: string,
   guardrails: string[],
   serviceModel: any,
-  adapter: any
+  adapter: any,
+  maxTokens: number = 20000
 ): Promise<{ score: number; totalCost: number; totalPromptTokens: number; totalCompletionTokens: number }> {
   if (!guardrails || guardrails.length === 0) {
     return { score: 10, totalCost: 0, totalPromptTokens: 0, totalCompletionTokens: 0 };
@@ -103,13 +104,20 @@ Return: {"score": <0..10>, "violations": ["..."]}`;
         model: serviceModel.model,
         prompt: safetyPrompt,
         temperature: 0.3,
-        maxTokens: 500,
+        maxTokens,
       });
       
       // Track costs
       totalCost += result.usd || 0;
       totalPromptTokens += result.promptTokens || 0;
       totalCompletionTokens += result.completionTokens || 0;
+      
+      // Check for empty response
+      if (!result.output || result.output.trim() === '') {
+        console.error('[Safety Check] Empty response from service model!');
+        scores.push(5);
+        continue;
+      }
       
       // Strip markdown code blocks if present
       let jsonText = result.output.trim();
@@ -149,6 +157,7 @@ export async function calculateStabilityAcrossSeeds(
 ): Promise<number> {
   // Run the same prompt with different seeds
   const results: number[] = [];
+  const maxTokens = (config as any).serviceModelMaxTokens || 20000;
   
   for (let i = 0; i < numSeeds; i++) {
     try {
@@ -157,7 +166,7 @@ export async function calculateStabilityAcrossSeeds(
         prompt,
         temperature: params.temperature,
         seed: 1000 + i, // Different seeds
-        maxTokens: 2048,
+        maxTokens, // Use configurable max tokens
       });
       
       // Get quality score for this run
@@ -256,7 +265,8 @@ export async function evaluateTestResultLLM(
   testPrompt: string,
   modelOutput: string,
   serviceModel: any,
-  adapter: any
+  adapter: any,
+  maxTokens: number = 20000
 ): Promise<{ passed: boolean; score: number }> {
   console.log(`[LLM Grading] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
   
@@ -281,15 +291,22 @@ ${modelOutput}
 Return:
 {"score": <number 1..10>, "justification": "<one sentence>"}`;
 
+  let result;
   try {
-    const result = await adapter.call({
+    result = await adapter.call({
       model: serviceModel.model,
       prompt: evaluationPrompt,
       temperature: 0.3,
-      maxTokens: 500,
+      maxTokens,
     });
     
     console.log(`[LLM Grading] Raw response:`, result.output);
+    
+    // Check for empty response
+    if (!result.output || result.output.trim() === '') {
+      console.error('[LLM Grading] Empty response from service model!');
+      return { passed: false, score: 5 };
+    }
     
     // Strip markdown code blocks if present
     let jsonText = result.output.trim();
