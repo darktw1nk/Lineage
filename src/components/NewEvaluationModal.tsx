@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
@@ -87,6 +87,18 @@ Here is the bug report:
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Update serviceModel when settings load
+  useEffect(() => {
+    if (settings?.serviceModel && !config.serviceModel?.model) {
+      console.log('[NewEval] Updating serviceModel from settings:', settings.serviceModel);
+      setConfig(prev => ({
+        ...prev,
+        serviceModel: settings.serviceModel,
+        parallelLimit: settings.globalParallelLimit || 5,
+      }));
+    }
+  }, [settings]);
 
   const createEvaluation = useMutation({
     mutationFn: async (config: EvaluationConfig) => {
