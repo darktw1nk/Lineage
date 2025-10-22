@@ -42,6 +42,10 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
     return deleteEvaluation(runId);
   });
   
+  ipcMain.handle('eval:getConfig', async (_event, runId: string) => {
+    return getEvaluationConfig(runId);
+  });
+  
   // Settings handlers
   ipcMain.handle('settings:get', async () => {
     return getSettings();
@@ -243,6 +247,23 @@ async function deleteEvaluation(runId: string): Promise<void> {
   });
   
   transaction();
+}
+
+async function getEvaluationConfig(runId: string): Promise<EvaluationConfig | null> {
+  const db = getDatabase();
+  
+  const row = db.prepare(`
+    SELECT ec.config_json
+    FROM evaluation_runs er
+    JOIN evaluation_configs ec ON er.config_id = ec.id
+    WHERE er.id = ?
+  `).get(runId) as { config_json: string } | undefined;
+  
+  if (!row) {
+    return null;
+  }
+  
+  return JSON.parse(row.config_json);
 }
 
 async function exportEvaluation(runId: string): Promise<string> {

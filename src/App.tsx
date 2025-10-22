@@ -7,6 +7,7 @@ import { RightPanel } from './components/RightPanel';
 import { Footer } from './components/Footer';
 import { SettingsModal } from './components/SettingsModal';
 import { NewEvaluationModal } from './components/NewEvaluationModal';
+import { EvaluationConfigPanel } from './components/EvaluationConfigPanel';
 import type { CandidateNode, UUID } from './types';
 
 const queryClient = new QueryClient();
@@ -16,6 +17,7 @@ function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<UUID | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showNewEvaluation, setShowNewEvaluation] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
 
   // Listen for error notifications from backend
   // Note: useEvaluationState hook handles all other IPC updates
@@ -61,15 +63,26 @@ function App() {
               onSelectNode={setSelectedNodeId}
             />
           </div>
-          <Footer evaluationId={selectedEvaluationId} />
+          <Footer 
+            evaluationId={selectedEvaluationId} 
+            onShowConfig={selectedEvaluationId ? () => setShowConfig(true) : undefined}
+          />
         </div>
 
-        {/* Right Panel */}
-        {selectedNodeId && (
+        {/* Right Panel - Node Details */}
+        {selectedNodeId && !showConfig && (
           <RightPanel
             evaluationId={selectedEvaluationId}
             nodeId={selectedNodeId}
             onClose={() => setSelectedNodeId(null)}
+          />
+        )}
+        
+        {/* Right Panel - Evaluation Config */}
+        {showConfig && selectedEvaluationId && (
+          <EvaluationConfigPanel
+            evaluationId={selectedEvaluationId}
+            onClose={() => setShowConfig(false)}
           />
         )}
 

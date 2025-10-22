@@ -11,6 +11,7 @@ export interface ElectronAPI {
     export: (runId: string) => Promise<string>;
     import: (filePath: string) => Promise<EvaluationRun>;
     delete: (runId: string) => Promise<void>;
+    getConfig: (runId: string) => Promise<EvaluationConfig | null>;
     subscribe: (runId: string, callback: (data: any) => void) => () => void;
   };
   settings: {

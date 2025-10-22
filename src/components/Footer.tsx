@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { Button } from './ui/button';
-import { Pause, Play, Square, Loader2 } from 'lucide-react';
+import { Pause, Play, Square, Loader2, Settings2 } from 'lucide-react';
 import type { UUID } from '../types';
 import { useEvaluation } from '../hooks/useEvaluation';
 
 interface FooterProps {
   evaluationId: UUID | null;
+  onShowConfig?: () => void;
 }
 
-export function Footer({ evaluationId }: FooterProps) {
+export function Footer({ evaluationId, onShowConfig }: FooterProps) {
   const [isPausing, setIsPausing] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
@@ -145,6 +146,17 @@ export function Footer({ evaluationId }: FooterProps) {
             </>
           )}
         </Button>
+        
+        {onShowConfig && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onShowConfig}
+            title="View Evaluation Config"
+          >
+            <Settings2 className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </div>
   );
