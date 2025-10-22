@@ -78,7 +78,7 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
                   <Copy className="h-3 w-3" />
                 </Button>
               </div>
-              <div className="max-h-60 overflow-y-auto rounded-md border bg-muted p-3 text-sm">
+              <div className="max-h-60 overflow-y-auto rounded-md border bg-muted p-3 text-sm whitespace-pre-wrap font-mono">
                 {node.prompt}
               </div>
             </div>
@@ -109,7 +109,7 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
               {node.changeLog.map((change, idx) => (
                 <div key={idx} className="rounded border bg-muted p-2 text-sm">
                   <span className="font-semibold text-primary">[{change.label}]</span>{' '}
-                  {change.text}
+                  <span className="whitespace-pre-wrap">{change.text}</span>
                 </div>
               ))}
             </div>
@@ -146,7 +146,7 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
                     <div className="border-t p-3 space-y-2 text-sm">
                       <div>
                         <span className="font-medium">Output:</span>
-                        <div className="mt-1 max-h-32 overflow-y-auto rounded bg-muted p-2">
+                        <div className="mt-1 max-h-32 overflow-y-auto rounded bg-muted p-2 whitespace-pre-wrap font-mono text-xs">
                           {test.outputText || 'No output'}
                         </div>
                       </div>

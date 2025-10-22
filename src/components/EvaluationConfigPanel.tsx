@@ -136,7 +136,7 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
             </div>
             <div>
               <div className="text-muted-foreground mb-1">Seed Prompt:</div>
-              <div className="text-xs font-mono bg-muted p-2 rounded max-h-32 overflow-y-auto">
+              <div className="text-xs font-mono bg-muted p-2 rounded max-h-32 overflow-y-auto whitespace-pre-wrap">
                 {config.population.seedPrompt}
               </div>
             </div>
@@ -173,13 +173,13 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
                   <span className="text-muted-foreground">Mode:</span>
                   <span className="font-mono">{test.mode}</span>
                 </div>
-                <div className="text-xs font-mono bg-muted p-2 rounded max-h-24 overflow-y-auto">
+                <div className="text-xs font-mono bg-muted p-2 rounded max-h-24 overflow-y-auto whitespace-pre-wrap">
                   {test.prompt.substring(0, 150)}{test.prompt.length > 150 ? '...' : ''}
                 </div>
                 {test.expected && (
                   <div className="text-xs mt-1">
                     <span className="text-muted-foreground">Expected:</span>
-                    <div className="font-mono bg-muted p-1 rounded mt-1">
+                    <div className="font-mono bg-muted p-1 rounded mt-1 whitespace-pre-wrap">
                       {test.expected.substring(0, 100)}{test.expected.length > 100 ? '...' : ''}
                     </div>
                   </div>
@@ -208,7 +208,7 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
             {config.fitness.guardrails && config.fitness.guardrails.length > 0 && (
               <div className="mt-2">
                 <div className="text-muted-foreground mb-1">Guardrails:</div>
-                <div className="text-xs font-mono bg-muted p-2 rounded max-h-24 overflow-y-auto">
+                <div className="text-xs font-mono bg-muted p-2 rounded max-h-24 overflow-y-auto whitespace-pre-wrap">
                   {config.fitness.guardrails.map((g, idx) => (
                     <div key={idx} className="mb-1">• {g.substring(0, 100)}{g.length > 100 ? '...' : ''}</div>
                   ))}
