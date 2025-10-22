@@ -30,6 +30,7 @@ export interface TestResult {
   completionTokens: number;
   rawResponsePath?: string; // persisted blob if raw capture enabled
   outputText?: string;
+  llmGradeReasoning?: string; // raw LLM judge response for llm-graded tests
 }
 
 export interface CandidateParams {

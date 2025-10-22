@@ -12,6 +12,7 @@ interface RightPanelProps {
 
 export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
   const [expandedTests, setExpandedTests] = useState<Set<UUID>>(new Set());
+  const [expandedReasonings, setExpandedReasonings] = useState<Set<UUID>>(new Set());
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('rightPanelWidth');
     return saved ? parseInt(saved, 10) : 384; // 384px = w-96
@@ -69,6 +70,16 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
       newExpanded.add(testId);
     }
     setExpandedTests(newExpanded);
+  };
+
+  const toggleReasoning = (testId: UUID) => {
+    const newExpanded = new Set(expandedReasonings);
+    if (newExpanded.has(testId)) {
+      newExpanded.delete(testId);
+    } else {
+      newExpanded.add(testId);
+    }
+    setExpandedReasonings(newExpanded);
   };
 
   const copyPrompt = () => {
@@ -200,6 +211,28 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
                           {test.outputText || 'No output'}
                         </div>
                       </div>
+                      
+                      {/* LLM Grading Reasoning (collapsible) */}
+                      {test.llmGradeReasoning && (
+                        <div>
+                          <button
+                            onClick={() => toggleReasoning(test.testId)}
+                            className="flex items-center space-x-1 text-xs font-medium text-primary hover:underline"
+                          >
+                            {expandedReasonings.has(test.testId) ? (
+                              <ChevronDown className="h-3 w-3" />
+                            ) : (
+                              <ChevronRight className="h-3 w-3" />
+                            )}
+                            <span>LLM Judge Reasoning</span>
+                          </button>
+                          {expandedReasonings.has(test.testId) && (
+                            <div className="mt-1 max-h-32 overflow-y-auto rounded bg-muted/50 p-2 whitespace-pre-wrap font-mono text-xs border-l-2 border-primary">
+                              {test.llmGradeReasoning}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       
                       <div className="flex justify-between text-xs text-muted-foreground">
                         <span>Prompt tokens: {test.promptTokens}</span>

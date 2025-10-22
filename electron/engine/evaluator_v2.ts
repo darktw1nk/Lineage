@@ -511,6 +511,7 @@ async function runTests(
     // Grade the output using LLM grading
     let score = 5.0; // Default fallback
     let passed = false;
+    let llmGradeReasoning: string | undefined;
     
     if (test.mode === 'llm_grade') {
       const { evaluateTestResultLLM } = await import('./fitness.js');
@@ -528,6 +529,7 @@ async function runTests(
       
       score = gradingResult.score;
       passed = gradingResult.passed;
+      llmGradeReasoning = gradingResult.reasoning;
       
       // Track service model costs from LLM grading
       state.run.totals.tokensPrompt += gradingResult.promptTokens;
@@ -582,6 +584,7 @@ async function runTests(
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
       outputText: result.output,
+      llmGradeReasoning,
     };
     
     return testResult;

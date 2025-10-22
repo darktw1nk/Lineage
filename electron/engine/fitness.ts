@@ -281,7 +281,7 @@ export async function evaluateTestResultLLM(
   serviceModel: any,
   adapter: any,
   maxTokens: number = 20000
-): Promise<{ passed: boolean; score: number; usd: number; promptTokens: number; completionTokens: number }> {
+): Promise<{ passed: boolean; score: number; usd: number; promptTokens: number; completionTokens: number; reasoning: string }> {
   console.log(`[LLM Grading] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
   
   const evaluationPrompt = `SYSTEM: You are a strict evaluator. Return ONLY a JSON object.
@@ -325,11 +325,15 @@ Return:
         usd: result?.usd || 0,
         promptTokens: result?.promptTokens || 0,
         completionTokens: result?.completionTokens || 0,
+        reasoning: 'Empty response from LLM judge',
       };
     }
     
+    // Keep the raw output for reasoning display
+    const rawOutput = result.output.trim();
+    
     // Strip markdown code blocks if present
-    let jsonText = result.output.trim();
+    let jsonText = rawOutput;
     if (jsonText.startsWith('```')) {
       jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
     }
@@ -346,6 +350,7 @@ Return:
       usd: result.usd || 0,
       promptTokens: result.promptTokens || 0,
       completionTokens: result.completionTokens || 0,
+      reasoning: rawOutput, // Full raw LLM response for UI display
     };
   } catch (error) {
     console.error('LLM grading failed:', error);
@@ -357,6 +362,7 @@ Return:
       usd: result?.usd || 0,
       promptTokens: result?.promptTokens || 0,
       completionTokens: result?.completionTokens || 0,
+      reasoning: `Error parsing LLM response: ${error instanceof Error ? error.message : String(error)}\n\nRaw output: ${result?.output || 'N/A'}`,
     };
   }
 }
