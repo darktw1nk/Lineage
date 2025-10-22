@@ -42,6 +42,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     set: (entry) => ipcRenderer.invoke('costs:set', entry),
     getAll: () => ipcRenderer.invoke('costs:getAll'),
   },
+  
+  // Logger methods
+  logs: {
+    getBuffer: () => ipcRenderer.invoke('logs:getBuffer'),
+    subscribe: (callback) => {
+      ipcRenderer.on('log:entry', (_event, entry) => callback(entry));
+      return () => ipcRenderer.removeAllListeners('log:entry');
+    },
+  },
 });
 
 // TypeScript definitions are in src/window.d.ts

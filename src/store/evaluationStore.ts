@@ -183,7 +183,7 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
     const handleUpdate = (_event: any, data: any) => {
       if (!data || !data.type) return;
       
-      console.log(`[Store] IPC update for ${evalId.slice(0, 8)}:`, data.type);
+      console.log(`[Store] IPC update for ${evalId.slice(0, 8)}:`, data.type, data);
       
       const store = get();
       
@@ -193,6 +193,7 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
           break;
           
         case 'node_created':
+          console.log(`[Store] Handling node_created: gen=${data.node.generation}, id=${data.node.id.slice(0, 8)}`);
           store.addNodeToEvaluation(evalId, data.node);
           break;
           
@@ -201,12 +202,16 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
           break;
           
         case 'generation_created':
+          console.log(`[Store] Handling generation_created: gen=${data.generation}, nodes=${data.nodes.length}`);
           store.addGenerationToEvaluation(evalId, data.generation, data.nodes);
           break;
           
         case 'totals':
           store.updateTotals(evalId, data.totals, data.cacheHits);
           break;
+          
+        default:
+          console.warn(`[Store] Unknown IPC event type: ${data.type}`);
       }
     };
     

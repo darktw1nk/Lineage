@@ -3,9 +3,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { initializeDatabase } from './database/init.js';
 import { registerIPCHandlers } from './ipc/handlers.js';
+import { initLogger, getLogBuffer } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Initialize logger early to capture all logs
+initLogger();
 
 let mainWindow: BrowserWindow | null = null;
 

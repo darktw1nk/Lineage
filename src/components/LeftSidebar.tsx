@@ -1,13 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { Button } from './ui/button';
-import { Plus, Settings, Download, Upload, Trash2 } from 'lucide-react';
+import { Plus, Settings, Download, Upload, Trash2, FileText } from 'lucide-react';
 import type { UUID, EvaluationRun } from '../types';
 import { useEvaluationStore } from '../store/evaluationStore';
 
 interface LeftSidebarProps {
   onNewEvaluation: () => void;
   onSettings: () => void;
+  onLogs: () => void;
   onSelectEvaluation: (id: UUID) => void;
   selectedEvaluationId: UUID | null;
 }
@@ -15,6 +16,7 @@ interface LeftSidebarProps {
 export function LeftSidebar({
   onNewEvaluation,
   onSettings,
+  onLogs,
   onSelectEvaluation,
   selectedEvaluationId,
 }: LeftSidebarProps) {
@@ -181,6 +183,10 @@ export function LeftSidebar({
         <Button onClick={onSettings} variant="outline" className="w-full">
           <Settings className="mr-2 h-4 w-4" />
           Settings
+        </Button>
+        <Button onClick={onLogs} variant="outline" className="w-full">
+          <FileText className="mr-2 h-4 w-4" />
+          Logs
         </Button>
       </div>
     </div>

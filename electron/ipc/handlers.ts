@@ -3,8 +3,14 @@ import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSett
 import { getDatabase } from '../database/init.js';
 import { v4 as uuidv4 } from 'uuid';
 import { store } from '../store.js';
+import { getLogBuffer } from '../logger.js';
 
 export function registerIPCHandlers(ipcMain: IpcMain): void {
+  // Logger handler
+  ipcMain.handle('logs:getBuffer', async () => {
+    return getLogBuffer();
+  });
+  
   // Evaluation handlers
   ipcMain.handle('eval:create', async (_event, config: EvaluationConfig) => {
     return createEvaluation(config);

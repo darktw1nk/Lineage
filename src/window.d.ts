@@ -1,5 +1,12 @@
 import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from './types';
 
+export interface LogEntry {
+  timestamp: number;
+  level: 'log' | 'info' | 'warn' | 'error';
+  message: string;
+  args: any[];
+}
+
 export interface ElectronAPI {
   eval: {
     create: (config: EvaluationConfig) => Promise<EvaluationRun>;
@@ -28,6 +35,10 @@ export interface ElectronAPI {
     get: (modelRef: ModelRef) => Promise<ModelCostEntry | null>;
     set: (entry: ModelCostEntry) => Promise<void>;
     getAll: () => Promise<ModelCostEntry[]>;
+  };
+  logs: {
+    getBuffer: () => Promise<LogEntry[]>;
+    subscribe: (callback: (entry: LogEntry) => void) => () => void;
   };
 }
 

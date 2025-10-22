@@ -8,6 +8,7 @@ import { Footer } from './components/Footer';
 import { SettingsModal } from './components/SettingsModal';
 import { NewEvaluationModal } from './components/NewEvaluationModal';
 import { EvaluationConfigPanel } from './components/EvaluationConfigPanel';
+import { LogsPanel } from './components/LogsPanel';
 import type { CandidateNode, UUID } from './types';
 
 const queryClient = new QueryClient();
@@ -18,6 +19,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showNewEvaluation, setShowNewEvaluation] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
 
   // Listen for error notifications from backend
   // Note: useEvaluationState hook handles all other IPC updates
@@ -50,6 +52,7 @@ function App() {
         <LeftSidebar
           onNewEvaluation={() => setShowNewEvaluation(true)}
           onSettings={() => setShowSettings(true)}
+          onLogs={() => setShowLogs(!showLogs)}
           onSelectEvaluation={setSelectedEvaluationId}
           selectedEvaluationId={selectedEvaluationId}
         />
@@ -63,6 +66,7 @@ function App() {
               onSelectNode={setSelectedNodeId}
             />
           </div>
+          {showLogs && <LogsPanel onClose={() => setShowLogs(false)} />}
           <Footer 
             evaluationId={selectedEvaluationId} 
             onShowConfig={selectedEvaluationId ? () => setShowConfig(true) : undefined}
