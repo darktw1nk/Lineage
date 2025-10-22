@@ -18,6 +18,7 @@ import type {
   CandidateNode,
   TestResult,
   ModelRef,
+  ChangeLogLine,
 } from '../../src/types/index.js';
 import { createShellPopulation, mutateNode, crossoverNodes, metaPromptNode } from './operators_v2.js';
 import { getProviderAdapter } from '../providers/index.js';
@@ -158,12 +159,21 @@ async function mutatePopulationInBackground(
     try {
       console.log(`[Evaluator] Mutating node ${node.id.slice(0, 8)}...`);
       
-      const { prompt, changeLog } = await mutateNode(shellNodes[0].prompt, state.config);
+      const result = await mutateNode(shellNodes[0].prompt, state.config);
       
       // Update node
-      node.prompt = prompt;
-      node.changeLog = changeLog;
+      node.prompt = result.prompt;
+      node.changeLog = result.changeLog;
       node.status = 'awaiting';
+      
+      // Track costs
+      state.run.totals.tokensPrompt += result.cost.promptTokens;
+      state.run.totals.tokensCompletion += result.cost.completionTokens;
+      state.run.totals.usd += result.cost.usd;
+      state.run.totals.calls += result.cost.calls;
+      
+      // Send totals update
+      sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
       
       // Update in state
       const index = state.run.generations[0].findIndex(n => n.id === node.id);
@@ -574,10 +584,28 @@ async function moveToNextGeneration(
     .filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
     .sort((a, b) => b.metrics!.fitness! - a.metrics!.fitness!);
   
-  const topK = state.config.selection.topK || Math.ceil(sorted.length * 0.4);
-  const topPerformers = sorted.slice(0, topK);
-  
-  console.log(`[Evaluator] Selected ${topPerformers.length} top performers`);
+  let topPerformers: CandidateNode[];
+  if (state.config.selection.policy === 'topp') {
+    // Top-P selection
+    const topP = state.config.selection.topP || 0.5;
+    const totalFitness = sorted.reduce((sum, n) => sum + (n.metrics?.fitness || 0), 0);
+    let cumulative = 0;
+    let cutoff = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      cumulative += (sorted[i].metrics?.fitness || 0) / totalFitness;
+      if (cumulative >= topP) {
+        cutoff = i + 1;
+        break;
+      }
+    }
+    topPerformers = sorted.slice(0, Math.max(1, cutoff));
+    console.log(`[Evaluator] Selected ${topPerformers.length} top performers (Top-P=${topP})`);
+  } else {
+    // Top-K selection
+    const topK = state.config.selection.topK || Math.ceil(sorted.length * 0.4);
+    topPerformers = sorted.slice(0, topK);
+    console.log(`[Evaluator] Selected ${topPerformers.length} top performers (Top-K=${topK})`);
+  }
   
   if (topPerformers.length === 0) {
     console.log(`[Evaluator] No valid performers, stopping`);
@@ -590,21 +618,69 @@ async function moveToNextGeneration(
   state.run.generations.push([]);
   
   const newGenNodes: CandidateNode[] = [];
+  const mutationFactor = state.config.operators.mutationFactor;
+  const crossoverFactor = state.config.operators.crossoverFactor;
   
-  // TODO: Implement variation operators (mutations, crossover)
-  // For now, just carry forward top performers
+  // Apply variation operators
   for (let i = 0; i < topPerformers.length; i++) {
     const parent = topPerformers[i];
     const model = state.config.enabledModels[i % state.config.enabledModels.length];
+    
+    let prompt = parent.prompt;
+    let changeLog: ChangeLogLine[] = [];
+    
+    const rand = Math.random();
+    
+    try {
+      if (rand < crossoverFactor && topPerformers.length > 1) {
+        // Crossover
+        const parentB = topPerformers[Math.floor(Math.random() * topPerformers.length)];
+        const result = await crossoverNodes(parent, parentB, state.config);
+        prompt = result.prompt;
+        changeLog = result.changeLog;
+        
+        // Track costs
+        state.run.totals.tokensPrompt += result.cost.promptTokens;
+        state.run.totals.tokensCompletion += result.cost.completionTokens;
+        state.run.totals.usd += result.cost.usd;
+        state.run.totals.calls += result.cost.calls;
+        
+        sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+        console.log(`[Evaluator] Crossover for gen ${state.currentGeneration} node ${i}`);
+      } else if (rand < crossoverFactor + mutationFactor) {
+        // Mutation
+        const result = await mutateNode(parent.prompt, state.config);
+        prompt = result.prompt;
+        changeLog = result.changeLog;
+        
+        // Track costs
+        state.run.totals.tokensPrompt += result.cost.promptTokens;
+        state.run.totals.tokensCompletion += result.cost.completionTokens;
+        state.run.totals.usd += result.cost.usd;
+        state.run.totals.calls += result.cost.calls;
+        
+        sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+        console.log(`[Evaluator] Mutation for gen ${state.currentGeneration} node ${i}`);
+      } else {
+        // Carry forward
+        changeLog = [{ label: 'MUTATION', text: 'Carried forward (no variation)' }];
+        console.log(`[Evaluator] Carry forward for gen ${state.currentGeneration} node ${i}`);
+      }
+    } catch (error) {
+      console.error(`[Evaluator] Operator failed for gen ${state.currentGeneration} node ${i}:`, error);
+      // Fallback to parent
+      prompt = parent.prompt;
+      changeLog = [{ label: 'MUTATION', text: 'Operator failed, using parent' }];
+    }
     
     const newNode: CandidateNode = {
       id: uuidv4(),
       generation: state.currentGeneration,
       lineageParents: [parent.id],
       status: 'awaiting',
-      prompt: parent.prompt, // TODO: mutate
+      prompt,
       params: { model, temperature: 0.7 },
-      changeLog: [{ label: 'MUTATION', text: 'Carried forward (TODO: implement mutation)' }],
+      changeLog,
     };
     
     newGenNodes.push(newNode);

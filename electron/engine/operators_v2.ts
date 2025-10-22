@@ -93,9 +93,14 @@ function createAutoShellNodes(config: EvaluationConfig): CandidateNode[] {
 export async function mutateNode(
   basePrompt: string,
   config: EvaluationConfig
-): Promise<{ prompt: string; changeLog: ChangeLogLine[] }> {
+): Promise<{ prompt: string; changeLog: ChangeLogLine[]; cost: { promptTokens: number; completionTokens: number; usd: number; calls: number } }> {
   const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
+  
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
+  let totalUsd = 0;
+  let totalCalls = 0;
   
   try {
     // Step 1: Propose edits
@@ -112,6 +117,11 @@ Return JSON list of edits: [{"label":"MUTATION","edit":"..."}]`;
       temperature: 1.0,
       maxTokens,
     });
+    
+    totalPromptTokens += proposalResult.promptTokens;
+    totalCompletionTokens += proposalResult.completionTokens;
+    totalUsd += proposalResult.usd;
+    totalCalls++;
     
     if (!proposalResult.output || proposalResult.output.trim() === '') {
       throw new Error('Empty response from service model (proposal step)');
@@ -141,6 +151,11 @@ Produce the NEW prompt ONLY.`;
       maxTokens,
     });
     
+    totalPromptTokens += applyResult.promptTokens;
+    totalCompletionTokens += applyResult.completionTokens;
+    totalUsd += applyResult.usd;
+    totalCalls++;
+    
     if (!applyResult.output || applyResult.output.trim() === '') {
       throw new Error('Empty response from service model (apply step)');
     }
@@ -153,7 +168,16 @@ Produce the NEW prompt ONLY.`;
       text: e.edit || 'Unknown edit',
     }));
     
-    return { prompt: newPrompt, changeLog };
+    return {
+      prompt: newPrompt,
+      changeLog,
+      cost: {
+        promptTokens: totalPromptTokens,
+        completionTokens: totalCompletionTokens,
+        usd: totalUsd,
+        calls: totalCalls,
+      },
+    };
   } catch (error) {
     console.error('[Mutation] Failed:', error);
     throw error;
@@ -167,7 +191,7 @@ export async function crossoverNodes(
   parentA: CandidateNode,
   parentB: CandidateNode,
   config: EvaluationConfig
-): Promise<{ prompt: string; changeLog: ChangeLogLine[] }> {
+): Promise<{ prompt: string; changeLog: ChangeLogLine[]; cost: { promptTokens: number; completionTokens: number; usd: number; calls: number } }> {
   const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
   
@@ -197,6 +221,12 @@ Return the merged prompt ONLY.`;
       label: 'CROSSOVER' as const,
       text: `Merged ${parentA.id.slice(0, 8)} + ${parentB.id.slice(0, 8)}`,
     }],
+    cost: {
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens,
+      usd: result.usd,
+      calls: 1,
+    },
   };
 }
 
