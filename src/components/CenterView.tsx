@@ -42,8 +42,19 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
 
     const flowNodes: Node[] = [];
     const flowEdges: Edge[] = [];
-    const nodeSpacing = 250; // Vertical spacing between nodes
-    const generationSpacing = 350; // Horizontal spacing between generations
+    const nodeSpacing = 300; // Vertical spacing between nodes
+    const generationSpacing = 400; // Horizontal spacing between generations
+
+    // Find top 3 performers across ALL generations for ranking
+    const allFinishedNodes = evaluation.generations.flatMap(gen => 
+      gen.filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
+    ).sort((a, b) => (b.metrics?.fitness || 0) - (a.metrics?.fitness || 0));
+    
+    const topNodeIds = new Set([
+      allFinishedNodes[0]?.id,
+      allFinishedNodes[1]?.id,
+      allFinishedNodes[2]?.id,
+    ].filter(Boolean));
 
     // Create nodes for each candidate
     evaluation.generations.forEach((generation, genIndex) => {
@@ -51,38 +62,55 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
         const x = genIndex * generationSpacing;
         const y = nodeIndex * nodeSpacing;
 
-        // Determine node color based on status and fitness
-        let bgColor = '#1e1e1e'; // Dark card
-        let borderColor = '#3e3e3e';
-        let textColor = '#e0e0e0';
+        // Calculate total tokens
+        const totalTokens = (candidate.tests || []).reduce(
+          (sum, test) => sum + test.promptTokens + test.completionTokens,
+          0
+        );
         
-        if (candidate.status === 'finished' && candidate.metrics?.fitness !== undefined) {
-          const fitness = candidate.metrics.fitness;
-          if (fitness >= 9) {
-            bgColor = '#16a34a'; // Strong green
-            borderColor = '#15803d';
-            textColor = '#ffffff';
-          } else if (fitness >= 7) {
-            bgColor = '#ca8a04'; // Strong yellow/gold
-            borderColor = '#a16207';
-            textColor = '#ffffff';
-          } else {
-            bgColor = '#374151'; // Gray
-            borderColor = '#4b5563';
-            textColor = '#d1d5db';
-          }
-        } else if (candidate.status === 'running') {
-          bgColor = '#2563eb'; // Strong blue
+        // Calculate elapsed time
+        const elapsed = candidate.timings?.finishedAt && candidate.timings?.startedAt
+          ? ((candidate.timings.finishedAt - candidate.timings.startedAt) / 1000).toFixed(1)
+          : null;
+
+        // Determine rank-based colors (Gold/Silver/Bronze for top 3)
+        let bgColor = '#2a2a3e'; // Default: darker purple-blue
+        let borderColor = '#4a4a6e';
+        let textColor = '#e0e0e0';
+        let rankLabel = '';
+        
+        if (candidate.id === allFinishedNodes[0]?.id) {
+          // 🥇 Gold - 1st place
+          bgColor = 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)';
+          borderColor = '#FFD700';
+          textColor = '#000000';
+          rankLabel = '🥇';
+        } else if (candidate.id === allFinishedNodes[1]?.id) {
+          // 🥈 Silver - 2nd place
+          bgColor = 'linear-gradient(135deg, #C0C0C0 0%, #A8A8A8 100%)';
+          borderColor = '#C0C0C0';
+          textColor = '#000000';
+          rankLabel = '🥈';
+        } else if (candidate.id === allFinishedNodes[2]?.id) {
+          // 🥉 Bronze - 3rd place
+          bgColor = 'linear-gradient(135deg, #CD7F32 0%, #B8860B 100%)';
+          borderColor = '#CD7F32';
+          textColor = '#000000';
+          rankLabel = '🥉';
+        } else if (candidate.status === 'finished') {
+          bgColor = '#3a3a4e'; // Finished but not top 3
+          borderColor = '#5a5a7e';
+        } else if (candidate.status === 'in_progress') {
+          bgColor = '#2563eb'; // Blue for running
           borderColor = '#1d4ed8';
           textColor = '#ffffff';
-        } else if (candidate.status === 'error') {
-          bgColor = '#dc2626'; // Strong red
+        } else if (candidate.status === 'failed') {
+          bgColor = '#dc2626'; // Red for error
           borderColor = '#b91c1c';
           textColor = '#ffffff';
         } else if (candidate.status === 'pending') {
-          bgColor = '#6b7280'; // Lighter gray
-          borderColor = '#9ca3af';
-          textColor = '#e5e7eb';
+          bgColor = '#4a4a5e'; // Lighter gray for pending
+          borderColor = '#6a6a8e';
         }
 
         flowNodes.push({
@@ -91,27 +119,71 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
           position: { x, y },
           data: {
             label: (
-              <div className="text-xs" style={{ color: textColor }}>
-                <div className="font-semibold text-sm">G{genIndex}</div>
-                <div className="opacity-70 text-xs">{candidate.id.slice(0, 8)}</div>
-                {candidate.metrics?.fitness !== undefined && (
-                  <div className="font-bold mt-1 text-sm">F: {candidate.metrics.fitness.toFixed(2)}</div>
+              <div className="text-xs font-mono" style={{ color: textColor }}>
+                {/* Fitness Score + Medal at top */}
+                {candidate.metrics?.fitness !== undefined ? (
+                  <div className="flex items-center justify-center gap-2 mb-3">
+                    <span className="font-bold text-2xl">{candidate.metrics.fitness.toFixed(2)}</span>
+                    {rankLabel && <span className="text-2xl">{rankLabel}</span>}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 mb-3">
+                    <span className="opacity-50 text-sm">No score yet</span>
+                    {rankLabel && <span className="text-2xl">{rankLabel}</span>}
+                  </div>
                 )}
-                {candidate.status !== 'finished' && (
-                  <div className="opacity-80 capitalize text-xs mt-1">{candidate.status}</div>
-                )}
+                
+                {/* Gen + ID */}
+                <div className="text-center mb-2">
+                  <div className="font-semibold text-xs">Gen {genIndex}</div>
+                  <div className="opacity-70 text-[10px]">{candidate.id.slice(0, 8)}</div>
+                </div>
+                
+                {/* Other info */}
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span className="opacity-80">Status:</span>
+                    <span className="font-semibold capitalize text-[10px]">{candidate.status}</span>
+                  </div>
+                  
+                  {totalTokens > 0 && (
+                    <div className="flex justify-between">
+                      <span className="opacity-80">Tokens:</span>
+                      <span className="text-[10px]">{totalTokens.toLocaleString()}</span>
+                    </div>
+                  )}
+                  
+                  {elapsed && (
+                    <div className="flex justify-between">
+                      <span className="opacity-80">Time:</span>
+                      <span className="text-[10px]">{elapsed}s</span>
+                    </div>
+                  )}
+                  
+                  {candidate.params?.model && (
+                    <div className="flex justify-between">
+                      <span className="opacity-80">Model:</span>
+                      <span className="text-[10px] truncate max-w-[100px]">{candidate.params.model.model}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             ),
           },
           style: {
             background: bgColor,
-            borderColor: borderColor,
-            borderWidth: candidate.id === selectedNodeId ? 4 : 2,
             color: textColor,
-            padding: '12px',
-            borderRadius: '8px',
-            width: 160,
-            boxShadow: candidate.id === selectedNodeId ? '0 0 0 2px #3b82f6' : 'none',
+            border: `3px solid ${borderColor}`,
+            borderRadius: '12px',
+            padding: '16px',
+            width: 220,
+            height: 200,
+            cursor: 'pointer',
+            boxShadow: candidate.id === selectedNodeId 
+              ? '0 0 0 3px #3b82f6' 
+              : topNodeIds.has(candidate.id) 
+              ? `0 0 20px ${borderColor}80` 
+              : '0 4px 6px rgba(0, 0, 0, 0.3)',
           },
         });
 
