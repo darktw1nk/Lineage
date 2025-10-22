@@ -1,6 +1,6 @@
 import { X, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from './ui/button';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { UUID, EvaluationConfig } from '../types';
 import { useQuery } from '@tanstack/react-query';
 
@@ -13,6 +13,12 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(['selection', 'operators', 'models', 'tests', 'fitness', 'targets'])
   );
+  const [width, setWidth] = useState(() => {
+    const saved = localStorage.getItem('configPanelWidth');
+    return saved ? parseInt(saved, 10) : 384; // 384px = w-96
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const { data: config } = useQuery<EvaluationConfig | null>({
     queryKey: ['evaluation-config', evaluationId],
@@ -22,6 +28,39 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
     },
     enabled: !!evaluationId,
   });
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!panelRef.current) return;
+      const newWidth = window.innerWidth - e.clientX;
+      // Min width: 300px, Max width: 800px
+      const clampedWidth = Math.max(300, Math.min(800, newWidth));
+      setWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      localStorage.setItem('configPanelWidth', width.toString());
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    // Prevent text selection and show resize cursor globally while dragging
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, width]);
 
   if (!config) {
     return null;
@@ -38,7 +77,18 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
   };
 
   return (
-    <div className="flex h-full w-96 flex-col border-l bg-card">
+    <div 
+      ref={panelRef}
+      className="relative flex h-full flex-col border-l bg-card"
+      style={{ width: `${width}px` }}
+    >
+      {/* Resize Handle */}
+      <div
+        className="absolute left-0 top-0 h-full w-1 cursor-col-resize hover:bg-primary/50 active:bg-primary transition-colors"
+        onMouseDown={() => setIsResizing(true)}
+      />
+      
+      <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b p-4">
         <h2 className="text-lg font-semibold">Evaluation Config</h2>
@@ -287,6 +337,7 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
             )}
           </div>
         </CollapsibleSection>
+      </div>
       </div>
     </div>
   );
