@@ -197,21 +197,29 @@ async function mutatePopulationInBackground(
     }
   });
   
-  await Promise.all(mutationPromises);
-  
-  console.log(`[Evaluator] All mutations complete`);
-  
-  // Send population ready event
-  sendUpdate(runId, { type: 'population_ready' });
-  
-  // Add awaiting nodes to queue
-  state.queue = state.run.generations[0].filter(n => n.status === 'awaiting');
-  console.log(`[Evaluator] Queue initialized with ${state.queue.length} nodes`);
-  
-  // Start evaluation loop
-  if (state.status === 'running') {
-    console.log(`[Evaluator] Starting evaluation loop...`);
-    evaluationLoop(runId);
+  try {
+    await Promise.all(mutationPromises);
+    
+    console.log(`[Evaluator] All mutations complete`);
+    
+    // Send population ready event
+    sendUpdate(runId, { type: 'population_ready' });
+    
+    // Add awaiting nodes to queue
+    state.queue = state.run.generations[0].filter(n => n.status === 'awaiting');
+    console.log(`[Evaluator] Queue initialized with ${state.queue.length} nodes`);
+    console.log(`[Evaluator] Node statuses:`, state.run.generations[0].map(n => `${n.id.slice(0, 8)}=${n.status}`));
+    
+    // Start evaluation loop
+    if (state.status === 'running') {
+      console.log(`[Evaluator] Starting evaluation loop...`);
+      evaluationLoop(runId);
+    } else {
+      console.log(`[Evaluator] NOT starting evaluation loop, status=${state.status}`);
+    }
+  } catch (error) {
+    console.error(`[Evaluator] Background mutation error:`, error);
+    sendUpdate(runId, { type: 'error', message: `Background mutation failed: ${error}` });
   }
 }
 
@@ -220,9 +228,14 @@ async function mutatePopulationInBackground(
  */
 async function evaluationLoop(runId: UUID): Promise<void> {
   const state = activeEvaluations.get(runId);
-  if (!state) return;
+  if (!state) {
+    console.log(`[Evaluator] Evaluation loop called but state not found for ${runId.slice(0, 8)}`);
+    return;
+  }
   
-  console.log(`[Evaluator] Evaluation loop started`);
+  console.log(`[Evaluator] Evaluation loop started for ${runId.slice(0, 8)}`);
+  console.log(`[Evaluator] Queue length: ${state.queue.length}, InProgress: ${state.inProgress.size}`);
+  console.log(`[Evaluator] Call stack:`, new Error().stack);
   
   while (state.queue.length > 0 && state.status === 'running') {
     // Check stopping conditions
@@ -231,12 +244,20 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       return;
     }
     
-    // Process next batch of nodes (up to parallelLimit)
+    // Process next batch of nodes in parallel (up to parallelLimit)
+    // Global semaphore will ensure we don't exceed total API concurrency
     const batch = state.queue.splice(0, state.config.parallelLimit);
     
-    console.log(`[Evaluator] Processing batch of ${batch.length} nodes`);
+    console.log(`[Evaluator] Processing batch of ${batch.length} nodes in parallel`);
     
+    // Process all nodes in batch in parallel
     await Promise.all(batch.map(node => processNode(runId, node, state)));
+    
+    // Check if we were paused during the batch
+    if (state.status === 'pausing') {
+      console.log(`[Evaluator] Pause detected, exiting loop`);
+      break;
+    }
     
     // Check if generation is complete
     const currentGen = state.run.generations[state.currentGeneration];
@@ -268,8 +289,25 @@ async function evaluationLoop(runId: UUID): Promise<void> {
     }
   }
   
-  console.log(`[Evaluator] Evaluation loop finished`);
-  finishEvaluation(runId, state);
+  console.log(`[Evaluator] Evaluation loop exited (status=${state.status}, queue=${state.queue.length}, inProgress=${state.inProgress.size})`);
+  
+  // If we exited because of pause, wait for any remaining in-progress nodes
+  if (state.status === 'pausing') {
+    console.log(`[Evaluator] Pausing... waiting for ${state.inProgress.size} in-progress nodes to complete`);
+    
+    // Wait for all in-progress nodes to finish
+    while (state.inProgress.size > 0) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    console.log(`[Evaluator] All in-progress nodes completed, now fully paused`);
+    state.status = 'paused';
+    state.run.status = 'paused';
+    sendUpdate(runId, { type: 'status', status: 'paused' });
+  } else if (state.status === 'running') {
+    // Loop exited naturally (queue empty)
+    finishEvaluation(runId, state);
+  }
 }
 
 /**
@@ -823,10 +861,21 @@ export function pauseEvaluation(runId: UUID): void {
 export function resumeEvaluation(runId: UUID): void {
   const state = activeEvaluations.get(runId);
   if (state) {
+    console.log(`[Evaluator] Resume requested for ${runId.slice(0, 8)}, queue=${state.queue.length}, inProgress=${state.inProgress.size}`);
+    
     state.status = 'running';
     state.run.status = 'running';
     sendUpdate(runId, { type: 'status', status: 'running' });
-    evaluationLoop(runId);
+    
+    // Only start loop if there's work to do
+    // If queue is empty, the background mutation may still be in progress
+    if (state.queue.length > 0 || state.inProgress.size > 0) {
+      console.log(`[Evaluator] Starting evaluation loop on resume`);
+      evaluationLoop(runId);
+    } else {
+      console.log(`[Evaluator] No work to resume yet (mutations may still be in progress)`);
+      // The loop will be started when mutations complete
+    }
   }
 }
 

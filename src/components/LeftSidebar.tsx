@@ -1,7 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { Button } from './ui/button';
 import { Plus, Settings, Download, Upload, Trash2 } from 'lucide-react';
 import type { UUID, EvaluationRun } from '../types';
+import { useEvaluationStore } from '../store/evaluationStore';
 
 interface LeftSidebarProps {
   onNewEvaluation: () => void;
@@ -18,12 +20,23 @@ export function LeftSidebar({
 }: LeftSidebarProps) {
   const queryClient = useQueryClient();
   
-  const { data: evaluations = [] } = useQuery<EvaluationRun[]>({
+  // Get evaluations from database (for list of all evaluations)
+  const { data: dbEvaluations = [] } = useQuery<EvaluationRun[]>({
     queryKey: ['evaluations'],
     queryFn: async () => {
       return await window.electronAPI.eval.list();
     },
-    refetchInterval: 5000,
+    refetchInterval: 2000,
+  });
+  
+  // Get real-time data from Zustand store
+  const storeEvaluations = useEvaluationStore((state) => state.evaluations);
+  
+  // Merge: use store data for running evaluations, DB data for others
+  const evaluations = dbEvaluations.map(dbEval => {
+    const liveEval = storeEvaluations.get(dbEval.id);
+    // If evaluation is in store (active/subscribed), use live data
+    return liveEval || dbEval;
   });
   
   const exportMutation = useMutation({
@@ -198,9 +211,19 @@ function getBestScore(evaluation: EvaluationRun): number | null {
 }
 
 function getStatus(evaluation: EvaluationRun): string {
+  // Check explicit status first (running, pausing, paused, stopped)
+  if (evaluation.status) {
+    if (evaluation.status === 'stopped' && evaluation.stopReason) {
+      return evaluation.stopReason;
+    }
+    return evaluation.status;
+  }
+  
+  // Fallback: check if finished
   if (evaluation.finishedAt) {
     return evaluation.stopReason ?? 'finished';
   }
+  
   return 'running';
 }
 
@@ -208,13 +231,22 @@ function getStatusColor(status: string): string {
   switch (status) {
     case 'running':
       return 'text-blue-500';
+    case 'pausing':
+      return 'text-orange-500';
     case 'paused':
       return 'text-yellow-500';
+    case 'stopped':
+      return 'text-gray-500';
     case 'finished':
     case 'target':
       return 'text-green-500';
+    case 'budget':
+    case 'time':
+      return 'text-purple-500';
     case 'error':
       return 'text-red-500';
+    case 'manual':
+      return 'text-orange-500';
     default:
       return 'text-muted-foreground';
   }
