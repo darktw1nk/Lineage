@@ -59,10 +59,14 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
           model: opts.model,
         });
         
+        console.log(`[BaseAdapter] Cost entry for ${this.name}/${opts.model}:`, cost);
+        
         const usd = cost
           ? (result.promptTokens / 1000) * cost.promptUSDper1k +
             (result.completionTokens / 1000) * cost.completionUSDper1k
           : 0;
+        
+        console.log(`[BaseAdapter] Calculated USD: ${usd} (prompt: ${result.promptTokens}, completion: ${result.completionTokens})`);
         
         return {
           ...result,

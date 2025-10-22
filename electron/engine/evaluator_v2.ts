@@ -297,14 +297,19 @@ async function processNode(
     
     // Calculate cost and latency from test results
     const { getModelCost } = await import('../providers/costs.js');
+    const costEntry = await getModelCost(node.params.model);
+    console.log(`[processNode] Cost entry for ${node.params.model.provider}/${node.params.model.model}:`, costEntry);
+    
     let totalCost = 0;
     for (const test of node.tests) {
-      const costEntry = await getModelCost(node.params.model);
       if (costEntry) {
-        totalCost += (test.promptTokens / 1000) * costEntry.prompt_usd_per_1k;
-        totalCost += (test.completionTokens / 1000) * costEntry.completion_usd_per_1k;
+        const promptCost = (test.promptTokens / 1000) * costEntry.promptUSDper1k;
+        const completionCost = (test.completionTokens / 1000) * costEntry.completionUSDper1k;
+        console.log(`[processNode] Test ${test.testId}: prompt ${test.promptTokens} tokens = $${promptCost.toFixed(6)}, completion ${test.completionTokens} tokens = $${completionCost.toFixed(6)}`);
+        totalCost += promptCost + completionCost;
       }
     }
+    console.log(`[processNode] Total cost for node ${node.id}: $${totalCost}`);
     const avgLatency = node.timings.finishedAt - (node.timings.startedAt || 0);
     
     // Safety guardrails (if enabled)
