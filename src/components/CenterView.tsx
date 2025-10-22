@@ -44,6 +44,7 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
     const flowEdges: Edge[] = [];
     const nodeSpacing = 300; // Vertical spacing between nodes
     const generationSpacing = 400; // Horizontal spacing between generations
+    let edgeCounter = 0; // Global counter for unique edge IDs
 
     // Find top 3 performers across ALL generations for ranking
     const allFinishedNodes = evaluation.generations.flatMap(gen => 
@@ -192,7 +193,7 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
           candidate.lineageParents.forEach((parentId) => {
             const edgeColor = candidate.status === 'running' ? '#3b82f6' : '#4b5563';
             flowEdges.push({
-              id: `${parentId}-${candidate.id}`,
+              id: `edge-${edgeCounter++}`,
               source: parentId,
               target: candidate.id,
               type: 'smoothstep',

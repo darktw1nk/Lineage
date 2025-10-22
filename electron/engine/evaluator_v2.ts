@@ -808,19 +808,13 @@ async function moveToNextGeneration(
   state.run.generations[state.currentGeneration] = newGenNodes;
   state.queue.push(...newGenNodes);
   
-  // Send generation created event
+  // Send generation created event (includes all nodes, no need for individual node_created events)
   console.log(`[Evaluator] Sending generation_created event for gen ${state.currentGeneration} with ${newGenNodes.length} nodes`);
   sendUpdate(runId, {
     type: 'generation_created',
     generation: state.currentGeneration,
     nodes: newGenNodes,
   });
-  
-  // Also send individual node_created events for each node in the new generation
-  for (const node of newGenNodes) {
-    console.log(`[Evaluator] Sending node_created for node ${node.id.slice(0, 8)} in gen ${state.currentGeneration}`);
-    sendUpdate(runId, { type: 'node_created', node });
-  }
   
   console.log(`[Evaluator] Generation ${state.currentGeneration} created with ${newGenNodes.length} nodes`);
 }
