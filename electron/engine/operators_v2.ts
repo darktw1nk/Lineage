@@ -131,9 +131,14 @@ Return JSON list of edits: [{"label":"MUTATION","edit":"..."}]`;
     let edits: any[];
     try {
       const cleaned = proposalResult.output.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+      console.log(`[Mutation] Raw output:`, proposalResult.output);
+      console.log(`[Mutation] Cleaned output:`, cleaned);
       edits = JSON.parse(cleaned);
-    } catch {
-      throw new Error('Failed to parse edit proposals as JSON');
+      console.log(`[Mutation] Parsed edits:`, edits);
+    } catch (error) {
+      console.error(`[Mutation] Parse error:`, error);
+      console.error(`[Mutation] Failed to parse:`, proposalResult.output);
+      throw new Error(`Failed to parse edit proposals as JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
     
     // Step 2: Apply edits
@@ -283,9 +288,14 @@ Return JSON edits: [{"label":"META","edit":"..."}]`;
   let edits: any[];
   try {
     const cleaned = proposalResult.output.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+    console.log(`[MetaPrompt] Raw output:`, proposalResult.output);
+    console.log(`[MetaPrompt] Cleaned output:`, cleaned);
     edits = JSON.parse(cleaned);
-  } catch {
-    throw new Error('Failed to parse meta-prompt edits');
+    console.log(`[MetaPrompt] Parsed edits:`, edits);
+  } catch (error) {
+    console.error(`[MetaPrompt] Parse error:`, error);
+    console.error(`[MetaPrompt] Failed to parse:`, proposalResult.output);
+    throw new Error(`Failed to parse meta-prompt edits: ${error instanceof Error ? error.message : String(error)}`);
   }
   
   // Apply edits

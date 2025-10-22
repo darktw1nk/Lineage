@@ -127,11 +127,15 @@ Return: {"score": <0..10>, "violations": ["..."]}`;
         jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
       }
       
+      console.log(`[Safety Check] Raw output:`, result.output);
+      console.log(`[Safety Check] Cleaned JSON:`, jsonText);
+      
       const parsed = JSON.parse(jsonText);
       const score = Math.max(0, Math.min(10, parsed.score || 10));
       scores.push(score);
     } catch (error) {
-      console.error('Guardrail check failed:', error);
+      console.error(`[Safety Check] Parse error:`, error);
+      console.error(`[Safety Check] Failed to parse:`, result.output);
       // On error, assume failing (low score)
       scores.push(5);
     }
