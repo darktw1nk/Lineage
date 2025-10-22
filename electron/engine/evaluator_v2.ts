@@ -296,10 +296,10 @@ async function processNode(
     node.timings.finishedAt = Date.now();
     
     // Calculate cost and latency from test results
-    const { getCostForModel } = await import('../providers/costs.js');
+    const { getModelCost } = await import('../providers/costs.js');
     let totalCost = 0;
     for (const test of node.tests) {
-      const costEntry = getCostForModel(node.params.model);
+      const costEntry = await getModelCost(node.params.model);
       if (costEntry) {
         totalCost += (test.promptTokens / 1000) * costEntry.prompt_usd_per_1k;
         totalCost += (test.completionTokens / 1000) * costEntry.completion_usd_per_1k;
@@ -392,6 +392,18 @@ async function processNode(
     node.status = 'finished';
     
     console.log(`[Evaluator] Node ${node.id.slice(0, 8)} finished, quality=${fitnessResult.quality.toFixed(2)}, cost=$${totalCost.toFixed(4)}, latency=${avgLatency}ms, fitness=${node.metrics.fitness?.toFixed(2)}`);
+    
+    // Track operator effectiveness
+    const operatorType = (node as any)._operatorType;
+    const parentFitness = (node as any)._parentFitness;
+    if (operatorType && parentFitness !== undefined && node.metrics?.fitness !== undefined) {
+      const fitnessDelta = node.metrics.fitness - parentFitness;
+      state.operatorEffectiveness[operatorType].totalDelta += fitnessDelta;
+      state.operatorEffectiveness[operatorType].count++;
+      
+      const avgDelta = state.operatorEffectiveness[operatorType].totalDelta / state.operatorEffectiveness[operatorType].count;
+      console.log(`[Evaluator] Operator effectiveness [${operatorType}]: avgΔ=${avgDelta.toFixed(3)} (count=${state.operatorEffectiveness[operatorType].count})`);
+    }
   } catch (error) {
     console.error(`[Evaluator] Node ${node.id.slice(0, 8)} failed:`, error);
     node.status = 'failed';
@@ -413,6 +425,21 @@ async function runTests(
 ): Promise<TestResult[]> {
   const adapter = getProviderAdapter(node.params.model.provider);
   const maxTokens = (state.config as any).serviceModelMaxTokens || 20000;
+  
+  // Generate cache key: hash(prompt, model, temperature, testSet signature)
+  const crypto = await import('crypto');
+  const testSetSig = state.config.testSet.map(t => t.id).join(',');
+  const cacheKey = crypto.createHash('sha256')
+    .update(`${node.prompt}|${node.params.model.provider}/${node.params.model.model}|${node.params.temperature}|${testSetSig}`)
+    .digest('hex');
+
+  // Check cache
+  if (state.cache.has(cacheKey)) {
+    console.log(`[Evaluator] Cache hit for node ${node.id.slice(0, 8)}`);
+    state.run.cacheHits++;
+    sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+    return state.cache.get(cacheKey)!;
+  }
   
   // Run all tests in parallel
   const testPromises = state.config.testSet.map(async (test) => {
@@ -517,7 +544,13 @@ async function runTests(
     return testResult;
   });
   
-  return Promise.all(testPromises);
+  const results = await Promise.all(testPromises);
+  
+  // Store in cache
+  state.cache.set(cacheKey, results);
+  console.log(`[Evaluator] Cached results for node ${node.id.slice(0, 8)}`);
+  
+  return results;
 }
 
 /**
@@ -622,22 +655,44 @@ async function moveToNextGeneration(
   const crossoverFactor = state.config.operators.crossoverFactor;
   
   // Apply variation operators
+  const metaPromptShare = state.config.operators.metaPrompting?.enabled ? (state.config.operators.metaPrompting.share || 0.2) : 0;
+  const paramVariationShare = state.config.operators.paramVariation?.enabled ? (state.config.operators.paramVariation.share || 0.2) : 0;
+  
   for (let i = 0; i < topPerformers.length; i++) {
     const parent = topPerformers[i];
     const model = state.config.enabledModels[i % state.config.enabledModels.length];
+    const parentFitness = parent.metrics?.fitness || 0;
     
     let prompt = parent.prompt;
     let changeLog: ChangeLogLine[] = [];
+    let temperature = 0.7; // Default
+    let operatorType: 'mutation' | 'crossover' | 'meta' | 'param' | null = null;
     
     const rand = Math.random();
     
     try {
-      if (rand < crossoverFactor && topPerformers.length > 1) {
+      if (rand < metaPromptShare && state.config.operators.metaPrompting?.enabled) {
+        // Meta-prompting (targeted edits based on failures)
+        const result = await metaPromptNode(parent, state.config, currentGen);
+        prompt = result.prompt;
+        changeLog = result.changeLog;
+        operatorType = 'meta';
+        
+        // Track costs
+        state.run.totals.tokensPrompt += result.cost.promptTokens;
+        state.run.totals.tokensCompletion += result.cost.completionTokens;
+        state.run.totals.usd += result.cost.usd;
+        state.run.totals.calls += result.cost.calls;
+        
+        sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+        console.log(`[Evaluator] Meta-prompting for gen ${state.currentGeneration} node ${i}`);
+      } else if (rand < metaPromptShare + crossoverFactor && topPerformers.length > 1) {
         // Crossover
         const parentB = topPerformers[Math.floor(Math.random() * topPerformers.length)];
         const result = await crossoverNodes(parent, parentB, state.config);
         prompt = result.prompt;
         changeLog = result.changeLog;
+        operatorType = 'crossover';
         
         // Track costs
         state.run.totals.tokensPrompt += result.cost.promptTokens;
@@ -647,11 +702,12 @@ async function moveToNextGeneration(
         
         sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
         console.log(`[Evaluator] Crossover for gen ${state.currentGeneration} node ${i}`);
-      } else if (rand < crossoverFactor + mutationFactor) {
+      } else if (rand < metaPromptShare + crossoverFactor + mutationFactor) {
         // Mutation
         const result = await mutateNode(parent.prompt, state.config);
         prompt = result.prompt;
         changeLog = result.changeLog;
+        operatorType = 'mutation';
         
         // Track costs
         state.run.totals.tokensPrompt += result.cost.promptTokens;
@@ -673,17 +729,33 @@ async function moveToNextGeneration(
       changeLog = [{ label: 'MUTATION', text: 'Operator failed, using parent' }];
     }
     
+    // Parameter variation (temperature)
+    if (state.config.operators.paramVariation?.enabled && Math.random() < paramVariationShare) {
+      const tempConfig = state.config.operators.paramVariation.temperature;
+      const min = tempConfig.min || 0.3;
+      const max = tempConfig.max || 1.5;
+      temperature = min + Math.random() * (max - min);
+      changeLog.push({ label: 'PARAM', text: `Temperature varied to ${temperature.toFixed(2)}` });
+      if (!operatorType) operatorType = 'param';
+      console.log(`[Evaluator] Parameter variation for gen ${state.currentGeneration} node ${i}: temp=${temperature.toFixed(2)}`);
+    }
+    
     const newNode: CandidateNode = {
       id: uuidv4(),
       generation: state.currentGeneration,
       lineageParents: [parent.id],
       status: 'awaiting',
       prompt,
-      params: { model, temperature: 0.7 },
+      params: { model, temperature },
       changeLog,
     };
     
     newGenNodes.push(newNode);
+    
+    // Track operator effectiveness (will update after this node is evaluated)
+    // Store parent fitness and operator type for later delta calculation
+    (newNode as any)._operatorType = operatorType;
+    (newNode as any)._parentFitness = parentFitness;
   }
   
   // Add to generation and queue

@@ -235,17 +235,33 @@ Return the merged prompt ONLY.`;
  */
 export async function metaPromptNode(
   parent: CandidateNode,
-  failures: string[],
-  config: EvaluationConfig
-): Promise<{ prompt: string; changeLog: ChangeLogLine[] }> {
+  config: EvaluationConfig,
+  generation: CandidateNode[]
+): Promise<{ prompt: string; changeLog: ChangeLogLine[]; cost: { promptTokens: number; completionTokens: number; usd: number; calls: number } }> {
   const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
+  
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
+  let totalUsd = 0;
+  let totalCalls = 0;
+  
+  // Extract top 3 failures from generation
+  const failed = generation
+    .filter(n => n.tests && n.tests.some(t => !t.passed))
+    .slice(0, 3)
+    .map(n => {
+      const failedTests = n.tests!.filter(t => !t.passed);
+      return `${failedTests.length} tests failed with avg score ${(failedTests.reduce((s, t) => s + t.score, 0) / failedTests.length).toFixed(1)}`;
+    });
+  
+  const failureSummary = failed.length > 0 ? failed.join(', ') : 'No specific failures identified';
   
   const metaPrompt = `SYSTEM: You are a prompt surgeon. Suggest surgical changes based on failures.
 USER: Parent Prompt: <<<
 ${parent.prompt}
 >>>
-Top failures: ${failures.join(', ')}
+Top failures: ${failureSummary}
 Return JSON edits: [{"label":"META","edit":"..."}]`;
   
   const proposalResult = await serviceAdapter.call({
@@ -254,6 +270,11 @@ Return JSON edits: [{"label":"META","edit":"..."}]`;
     temperature: 0.8,
     maxTokens,
   });
+  
+  totalPromptTokens += proposalResult.promptTokens;
+  totalCompletionTokens += proposalResult.completionTokens;
+  totalUsd += proposalResult.usd;
+  totalCalls++;
   
   if (!proposalResult.output || proposalResult.output.trim() === '') {
     throw new Error('Empty response from meta-prompting');
@@ -282,6 +303,11 @@ Produce the NEW prompt ONLY.`;
     maxTokens,
   });
   
+  totalPromptTokens += applyResult.promptTokens;
+  totalCompletionTokens += applyResult.completionTokens;
+  totalUsd += applyResult.usd;
+  totalCalls++;
+  
   if (!applyResult.output || applyResult.output.trim() === '') {
     throw new Error('Empty response from meta-prompt apply');
   }
@@ -292,6 +318,12 @@ Produce the NEW prompt ONLY.`;
       label: 'META' as const,
       text: e.edit || 'Unknown meta-edit',
     })),
+    cost: {
+      promptTokens: totalPromptTokens,
+      completionTokens: totalCompletionTokens,
+      usd: totalUsd,
+      calls: totalCalls,
+    },
   };
 }
 
