@@ -42,8 +42,8 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
 
     const flowNodes: Node[] = [];
     const flowEdges: Edge[] = [];
-    const nodeSpacing = 300; // Vertical spacing between nodes
-    const generationSpacing = 400; // Horizontal spacing between generations
+    const nodeSpacing = 300; // Horizontal spacing between nodes
+    const generationSpacing = 400; // Vertical spacing between generations
     let edgeCounter = 0; // Global counter for unique edge IDs
 
     // Find top 3 performers across ALL generations for ranking
@@ -60,8 +60,8 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
     // Create nodes for each candidate
     evaluation.generations.forEach((generation, genIndex) => {
       generation.forEach((candidate, nodeIndex) => {
-        const x = genIndex * generationSpacing;
-        const y = nodeIndex * nodeSpacing;
+        const x = nodeIndex * nodeSpacing;
+        const y = genIndex * generationSpacing;
 
         // Calculate total tokens
         const totalTokens = (candidate.tests || []).reduce(
