@@ -366,7 +366,8 @@ async function processNode(
       }
     }
     console.log(`[processNode] Total cost for node ${node.id}: $${totalCost}`);
-    const avgLatency = node.timings.finishedAt - (node.timings.startedAt || 0);
+    // Sum all test latencies (includes cached latencies from previous runs)
+    const totalLatency = node.tests.reduce((sum, r) => sum + r.latencyMs, 0);
     
     // Safety guardrails (if enabled)
     let safetyScore: number | undefined = undefined;
@@ -434,7 +435,7 @@ async function processNode(
     // Set metrics before calculating fitness
     node.metrics = {
       costUSD: totalCost,
-      latencyMs: avgLatency,
+      latencyMs: totalLatency,
       safety: safetyScore,
       stability: stabilityScore,
     };
@@ -445,14 +446,14 @@ async function processNode(
       quality: fitnessResult.quality,
       safety: safetyScore,
       costUSD: totalCost,
-      latencyMs: avgLatency,
+      latencyMs: totalLatency,
       stability: stabilityScore,
       fitness: fitnessResult.fitness,
     };
     
     node.status = 'finished';
     
-    console.log(`[Evaluator] Node ${node.id.slice(0, 8)} finished, quality=${fitnessResult.quality.toFixed(2)}, cost=$${totalCost.toFixed(4)}, latency=${avgLatency}ms, fitness=${node.metrics.fitness?.toFixed(2)}`);
+    console.log(`[Evaluator] Node ${node.id.slice(0, 8)} finished, quality=${fitnessResult.quality.toFixed(2)}, cost=$${totalCost.toFixed(4)}, latency=${totalLatency}ms, fitness=${node.metrics.fitness?.toFixed(2)}`);
     
     // Track operator effectiveness
     const operatorType = (node as any)._operatorType;
@@ -601,6 +602,7 @@ async function runTests(
       score,
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
+      latencyMs: result.latencyMs,
       outputText: result.output,
       llmGradeReasoning,
     };

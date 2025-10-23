@@ -28,6 +28,7 @@ export interface TestResult {
   score: number; // 0..10
   promptTokens: number;
   completionTokens: number;
+  latencyMs: number; // execution time for this test
   rawResponsePath?: string; // persisted blob if raw capture enabled
   outputText?: string;
   llmGradeReasoning?: string; // raw LLM judge response for llm-graded tests
