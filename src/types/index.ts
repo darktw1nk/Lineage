@@ -8,7 +8,7 @@ export interface ModelRef {
   model: string; // e.g., 'gpt-4', 'claude-3-5-sonnet', 'gemini-1.5-pro'
 }
 
-export type NodeStatus = 'awaiting' | 'in_progress' | 'finished' | 'failed' | 'skipped';
+export type NodeStatus = 'awaiting' | 'pending' | 'in_progress' | 'finished' | 'failed' | 'skipped';
 
 export interface TestCase {
   id: UUID;
@@ -107,7 +107,7 @@ export interface EvaluationRun {
   startedAt: number;
   finishedAt?: number;
   stopReason?: 'time' | 'budget' | 'target' | 'manual' | 'exhausted' | 'error' | 'generations';
-  status?: 'running' | 'paused' | 'stopped' | 'pausing';
+  status?: 'running' | 'paused' | 'stopped' | 'pausing' | 'finished';
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
   generations: CandidateNode[][]; // 2D grid
   cacheHits: number;

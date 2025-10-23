@@ -36,10 +36,14 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
   useEffect(() => {
     if (!evaluation) return;
     
-    // Only update timer for running/pausing, not for paused/stopped/finished
-    const isActive = evaluation.status === 'running' || evaluation.status === 'pausing';
-    if (!isActive && evaluation.finishedAt) return; // finished
-    if (!isActive && (evaluation.status === 'paused' || evaluation.status === 'stopped')) return; // paused/stopped
+    // Stop timer for paused, stopped, finished, or when finishedAt is set
+    if (evaluation.status === 'paused') return;
+    if (evaluation.status === 'stopped') return;
+    if (evaluation.status === 'finished') return;
+    if (evaluation.finishedAt) return;
+    
+    // Only run timer for running or pausing
+    if (evaluation.status !== 'running' && evaluation.status !== 'pausing') return;
     
     const interval = setInterval(() => {
       setCurrentTime(Date.now());
@@ -60,7 +64,6 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
   const status = evaluation.status || (evaluation.finishedAt ? 'stopped' : 'running');
   const isPaused = status === 'paused';
   const isPausing = status === 'pausing';
-  const isRunning = status === 'running';
   const isStopped = status === 'stopped' || status === 'finished' || !!evaluation.stopReason;
   
   // Calculate elapsed time (excluding paused time)

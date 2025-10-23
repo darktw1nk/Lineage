@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Button } from './ui/button';
 import { Plus, Settings, Download, Upload, Trash2, FileText } from 'lucide-react';
 import type { UUID, EvaluationRun } from '../types';
@@ -37,6 +37,7 @@ export function LeftSidebar({
 }: LeftSidebarProps) {
   const queryClient = useQueryClient();
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const frozenTimesRef = useRef<Map<string, number>>(new Map());
   
   // Update current time every second for running evaluations
   useEffect(() => {
@@ -132,21 +133,33 @@ export function LeftSidebar({
           const status = getStatus(evaluation);
           
           // Calculate elapsed time (excluding paused time)
-          // Backend tracks totalPausedMs and sends pausedAt when paused
           let elapsedMs: number;
           if (evaluation.finishedAt) {
-            // Finished - use final time minus total paused
+            // Finished - use final time (FROZEN)
             elapsedMs = (evaluation.finishedAt - evaluation.startedAt) - (evaluation.totalPausedMs || 0);
+            // Clear frozen time
+            frozenTimesRef.current.delete(evaluation.id);
           } else if (status === 'paused' && evaluation.pausedAt) {
-            // Currently paused - add current pause duration to total
+            // Currently paused - freeze time
             const currentPauseDuration = currentTime - evaluation.pausedAt;
             const totalPaused = (evaluation.totalPausedMs || 0) + currentPauseDuration;
             const wallClockMs = currentTime - evaluation.startedAt;
             elapsedMs = wallClockMs - totalPaused;
-          } else {
-            // Running, pausing - calculate wall-clock time minus total paused
+          } else if (status === 'running' || status === 'pausing') {
+            // Running or pausing - calculate live time
             const wallClockMs = currentTime - evaluation.startedAt;
             elapsedMs = wallClockMs - (evaluation.totalPausedMs || 0);
+            // Clear frozen time
+            frozenTimesRef.current.delete(evaluation.id);
+          } else {
+            // Stopped, finished, or other - use frozen time or capture it now
+            if (frozenTimesRef.current.has(evaluation.id)) {
+              elapsedMs = frozenTimesRef.current.get(evaluation.id)!;
+            } else {
+              const wallClockMs = currentTime - evaluation.startedAt;
+              elapsedMs = wallClockMs - (evaluation.totalPausedMs || 0);
+              frozenTimesRef.current.set(evaluation.id, elapsedMs);
+            }
           }
           const elapsedTime = formatElapsedTimeCompact(elapsedMs);
           

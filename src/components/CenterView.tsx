@@ -191,20 +191,20 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
         // Create edges from parents
         if (candidate.lineageParents && candidate.lineageParents.length > 0) {
           candidate.lineageParents.forEach((parentId) => {
-            const edgeColor = candidate.status === 'running' ? '#3b82f6' : '#4b5563';
+            const edgeColor = candidate.status === 'in_progress' ? '#3b82f6' : '#4b5563';
             flowEdges.push({
               id: `edge-${edgeCounter++}`,
               source: parentId,
               target: candidate.id,
-              type: 'smoothstep',
-              animated: candidate.status === 'running',
+              type: 'simplebezier',
+              animated: candidate.status === 'in_progress',
               markerEnd: {
                 type: MarkerType.ArrowClosed,
                 color: edgeColor,
               },
               style: {
                 stroke: edgeColor,
-                strokeWidth: candidate.status === 'running' ? 3 : 2,
+                strokeWidth: candidate.status === 'in_progress' ? 3 : 2,
               },
             });
           });
