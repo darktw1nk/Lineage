@@ -28,7 +28,7 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
   const currentGeneration = evaluation.generations.length;
   const status = evaluation.status || (evaluation.finishedAt ? 'stopped' : 'running');
   const isPaused = status === 'paused';
-  const isStopped = status === 'stopped' || !!evaluation.stopReason;
+  const isStopped = status === 'stopped' || status === 'finished' || !!evaluation.stopReason;
   
   const handlePauseResume = async () => {
     if (isPaused) {
@@ -66,6 +66,10 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
           <div className="text-sm font-medium">
             {evaluation.stopReason
               ? `Stopped: ${evaluation.stopReason}`
+              : status === 'finished'
+              ? 'Finished'
+              : status === 'pausing'
+              ? 'Pausing...'
               : isPaused
               ? 'Paused'
               : 'Running'}
