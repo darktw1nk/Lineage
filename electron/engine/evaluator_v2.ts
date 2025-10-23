@@ -74,6 +74,66 @@ function trackServiceCost(
 }
 
 /**
+ * Check if relative mode is enabled for any metric
+ */
+function isRelativeModeEnabled(config: EvaluationConfig): boolean {
+  const costRelative = config.fitness.costNorm?.mode === 'relative' && (config.fitness.weights.cost || 0) > 0;
+  const latencyRelative = config.fitness.latencyNorm?.mode === 'relative' && (config.fitness.weights.latency || 0) > 0;
+  return costRelative || latencyRelative;
+}
+
+/**
+ * Recalculate fitness for all finished nodes using current max values (for relative mode)
+ */
+function recalculateAllFitness(runId: UUID, state: EvaluationState): void {
+  // Collect all finished nodes across all generations
+  const finishedNodes: CandidateNode[] = [];
+  for (const generation of state.run.generations) {
+    for (const node of generation) {
+      if (node.status === 'finished' && node.metrics) {
+        finishedNodes.push(node);
+      }
+    }
+  }
+  
+  if (finishedNodes.length === 0) return;
+  
+  // Calculate dynamic max values from all finished nodes
+  let maxCost: number | undefined;
+  let maxLatency: number | undefined;
+  
+  if (state.config.fitness.costNorm?.mode === 'relative' && (state.config.fitness.weights.cost || 0) > 0) {
+    maxCost = Math.max(...finishedNodes.map(n => n.metrics?.costUSD || 0).filter(c => c > 0));
+    console.log(`[Fitness Recalc] Dynamic max cost: $${maxCost.toFixed(6)} (from ${finishedNodes.length} nodes)`);
+  }
+  
+  if (state.config.fitness.latencyNorm?.mode === 'relative' && (state.config.fitness.weights.latency || 0) > 0) {
+    maxLatency = Math.max(...finishedNodes.map(n => n.metrics?.latencyMs || 0).filter(l => l > 0));
+    console.log(`[Fitness Recalc] Dynamic max latency: ${maxLatency.toFixed(1)}ms (from ${finishedNodes.length} nodes)`);
+  }
+  
+  // Recalculate fitness for all finished nodes
+  let recalculated = 0;
+  for (const node of finishedNodes) {
+    const fitnessResult = calculateFitness(node, state.config, maxCost, maxLatency);
+    if (node.metrics) {
+      const oldFitness = node.metrics.fitness;
+      node.metrics.fitness = fitnessResult.fitness;
+      const fitnessChanged = Math.abs((oldFitness || 0) - fitnessResult.fitness) > 0.001;
+      if (fitnessChanged) {
+        recalculated++;
+        console.log(`[Fitness Recalc] Node ${node.id.slice(0, 8)}: ${(oldFitness || 0).toFixed(3)} → ${fitnessResult.fitness.toFixed(3)}`);
+      }
+      // Always send update for all nodes to ensure UI is in sync
+      sendUpdate(runId, { type: 'node_updated', node });
+    }
+  }
+  
+  console.log(`[Fitness Recalc] Sent updates for ${finishedNodes.length} nodes (${recalculated} changed)`);
+}
+}
+
+/**
  * Main entry point: Start evaluation
  * Returns immediately after sending shell nodes to UI
  */
@@ -344,6 +404,8 @@ async function processNode(
   
   sendUpdate(runId, { type: 'node_updated', node });
   
+  let skipFinalUpdate = false; // Will be set to true if we call recalculateAllFitness
+  
   try {
     // Run all tests
     node.tests = await runTests(runId, node, state);
@@ -441,6 +503,7 @@ async function processNode(
     };
     
     // Calculate fitness (uses node.tests and node.metrics)
+    // Note: Initial calculation uses absolute values if set, will be recalculated below if relative mode
     const fitnessResult = calculateFitness(node, state.config);
     node.metrics = {
       quality: fitnessResult.quality,
@@ -454,6 +517,13 @@ async function processNode(
     node.status = 'finished';
     
     console.log(`[Evaluator] Node ${node.id.slice(0, 8)} finished, quality=${fitnessResult.quality.toFixed(2)}, cost=$${totalCost.toFixed(4)}, latency=${totalLatency}ms, fitness=${node.metrics.fitness?.toFixed(2)}`);
+    
+    // If relative mode is enabled for cost or latency, recalculate fitness for ALL finished nodes
+    // This will update node.metrics.fitness in place and send updates for all nodes
+    skipFinalUpdate = isRelativeModeEnabled(state.config);
+    if (skipFinalUpdate) {
+      recalculateAllFitness(runId, state);
+    }
     
     // Track operator effectiveness
     const operatorType = (node as any)._operatorType;
@@ -474,7 +544,10 @@ async function processNode(
   
   state.inProgress.delete(node.id);
   
-  sendUpdate(runId, { type: 'node_updated', node });
+  // Only send update if we didn't already send it in recalculateAllFitness
+  if (!skipFinalUpdate) {
+    sendUpdate(runId, { type: 'node_updated', node });
+  }
 }
 
 /**

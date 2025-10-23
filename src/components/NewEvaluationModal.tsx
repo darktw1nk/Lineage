@@ -79,8 +79,8 @@ Here is the bug report:
         stability: 0,
       },
       guardrails: [],
-      costNorm: { maxUSDPerCall: 0.1 },
-      latencyNorm: { maxMs: 5000 },
+      costNorm: { mode: 'absolute', maxUSDPerCall: 0.1 },
+      latencyNorm: { mode: 'absolute', maxMs: 30000 },
     },
     targets: {
       timeLimitMs: 3600000, // 1 hour
@@ -1051,13 +1051,62 @@ function FitnessTab({ config, setConfig }: TabProps) {
         />
         <Label htmlFor="cost-enabled">Cost</Label>
         {(weights.cost || 0) > 0 && (
-          <Input
-            type="number"
-            step="0.1"
-            value={weights.cost || 0}
-            onChange={(e) => setWeight('cost', parseFloat(e.target.value) || 0)}
-            className="w-24"
-          />
+          <>
+            <Input
+              type="number"
+              step="0.1"
+              value={weights.cost || 0}
+              onChange={(e) => setWeight('cost', parseFloat(e.target.value) || 0)}
+              className="w-24"
+            />
+            <select
+              className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+              value={config.fitness?.costNorm?.mode || 'absolute'}
+              onChange={(e) => {
+                setConfig({
+                  ...config,
+                  fitness: {
+                    ...config.fitness!,
+                    costNorm: {
+                      mode: e.target.value as 'absolute' | 'relative',
+                      maxUSDPerCall: config.fitness?.costNorm?.maxUSDPerCall || 0.1,
+                    },
+                  },
+                });
+              }}
+            >
+              <option value="absolute">Absolute</option>
+              <option value="relative">Relative</option>
+            </select>
+            {config.fitness?.costNorm?.mode === 'absolute' && (
+              <>
+                <Label htmlFor="cost-norm-max" className="text-xs text-muted-foreground whitespace-nowrap">
+                  Max $
+                </Label>
+                <Input
+                  id="cost-norm-max"
+                  type="number"
+                  step="0.01"
+                  min="0.001"
+                  value={config.fitness?.costNorm?.maxUSDPerCall || 0.1}
+                  onChange={(e) => {
+                    setConfig({
+                      ...config,
+                      fitness: {
+                        ...config.fitness!,
+                        costNorm: {
+                          mode: config.fitness?.costNorm?.mode || 'absolute',
+                          maxUSDPerCall: parseFloat(e.target.value) || 0.1,
+                        },
+                      },
+                    });
+                  }}
+                  className="w-24"
+                  placeholder="0.1"
+                />
+              </>
+            )}
+          </>
         )}
       </div>
 
@@ -1069,13 +1118,62 @@ function FitnessTab({ config, setConfig }: TabProps) {
         />
         <Label htmlFor="latency-enabled">Latency</Label>
         {(weights.latency || 0) > 0 && (
-          <Input
-            type="number"
-            step="0.1"
-            value={weights.latency || 0}
-            onChange={(e) => setWeight('latency', parseFloat(e.target.value) || 0)}
-            className="w-24"
-          />
+          <>
+            <Input
+              type="number"
+              step="0.1"
+              value={weights.latency || 0}
+              onChange={(e) => setWeight('latency', parseFloat(e.target.value) || 0)}
+              className="w-24"
+            />
+            <select
+              className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+              value={config.fitness?.latencyNorm?.mode || 'absolute'}
+              onChange={(e) => {
+                setConfig({
+                  ...config,
+                  fitness: {
+                    ...config.fitness!,
+                    latencyNorm: {
+                      mode: e.target.value as 'absolute' | 'relative',
+                      maxMs: config.fitness?.latencyNorm?.maxMs || 30000,
+                    },
+                  },
+                });
+              }}
+            >
+              <option value="absolute">Absolute</option>
+              <option value="relative">Relative</option>
+            </select>
+            {config.fitness?.latencyNorm?.mode === 'absolute' && (
+              <>
+                <Label htmlFor="latency-norm-max" className="text-xs text-muted-foreground whitespace-nowrap">
+                  Max ms
+                </Label>
+                <Input
+                  id="latency-norm-max"
+                  type="number"
+                  step="1000"
+                  min="100"
+                  value={config.fitness?.latencyNorm?.maxMs || 30000}
+                  onChange={(e) => {
+                    setConfig({
+                      ...config,
+                      fitness: {
+                        ...config.fitness!,
+                        latencyNorm: {
+                          mode: config.fitness?.latencyNorm?.mode || 'absolute',
+                          maxMs: parseFloat(e.target.value) || 30000,
+                        },
+                      },
+                    });
+                  }}
+                  className="w-32"
+                  placeholder="30000"
+                />
+              </>
+            )}
+          </>
         )}
       </div>
 

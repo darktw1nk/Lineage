@@ -12,7 +12,9 @@ export interface FitnessResult {
 
 export function calculateFitness(
   node: CandidateNode,
-  config: EvaluationConfig
+  config: EvaluationConfig,
+  dynamicMaxCost?: number,  // For relative mode
+  dynamicMaxLatency?: number // For relative mode
 ): FitnessResult {
   const weights = config.fitness.weights;
   
@@ -30,24 +32,43 @@ export function calculateFitness(
   
   // Calculate scalar fitness
   let fitness = normalizedWeights.quality * quality;
+  console.log(`[Fitness] Node ${node.id.slice(0, 8)}: quality=${quality.toFixed(3)}, weight=${normalizedWeights.quality.toFixed(3)}, contribution=${(normalizedWeights.quality * quality).toFixed(3)}`);
   
   if (safety !== undefined && normalizedWeights.safety) {
     fitness += normalizedWeights.safety * safety;
+    console.log(`[Fitness] Node ${node.id.slice(0, 8)}: safety=${safety.toFixed(3)}, weight=${normalizedWeights.safety.toFixed(3)}, contribution=${(normalizedWeights.safety * safety).toFixed(3)}`);
   }
   
   if (costUSD !== undefined && normalizedWeights.cost && config.fitness.costNorm) {
-    const costNorm = Math.min(1, costUSD / config.fitness.costNorm.maxUSDPerCall);
-    fitness += normalizedWeights.cost * (1 - costNorm);
+    // Use dynamic max for relative mode, or configured max for absolute mode
+    const maxCost = dynamicMaxCost && config.fitness.costNorm.mode === 'relative' 
+      ? dynamicMaxCost 
+      : config.fitness.costNorm.maxUSDPerCall;
+    const costNorm = Math.min(1, costUSD / maxCost);
+    const costScore = 1 - costNorm;
+    const costContribution = normalizedWeights.cost * costScore;
+    fitness += costContribution;
+    console.log(`[Fitness] Node ${node.id.slice(0, 8)}: cost=$${costUSD.toFixed(6)}, maxCost=$${maxCost.toFixed(6)} (${config.fitness.costNorm.mode}), costNorm=${costNorm.toFixed(3)}, costScore=${costScore.toFixed(3)}, contribution=${costContribution.toFixed(3)}`);
   }
   
   if (latencyMs !== undefined && normalizedWeights.latency && config.fitness.latencyNorm) {
-    const latencyNorm = Math.min(1, latencyMs / config.fitness.latencyNorm.maxMs);
-    fitness += normalizedWeights.latency * (1 - latencyNorm);
+    // Use dynamic max for relative mode, or configured max for absolute mode
+    const maxLatency = dynamicMaxLatency && config.fitness.latencyNorm.mode === 'relative'
+      ? dynamicMaxLatency
+      : config.fitness.latencyNorm.maxMs;
+    const latencyNorm = Math.min(1, latencyMs / maxLatency);
+    const latencyScore = 1 - latencyNorm;
+    const latencyContribution = normalizedWeights.latency * latencyScore;
+    fitness += latencyContribution;
+    console.log(`[Fitness] Node ${node.id.slice(0, 8)}: latency=${latencyMs.toFixed(1)}ms, maxLatency=${maxLatency.toFixed(1)}ms (${config.fitness.latencyNorm.mode}), latencyNorm=${latencyNorm.toFixed(3)}, latencyScore=${latencyScore.toFixed(3)}, contribution=${latencyContribution.toFixed(3)}`);
   }
   
   if (stability !== undefined && normalizedWeights.stability) {
     fitness += normalizedWeights.stability * stability;
+    console.log(`[Fitness] Node ${node.id.slice(0, 8)}: stability=${stability.toFixed(3)}, weight=${normalizedWeights.stability.toFixed(3)}, contribution=${(normalizedWeights.stability * stability).toFixed(3)}`);
   }
+  
+  console.log(`[Fitness] Node ${node.id.slice(0, 8)}: FINAL fitness=${fitness.toFixed(3)}`);
   
   return {
     quality,

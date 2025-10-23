@@ -92,8 +92,8 @@ export interface EvaluationConfig {
   fitness: {
     weights: { quality: number; safety?: number; cost?: number; latency?: number; stability?: number };
     guardrails?: string[]; // prompts for safety checks
-    costNorm?: { maxUSDPerCall: number };
-    latencyNorm?: { maxMs: number };
+    costNorm?: { mode: 'absolute' | 'relative'; maxUSDPerCall: number };
+    latencyNorm?: { mode: 'absolute' | 'relative'; maxMs: number };
   };
   targets: { timeLimitMs?: number; budgetUSD?: number; targetFitness?: number; maxGenerations?: number };
   serviceModel: ModelRef; // for meta/mutation/crossover/grading

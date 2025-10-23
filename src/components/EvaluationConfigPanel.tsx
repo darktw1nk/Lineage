@@ -267,14 +267,18 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
             )}
             {config.fitness.costNorm && (
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Cost Norm Max:</span>
-                <span className="font-mono">${config.fitness.costNorm.maxUSDPerCall}</span>
+                <span className="text-muted-foreground">Cost Norm:</span>
+                <span className="font-mono">
+                  {config.fitness.costNorm.mode === 'relative' ? 'Relative (dynamic)' : `Absolute $${config.fitness.costNorm.maxUSDPerCall}`}
+                </span>
               </div>
             )}
             {config.fitness.latencyNorm && (
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Latency Norm Max:</span>
-                <span className="font-mono">{config.fitness.latencyNorm.maxMs}ms</span>
+                <span className="text-muted-foreground">Latency Norm:</span>
+                <span className="font-mono">
+                  {config.fitness.latencyNorm.mode === 'relative' ? 'Relative (dynamic)' : `Absolute ${config.fitness.latencyNorm.maxMs}ms`}
+                </span>
               </div>
             )}
           </div>
