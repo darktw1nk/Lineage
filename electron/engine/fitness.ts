@@ -45,7 +45,7 @@ export function calculateFitness(
       ? dynamicMaxCost 
       : config.fitness.costNorm.maxUSDPerCall;
     const costNorm = Math.min(1, costUSD / maxCost);
-    const costScore = 1 - costNorm;
+    const costScore = (1 - costNorm) * 10; // Scale to 0-10 range
     const costContribution = normalizedWeights.cost * costScore;
     fitness += costContribution;
     console.log(`[Fitness] Node ${node.id.slice(0, 8)}: cost=$${costUSD.toFixed(6)}, maxCost=$${maxCost.toFixed(6)} (${config.fitness.costNorm.mode}), costNorm=${costNorm.toFixed(3)}, costScore=${costScore.toFixed(3)}, contribution=${costContribution.toFixed(3)}`);
@@ -57,7 +57,7 @@ export function calculateFitness(
       ? dynamicMaxLatency
       : config.fitness.latencyNorm.maxMs;
     const latencyNorm = Math.min(1, latencyMs / maxLatency);
-    const latencyScore = 1 - latencyNorm;
+    const latencyScore = (1 - latencyNorm) * 10; // Scale to 0-10 range
     const latencyContribution = normalizedWeights.latency * latencyScore;
     fitness += latencyContribution;
     console.log(`[Fitness] Node ${node.id.slice(0, 8)}: latency=${latencyMs.toFixed(1)}ms, maxLatency=${maxLatency.toFixed(1)}ms (${config.fitness.latencyNorm.mode}), latencyNorm=${latencyNorm.toFixed(3)}, latencyScore=${latencyScore.toFixed(3)}, contribution=${latencyContribution.toFixed(3)}`);
