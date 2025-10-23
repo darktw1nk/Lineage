@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Pause, Play, Square, Loader2, Settings2 } from 'lucide-react';
 import type { UUID } from '../types';
@@ -9,13 +9,44 @@ interface FooterProps {
   onShowConfig?: () => void;
 }
 
+// Format elapsed time in a human-readable format
+function formatElapsedTime(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  } else {
+    return `${seconds}s`;
+  }
+}
+
 export function Footer({ evaluationId, onShowConfig }: FooterProps) {
-  const [isPausing, setIsPausing] = useState(false);
-  const [isResuming, setIsResuming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [currentTime, setCurrentTime] = useState(Date.now());
   
   // Centralized store - single source of truth!
   const { evaluation } = useEvaluation(evaluationId);
+
+  // Update current time every second for running/pausing evaluations
+  // Timer updates only when 'running' or 'pausing', freezes when 'paused'
+  useEffect(() => {
+    if (!evaluation) return;
+    
+    // Only update timer for running/pausing, not for paused/stopped/finished
+    const isActive = evaluation.status === 'running' || evaluation.status === 'pausing';
+    if (!isActive && evaluation.finishedAt) return; // finished
+    if (!isActive && (evaluation.status === 'paused' || evaluation.status === 'stopped')) return; // paused/stopped
+    
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [evaluation?.status, evaluation?.finishedAt]);
 
   if (!evaluation) {
     return (
@@ -28,22 +59,35 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
   const currentGeneration = evaluation.generations.length;
   const status = evaluation.status || (evaluation.finishedAt ? 'stopped' : 'running');
   const isPaused = status === 'paused';
+  const isPausing = status === 'pausing';
+  const isRunning = status === 'running';
   const isStopped = status === 'stopped' || status === 'finished' || !!evaluation.stopReason;
+  
+  // Calculate elapsed time (excluding paused time)
+  // Backend tracks totalPausedMs and sends it via IPC
+  let elapsedMs: number;
+  if (evaluation.finishedAt) {
+    // Finished - use final time minus total paused
+    elapsedMs = (evaluation.finishedAt - evaluation.startedAt) - (evaluation.totalPausedMs || 0);
+  } else {
+    // Running or paused - calculate wall-clock time minus total paused
+    const wallClockMs = currentTime - evaluation.startedAt;
+    elapsedMs = wallClockMs - (evaluation.totalPausedMs || 0);
+  }
+  const elapsedTime = formatElapsedTime(elapsedMs);
   
   const handlePauseResume = async () => {
     if (isPaused) {
-      setIsResuming(true);
       try {
         await window.electronAPI.eval.resume(evaluation.id);
-      } finally {
-        setTimeout(() => setIsResuming(false), 1000); // Clear after status updates
+      } catch (error) {
+        console.error('Resume error:', error);
       }
     } else {
-      setIsPausing(true);
       try {
         await window.electronAPI.eval.pause(evaluation.id);
-      } finally {
-        setTimeout(() => setIsPausing(false), 1000); // Clear after status updates
+      } catch (error) {
+        console.error('Pause error:', error);
       }
     }
   };
@@ -82,6 +126,11 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
         </div>
         
         <div>
+          <div className="text-xs text-muted-foreground">Elapsed</div>
+          <div className="text-sm font-medium">{elapsedTime}</div>
+        </div>
+        
+        <div>
           <div className="text-xs text-muted-foreground">Tokens</div>
           <div className="text-sm font-medium">
             {(evaluation.totals.tokensPrompt + evaluation.totals.tokensCompletion).toLocaleString()}
@@ -107,17 +156,12 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
           size="sm"
           variant="outline"
           onClick={handlePauseResume}
-          disabled={isStopped || isPausing || isResuming}
+          disabled={isStopped || isPausing}
         >
           {isPausing ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Pausing...
-            </>
-          ) : isResuming ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Resuming...
             </>
           ) : isPaused ? (
             <>

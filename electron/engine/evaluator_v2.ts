@@ -30,7 +30,7 @@ import { getDatabase } from '../database/init.js';
 interface EvaluationState {
   run: EvaluationRun;
   config: EvaluationConfig;
-  status: 'running' | 'paused' | 'stopped';
+  status: 'running' | 'pausing' | 'paused' | 'stopped';
   currentGeneration: number;
   queue: CandidateNode[];
   inProgress: Set<UUID>;
@@ -42,6 +42,8 @@ interface EvaluationState {
     meta: { totalDelta: number; count: number };
     param: { totalDelta: number; count: number };
   };
+  pausedAt?: number; // Timestamp when paused (if currently paused)
+  totalPausedMs: number; // Total time spent paused
 }
 
 // Active evaluations map
@@ -111,6 +113,7 @@ export async function startEvaluation(
       meta: { totalDelta: 0, count: 0 },
       param: { totalDelta: 0, count: 0 },
     },
+    totalPausedMs: 0,
   };
   
   activeEvaluations.set(runId, state);
@@ -210,6 +213,18 @@ async function mutatePopulationInBackground(
     console.log(`[Evaluator] Queue initialized with ${state.queue.length} nodes`);
     console.log(`[Evaluator] Node statuses:`, state.run.generations[0].map(n => `${n.id.slice(0, 8)}=${n.status}`));
     
+    // Handle pause request that occurred during mutations
+    if (state.status === 'pausing') {
+      console.log(`[Evaluator] Mutations complete, transitioning from 'pausing' to 'paused'`);
+      state.status = 'paused';
+      state.run.status = 'paused';
+      state.run.totalPausedMs = state.totalPausedMs; // Update run object
+      state.pausedAt = Date.now();
+      state.run.pausedAt = state.pausedAt; // Send to frontend
+      sendUpdate(runId, { type: 'status', status: 'paused', totalPausedMs: state.totalPausedMs, pausedAt: state.pausedAt });
+      return;
+    }
+    
     // Start evaluation loop
     if (state.status === 'running') {
       console.log(`[Evaluator] Starting evaluation loop...`);
@@ -303,7 +318,10 @@ async function evaluationLoop(runId: UUID): Promise<void> {
     console.log(`[Evaluator] All in-progress nodes completed, now fully paused`);
     state.status = 'paused';
     state.run.status = 'paused';
-    sendUpdate(runId, { type: 'status', status: 'paused' });
+    state.run.totalPausedMs = state.totalPausedMs; // Update run object
+    state.pausedAt = Date.now(); // Record when actually paused
+    state.run.pausedAt = state.pausedAt; // Send to frontend
+    sendUpdate(runId, { type: 'status', status: 'paused', totalPausedMs: state.totalPausedMs, pausedAt: state.pausedAt });
   } else if (state.status === 'running') {
     // Loop exited naturally (queue empty)
     finishEvaluation(runId, state);
@@ -606,10 +624,12 @@ function shouldStop(state: EvaluationState): boolean {
   const config = state.config;
   const run = state.run;
   
-  // Time limit
+  // Time limit (excluding paused time)
   if (config.targets.timeLimitMs) {
-    const elapsed = Date.now() - run.startedAt;
-    if (elapsed >= config.targets.timeLimitMs) {
+    const wallClockElapsed = Date.now() - run.startedAt;
+    const activeElapsed = wallClockElapsed - state.totalPausedMs;
+    if (activeElapsed >= config.targets.timeLimitMs) {
+      console.log(`[Evaluator] Time limit reached: ${activeElapsed}ms active (${wallClockElapsed}ms total, ${state.totalPausedMs}ms paused)`);
       state.run.stopReason = 'time';
       return true;
     }
@@ -853,9 +873,11 @@ function finishEvaluation(runId: UUID, state: EvaluationState): void {
 export function pauseEvaluation(runId: UUID): void {
   const state = activeEvaluations.get(runId);
   if (state) {
-    state.status = 'paused';
-    state.run.status = 'paused';
-    sendUpdate(runId, { type: 'status', status: 'paused' });
+    console.log(`[Evaluator] Pause requested, setting status to 'pausing'`);
+    state.status = 'pausing';
+    state.run.status = 'pausing';
+    sendUpdate(runId, { type: 'status', status: 'pausing' });
+    // Note: pausedAt will be set when actually paused in the evaluation loop
   }
 }
 
@@ -867,9 +889,19 @@ export function resumeEvaluation(runId: UUID): void {
   if (state) {
     console.log(`[Evaluator] Resume requested for ${runId.slice(0, 8)}, queue=${state.queue.length}, inProgress=${state.inProgress.size}`);
     
+    // Calculate pause duration and add to total
+    if (state.pausedAt) {
+      const pauseDuration = Date.now() - state.pausedAt;
+      state.totalPausedMs += pauseDuration;
+      state.run.totalPausedMs = state.totalPausedMs; // Update run object
+      console.log(`[Evaluator] Pause duration: ${pauseDuration}ms, Total paused: ${state.totalPausedMs}ms`);
+      state.pausedAt = undefined;
+      state.run.pausedAt = undefined; // Clear from frontend
+    }
+    
     state.status = 'running';
     state.run.status = 'running';
-    sendUpdate(runId, { type: 'status', status: 'running' });
+    sendUpdate(runId, { type: 'status', status: 'running', totalPausedMs: state.totalPausedMs, pausedAt: undefined });
     
     // Only start loop if there's work to do
     // If queue is empty, the background mutation may still be in progress

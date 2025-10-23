@@ -25,7 +25,7 @@ interface EvaluationStore {
   addNodeToEvaluation: (evalId: UUID, node: CandidateNode) => void;
   addGenerationToEvaluation: (evalId: UUID, generation: number, nodes: CandidateNode[]) => void;
   updateTotals: (evalId: UUID, totals: any, cacheHits: number) => void;
-  updateStatus: (evalId: UUID, status: string) => void;
+  updateStatus: (evalId: UUID, status: string, totalPausedMs?: number, pausedAt?: number) => void;
   setLoading: (evalId: UUID, isLoading: boolean) => void;
   
   // Subscription management
@@ -145,13 +145,20 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
     });
   },
   
-  updateStatus: (evalId, status) => {
+  updateStatus: (evalId, status, totalPausedMs, pausedAt) => {
     set((state) => {
       const evaluation = state.evaluations.get(evalId);
       if (!evaluation) return state;
       
       const newEvaluations = new Map(state.evaluations);
-      newEvaluations.set(evalId, { ...evaluation, status: status as any });
+      const updated = { ...evaluation, status: status as any };
+      if (totalPausedMs !== undefined) {
+        updated.totalPausedMs = totalPausedMs;
+      }
+      if (pausedAt !== undefined) {
+        updated.pausedAt = pausedAt;
+      }
+      newEvaluations.set(evalId, updated);
       
       return { evaluations: newEvaluations };
     });
@@ -189,7 +196,7 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       
       switch (data.type) {
         case 'status':
-          store.updateStatus(evalId, data.status);
+          store.updateStatus(evalId, data.status, data.totalPausedMs, data.pausedAt);
           break;
           
         case 'node_created':

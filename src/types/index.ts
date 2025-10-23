@@ -107,11 +107,13 @@ export interface EvaluationRun {
   startedAt: number;
   finishedAt?: number;
   stopReason?: 'time' | 'budget' | 'target' | 'manual' | 'exhausted' | 'error' | 'generations';
-  status?: 'running' | 'paused' | 'stopped';
+  status?: 'running' | 'paused' | 'stopped' | 'pausing';
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
   generations: CandidateNode[][]; // 2D grid
   cacheHits: number;
   version: string; // schema version
+  totalPausedMs?: number; // Total time spent paused (for accurate elapsed time display)
+  pausedAt?: number; // Timestamp when currently paused (if status is 'paused')
 }
 
 export interface ModelCostEntry {

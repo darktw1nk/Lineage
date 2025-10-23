@@ -1,9 +1,24 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from './ui/button';
 import { Plus, Settings, Download, Upload, Trash2, FileText } from 'lucide-react';
 import type { UUID, EvaluationRun } from '../types';
 import { useEvaluationStore } from '../store/evaluationStore';
+
+// Format elapsed time in a compact format for sidebar
+function formatElapsedTimeCompact(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m`;
+  } else if (minutes > 0) {
+    return `${minutes}m`;
+  } else {
+    return `${seconds}s`;
+  }
+}
 
 interface LeftSidebarProps {
   onNewEvaluation: () => void;
@@ -21,6 +36,16 @@ export function LeftSidebar({
   selectedEvaluationId,
 }: LeftSidebarProps) {
   const queryClient = useQueryClient();
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  
+  // Update current time every second for running evaluations
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
   
   // Get evaluations from database (for list of all evaluations)
   const { data: dbEvaluations = [] } = useQuery<EvaluationRun[]>({
@@ -106,6 +131,25 @@ export function LeftSidebar({
           const bestScore = getBestScore(evaluation);
           const status = getStatus(evaluation);
           
+          // Calculate elapsed time (excluding paused time)
+          // Backend tracks totalPausedMs and sends pausedAt when paused
+          let elapsedMs: number;
+          if (evaluation.finishedAt) {
+            // Finished - use final time minus total paused
+            elapsedMs = (evaluation.finishedAt - evaluation.startedAt) - (evaluation.totalPausedMs || 0);
+          } else if (status === 'paused' && evaluation.pausedAt) {
+            // Currently paused - add current pause duration to total
+            const currentPauseDuration = currentTime - evaluation.pausedAt;
+            const totalPaused = (evaluation.totalPausedMs || 0) + currentPauseDuration;
+            const wallClockMs = currentTime - evaluation.startedAt;
+            elapsedMs = wallClockMs - totalPaused;
+          } else {
+            // Running, pausing - calculate wall-clock time minus total paused
+            const wallClockMs = currentTime - evaluation.startedAt;
+            elapsedMs = wallClockMs - (evaluation.totalPausedMs || 0);
+          }
+          const elapsedTime = formatElapsedTimeCompact(elapsedMs);
+          
           return (
             <button
               key={evaluation.id}
@@ -164,11 +208,12 @@ export function LeftSidebar({
                   </span>
                 </div>
               </div>
-              {bestScore !== null && (
-                <div className="mt-1 text-xs opacity-70">
-                  Best: {bestScore.toFixed(2)}
-                </div>
-              )}
+              <div className="mt-1 flex items-center justify-between text-xs opacity-70">
+                {bestScore !== null && (
+                  <span>Best: {bestScore.toFixed(2)}</span>
+                )}
+                <span className="ml-auto">{elapsedTime}</span>
+              </div>
             </button>
           );
         })}
