@@ -5,9 +5,12 @@
  * 1. startEvaluation: Setup + create shell nodes + send to UI + return immediately
  * 2. mutatePopulationInBackground: Async mutation of nodes 1+ 
  * 3. evaluationLoop: Process nodes, run tests, calculate fitness
- * 4. moveToNextGeneration: Selection + variation operators
+ * 4. moveToNextGeneration: Delegates to generation.ts for selection and variation
  * 
  * Real-time streaming: Every state change immediately sent via IPC
+ * 
+ * Note: Generation creation logic moved to generation.ts
+ * Note: Genetic operators in operators_v2.ts, mutations.ts, metaprompting.ts
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -20,7 +23,8 @@ import type {
   ModelRef,
   ChangeLogLine,
 } from '../../src/types/index.js';
-import { createShellPopulation, mutateNode, crossoverNodes, metaPromptNode } from './operators_v2.js';
+import { createShellPopulation, mutateNode } from './operators_v2.js';
+import { selectTopPerformers, createNextGeneration } from './generation.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { BrowserWindow } from 'electron';
 import { initGlobalSemaphore } from './semaphore.js';
@@ -130,7 +134,6 @@ function recalculateAllFitness(runId: UUID, state: EvaluationState): void {
   }
   
   console.log(`[Fitness Recalc] Sent updates for ${finishedNodes.length} nodes (${recalculated} changed)`);
-}
 }
 
 /**
@@ -328,8 +331,9 @@ async function evaluationLoop(runId: UUID): Promise<void> {
     // Process all nodes in batch in parallel
     await Promise.all(batch.map(node => processNode(runId, node, state)));
     
-    // Check if we were paused during the batch
-    if (state.status === 'pausing') {
+    // Check if we were paused during the batch (status can change externally)
+    const currentStatus = state.status as EvaluationState['status'];
+    if (currentStatus === 'pausing') {
       console.log(`[Evaluator] Pause detected, exiting loop`);
       break;
     }
@@ -754,32 +758,7 @@ async function moveToNextGeneration(
   
   // Select top performers
   const currentGen = state.run.generations[state.currentGeneration];
-  const sorted = currentGen
-    .filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
-    .sort((a, b) => b.metrics!.fitness! - a.metrics!.fitness!);
-  
-  let topPerformers: CandidateNode[];
-  if (state.config.selection.policy === 'topp') {
-    // Top-P selection
-    const topP = state.config.selection.topP || 0.5;
-    const totalFitness = sorted.reduce((sum, n) => sum + (n.metrics?.fitness || 0), 0);
-    let cumulative = 0;
-    let cutoff = 0;
-    for (let i = 0; i < sorted.length; i++) {
-      cumulative += (sorted[i].metrics?.fitness || 0) / totalFitness;
-      if (cumulative >= topP) {
-        cutoff = i + 1;
-        break;
-      }
-    }
-    topPerformers = sorted.slice(0, Math.max(1, cutoff));
-    console.log(`[Evaluator] Selected ${topPerformers.length} top performers (Top-P=${topP})`);
-  } else {
-    // Top-K selection
-    const topK = state.config.selection.topK || Math.ceil(sorted.length * 0.4);
-    topPerformers = sorted.slice(0, topK);
-    console.log(`[Evaluator] Selected ${topPerformers.length} top performers (Top-K=${topK})`);
-  }
+  const topPerformers = selectTopPerformers(currentGen, state.config);
   
   if (topPerformers.length === 0) {
     console.log(`[Evaluator] No valid performers, stopping`);
@@ -791,113 +770,22 @@ async function moveToNextGeneration(
   state.currentGeneration++;
   state.run.generations.push([]);
   
-  const newGenNodes: CandidateNode[] = [];
-  const mutationFactor = state.config.operators.mutationFactor;
-  const crossoverFactor = state.config.operators.crossoverFactor;
+  const result = await createNextGeneration(
+    topPerformers,
+    currentGen,
+    state.currentGeneration,
+    state.config
+  );
   
-  // Apply variation operators
-  const metaPromptShare = state.config.operators.metaPrompting?.enabled ? (state.config.operators.metaPrompting.share || 0.2) : 0;
-  const paramVariationShare = state.config.operators.paramVariation?.enabled ? (state.config.operators.paramVariation.share || 0.2) : 0;
+  const newGenNodes = result.newNodes;
   
-  for (let i = 0; i < topPerformers.length; i++) {
-    const parent = topPerformers[i];
-    const model = state.config.enabledModels[i % state.config.enabledModels.length];
-    const parentFitness = parent.metrics?.fitness || 0;
-    
-    let prompt = parent.prompt;
-    let changeLog: ChangeLogLine[] = [];
-    let temperature = 0.7; // Default
-    let operatorType: 'mutation' | 'crossover' | 'meta' | 'param' | null = null;
-    
-    const rand = Math.random();
-    
-    try {
-      if (rand < metaPromptShare && state.config.operators.metaPrompting?.enabled) {
-        // Meta-prompting (targeted edits based on failures)
-        const result = await metaPromptNode(parent, state.config, currentGen);
-        prompt = result.prompt;
-        changeLog = result.changeLog;
-        operatorType = 'meta';
-        
-        // Track costs
-        state.run.totals.tokensPrompt += result.cost.promptTokens;
-        state.run.totals.tokensCompletion += result.cost.completionTokens;
-        state.run.totals.usd += result.cost.usd;
-        state.run.totals.calls += result.cost.calls;
-        
-        sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
-        console.log(`[Evaluator] Meta-prompting for gen ${state.currentGeneration} node ${i}`);
-      } else if (rand < metaPromptShare + crossoverFactor && topPerformers.length > 1) {
-        // Crossover
-        const parentB = topPerformers[Math.floor(Math.random() * topPerformers.length)];
-        const result = await crossoverNodes(parent, parentB, state.config);
-        prompt = result.prompt;
-        changeLog = result.changeLog;
-        operatorType = 'crossover';
-        
-        // Track costs
-        state.run.totals.tokensPrompt += result.cost.promptTokens;
-        state.run.totals.tokensCompletion += result.cost.completionTokens;
-        state.run.totals.usd += result.cost.usd;
-        state.run.totals.calls += result.cost.calls;
-        
-        sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
-        console.log(`[Evaluator] Crossover for gen ${state.currentGeneration} node ${i}`);
-      } else if (rand < metaPromptShare + crossoverFactor + mutationFactor) {
-        // Mutation
-        const result = await mutateNode(parent.prompt, state.config);
-        prompt = result.prompt;
-        changeLog = result.changeLog;
-        operatorType = 'mutation';
-        
-        // Track costs
-        state.run.totals.tokensPrompt += result.cost.promptTokens;
-        state.run.totals.tokensCompletion += result.cost.completionTokens;
-        state.run.totals.usd += result.cost.usd;
-        state.run.totals.calls += result.cost.calls;
-        
-        sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
-        console.log(`[Evaluator] Mutation for gen ${state.currentGeneration} node ${i}`);
-      } else {
-        // Carry forward
-        changeLog = [{ label: 'MUTATION', text: 'Carried forward (no variation)' }];
-        console.log(`[Evaluator] Carry forward for gen ${state.currentGeneration} node ${i}`);
-      }
-    } catch (error) {
-      console.error(`[Evaluator] Operator failed for gen ${state.currentGeneration} node ${i}:`, error);
-      // Fallback to parent
-      prompt = parent.prompt;
-      changeLog = [{ label: 'MUTATION', text: 'Operator failed, using parent' }];
-    }
-    
-    // Parameter variation (temperature)
-    if (state.config.operators.paramVariation?.enabled && Math.random() < paramVariationShare) {
-      const tempConfig = state.config.operators.paramVariation.temperature;
-      const min = tempConfig.min || 0.3;
-      const max = tempConfig.max || 1.5;
-      temperature = min + Math.random() * (max - min);
-      changeLog.push({ label: 'PARAM', text: `Temperature varied to ${temperature.toFixed(2)}` });
-      if (!operatorType) operatorType = 'param';
-      console.log(`[Evaluator] Parameter variation for gen ${state.currentGeneration} node ${i}: temp=${temperature.toFixed(2)}`);
-    }
-    
-    const newNode: CandidateNode = {
-      id: uuidv4(),
-      generation: state.currentGeneration,
-      lineageParents: [parent.id],
-      status: 'awaiting',
-      prompt,
-      params: { model, temperature },
-      changeLog,
-    };
-    
-    newGenNodes.push(newNode);
-    
-    // Track operator effectiveness (will update after this node is evaluated)
-    // Store parent fitness and operator type for later delta calculation
-    (newNode as any)._operatorType = operatorType;
-    (newNode as any)._parentFitness = parentFitness;
-  }
+  // Track costs
+  state.run.totals.tokensPrompt += result.costTracking.promptTokens;
+  state.run.totals.tokensCompletion += result.costTracking.completionTokens;
+  state.run.totals.usd += result.costTracking.usd;
+  state.run.totals.calls += result.costTracking.calls;
+  
+  sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
   
   // Add to generation and queue
   state.run.generations[state.currentGeneration] = newGenNodes;
