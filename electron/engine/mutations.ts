@@ -8,6 +8,63 @@ import type { EvaluationConfig, ChangeLogLine } from '../../src/types/index.js';
 import { getProviderAdapter } from '../providers/index.js';
 
 /**
+ * Mutation Strategy Catalog
+ * Specific, actionable mutation techniques organized by category
+ */
+const MUTATION_STRATEGIES = {
+  structure: [
+    'Reorder sections (role → goals → constraints → output spec)',
+    'Convert paragraphs to bullet checklists',
+    'Insert a thinking scaffold (e.g., "First, extract actors… Then, dedupe…")',
+  ],
+  content: [
+    'Tighten constraints ("Output strictly RFC8259 JSON. No commentary.")',
+    'Add/replace few-shot examples (hard cases, counter-examples)',
+    'Add evaluation rubric inside the prompt ("If a task lacks an assignee, infer from speaker attribution.")',
+    'Add anti-patterns ("Do not create subtasks for \'thanks\', \'OK\' ")',
+    'Introduce domain terms/ontologies',
+  ],
+  formatting: [
+    'Switch from free text → step-tagged blocks (e.g., # PLAN, # FINAL)',
+    'Adjust temperature/tool-use hints',
+  ],
+  compression: [
+    'Replace long rules with short checklists or regex-like constraints',
+    'Prune redundant lines detected via ablation',
+  ],
+  regularizers: [
+    'Add length constraints (tokens/words)',
+    'Force field-by-field validation hints (e.g., JSON schema embedded)',
+  ],
+};
+
+/**
+ * Randomly select N mutation strategies from the catalog
+ * Returns strategies with category prefix: "[Category] Strategy description"
+ */
+function selectRandomStrategies(count: number = 2): string[] {
+  const allStrategies: Array<{ category: string; strategy: string }> = [];
+  
+  // Flatten all strategies with their categories
+  for (const category of Object.keys(MUTATION_STRATEGIES)) {
+    const strategies = MUTATION_STRATEGIES[category as keyof typeof MUTATION_STRATEGIES];
+    for (const strategy of strategies) {
+      allStrategies.push({
+        category: category.charAt(0).toUpperCase() + category.slice(1), // Capitalize first letter
+        strategy,
+      });
+    }
+  }
+  
+  // Shuffle and select N strategies
+  const shuffled = allStrategies.sort(() => Math.random() - 0.5);
+  const selected = shuffled.slice(0, Math.min(count, allStrategies.length));
+  
+  // Format with category prefix
+  return selected.map(s => `[${s.category}] ${s.strategy}`);
+}
+
+/**
  * Mutates a single prompt using service model
  * Returns new prompt and changelog
  * 
@@ -28,13 +85,25 @@ export async function mutateNode(
   let totalCalls = 0;
   
   try {
-    // Step 1: Propose edits
+    // Select 1-3 random mutation strategies
+    const numStrategies = Math.floor(Math.random() * 3) + 1; // 1-3 strategies
+    const selectedStrategies = selectRandomStrategies(numStrategies);
+    
+    console.log(`[Mutation] Selected ${numStrategies} strategies:`, selectedStrategies);
+    
+    // Step 1: Propose edits using selected strategies
+    const strategiesList = selectedStrategies.map((s, i) => `${i + 1}. ${s}`).join('\n');
     const proposalPrompt = `SYSTEM: You propose SMALL, PRECISE edits to improve a prompt.
 USER: Candidate prompt: <<<
 ${basePrompt}
 >>>
-Make 1–3 minimal edits chosen from: structure, content, formatting, compression, regularizers.
-Return JSON list of edits: [{"label":"MUTATION","edit":"..."}]`;
+Apply these specific mutation strategies:
+${strategiesList}
+
+For each strategy above, propose a concrete edit. Return JSON list with the category prefix preserved:
+[{"label":"MUTATION","edit":"[Category] Specific change description"}]
+
+IMPORTANT: Keep the [Category] prefix from each strategy in your edit descriptions.`;
     
     const proposalResult = await serviceAdapter.call({
       model: config.serviceModel.model,
