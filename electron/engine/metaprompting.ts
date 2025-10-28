@@ -45,17 +45,34 @@ export async function metaPromptNode(
       return `${failedTests.length} tests failed with avg score ${(failedTests.reduce((s, t) => s + t.score, 0) / failedTests.length).toFixed(1)}`;
     });
   
-  const failureSummary = failed.length > 0 ? failed.join(', ') : 'No specific failures identified';
+  const hasFailures = failed.length > 0;
+  const failureSummary = failed.join(', ');
   
-  console.log(`[MetaPrompt] Failure summary:`, failureSummary);
+  console.log(`[MetaPrompt] ${hasFailures ? `Failures found: ${failureSummary}` : 'No failures found, suggesting general improvements'}`);
   
-  // Step 1: Propose surgical edits based on failures
-  const metaPrompt = `SYSTEM: You are a prompt surgeon. Suggest surgical changes to improve the prompt  based on failures.
+  // Step 1: Propose surgical edits - either based on failures or general improvements
+  let metaPrompt: string;
+  if (hasFailures) {
+    metaPrompt = `SYSTEM: You are a prompt surgeon. Suggest surgical changes to improve the prompt based on failures.
 USER: Parent Prompt: <<<
 ${parent.prompt}
 >>>
 Top failures: ${failureSummary}
+
+Analyze these failures and suggest 1-3 targeted edits to address them.
 Return JSON edits: [{"label":"META","edit":"..."}]`;
+  } else {
+    metaPrompt = `SYSTEM: You are a prompt surgeon. Suggest surgical improvements to make the prompt even better.
+USER: Parent Prompt: <<<
+${parent.prompt}
+>>>
+This prompt is performing well with no test failures. Suggest 1-3 refinements to further improve:
+- Clarity and precision
+- Edge case handling
+- Output quality
+
+Return JSON edits: [{"label":"META","edit":"..."}]`;
+  }
   
   const proposalResult = await serviceAdapter.call({
     model: config.serviceModel.model,
