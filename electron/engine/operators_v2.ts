@@ -4,15 +4,16 @@
  * Clean separation:
  * - createShellPopulation: Creates initial node shells (synchronous, fast)
  * - crossoverNodes: Combines two parent nodes
- * - metaPromptNode: Smart mutation based on test failures
  * 
  * Note: Basic mutation moved to mutations.ts
+ * Note: Meta-prompting moved to metaprompting.ts
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import type { CandidateNode, EvaluationConfig, ModelRef, ChangeLogLine } from '../../src/types/index.js';
 import { getProviderAdapter } from '../providers/index.js';
 export { mutateNode } from './mutations.js';
+export { metaPromptNode } from './metaprompting.js';
 
 /**
  * Creates shell nodes for initial population
@@ -134,106 +135,3 @@ Return the merged prompt ONLY.`;
     },
   };
 }
-
-/**
- * Meta-prompting: targeted edits based on failures
- */
-export async function metaPromptNode(
-  parent: CandidateNode,
-  config: EvaluationConfig,
-  generation: CandidateNode[]
-): Promise<{ prompt: string; changeLog: ChangeLogLine[]; cost: { promptTokens: number; completionTokens: number; usd: number; calls: number } }> {
-  const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
-  const maxTokens = (config as any).serviceModelMaxTokens || 20000;
-  
-  let totalPromptTokens = 0;
-  let totalCompletionTokens = 0;
-  let totalUsd = 0;
-  let totalCalls = 0;
-  
-  // Extract top 3 failures from generation
-  const failed = generation
-    .filter(n => n.tests && n.tests.some(t => !t.passed))
-    .slice(0, 3)
-    .map(n => {
-      const failedTests = n.tests!.filter(t => !t.passed);
-      return `${failedTests.length} tests failed with avg score ${(failedTests.reduce((s, t) => s + t.score, 0) / failedTests.length).toFixed(1)}`;
-    });
-  
-  const failureSummary = failed.length > 0 ? failed.join(', ') : 'No specific failures identified';
-  
-  const metaPrompt = `SYSTEM: You are a prompt surgeon. Suggest surgical changes based on failures.
-USER: Parent Prompt: <<<
-${parent.prompt}
->>>
-Top failures: ${failureSummary}
-Return JSON edits: [{"label":"META","edit":"..."}]`;
-  
-  const proposalResult = await serviceAdapter.call({
-    model: config.serviceModel.model,
-    prompt: metaPrompt,
-    temperature: 0.8,
-    maxTokens,
-  });
-  
-  totalPromptTokens += proposalResult.promptTokens;
-  totalCompletionTokens += proposalResult.completionTokens;
-  totalUsd += proposalResult.usd;
-  totalCalls++;
-  
-  if (!proposalResult.output || proposalResult.output.trim() === '') {
-    throw new Error('Empty response from meta-prompting');
-  }
-  
-  let edits: any[];
-  try {
-    const cleaned = proposalResult.output.replace(/```json\n?/g, '').replace(/```/g, '').trim();
-    console.log(`[MetaPrompt] Raw output:`, proposalResult.output);
-    console.log(`[MetaPrompt] Cleaned output:`, cleaned);
-    edits = JSON.parse(cleaned);
-    console.log(`[MetaPrompt] Parsed edits:`, edits);
-  } catch (error) {
-    console.error(`[MetaPrompt] Parse error:`, error);
-    console.error(`[MetaPrompt] Failed to parse:`, proposalResult.output);
-    throw new Error(`Failed to parse meta-prompt edits: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  
-  // Apply edits
-  const applyPrompt = `SYSTEM: You apply edit instructions to a prompt faithfully.
-USER: Original: <<<
-${parent.prompt}
->>>
-Edits: ${JSON.stringify(edits)}
-Produce the NEW prompt ONLY.`;
-  
-  const applyResult = await serviceAdapter.call({
-    model: config.serviceModel.model,
-    prompt: applyPrompt,
-    temperature: 0.3,
-    maxTokens,
-  });
-  
-  totalPromptTokens += applyResult.promptTokens;
-  totalCompletionTokens += applyResult.completionTokens;
-  totalUsd += applyResult.usd;
-  totalCalls++;
-  
-  if (!applyResult.output || applyResult.output.trim() === '') {
-    throw new Error('Empty response from meta-prompt apply');
-  }
-  
-  return {
-    prompt: applyResult.output.trim(),
-    changeLog: edits.map(e => ({
-      label: 'META' as const,
-      text: e.edit || 'Unknown meta-edit',
-    })),
-    cost: {
-      promptTokens: totalPromptTokens,
-      completionTokens: totalCompletionTokens,
-      usd: totalUsd,
-      calls: totalCalls,
-    },
-  };
-}
-
