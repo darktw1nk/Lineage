@@ -21,6 +21,8 @@ const createWindow = () => {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      zoomFactor: 1.0,
+      disableBlinkFeatures: 'Accelerated2dCanvas',
     },
   });
 

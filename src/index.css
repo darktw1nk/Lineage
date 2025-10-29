@@ -73,3 +73,13 @@ body {
   overflow: hidden;
 }
 
+/* Fix for Windows fractional scaling blur (125%, 150%, 175%) */
+@media screen and (-webkit-min-device-pixel-ratio: 1.25), 
+       screen and (min-resolution: 120dpi) {
+  body, input, textarea, select, button {
+    -webkit-font-smoothing: subpixel-antialiased;
+    -moz-osx-font-smoothing: auto;
+    font-smooth: always;
+  }
+}
+

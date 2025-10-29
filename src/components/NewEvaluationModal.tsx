@@ -203,13 +203,7 @@ Here is the bug report:
   return (
     <TooltipProvider>
       <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent 
-          className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
-          style={{
-            WebkitFontSmoothing: 'antialiased',
-            backfaceVisibility: 'hidden'
-          }}
-        >
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>New Evaluation</DialogTitle>
           <DialogDescription>
@@ -240,12 +234,15 @@ Here is the bug report:
           </TabsList>
 
           <div 
-            className="overflow-y-auto p-4 h-[500px] min-h-0"
+            className="p-4 h-[500px] min-h-0"
             style={{
+              overflowY: 'scroll',
               scrollbarGutter: 'stable',
-              WebkitFontSmoothing: 'antialiased',
-              backfaceVisibility: 'hidden'
-            }}
+              willChange: 'auto',
+              transform: 'translateZ(0)',
+              imageRendering: 'crisp-edges',
+              WebkitFontSmoothing: 'subpixel-antialiased'
+            } as React.CSSProperties}
           >
             <TabsContent value="main" className="space-y-4 mt-0">
               <MainTab config={config} setConfig={setConfig} />
@@ -560,6 +557,10 @@ function PopulationTab({ config, setConfig }: TabProps) {
           <textarea
             id="seedPrompt"
             className="w-full h-32 rounded-md border border-input bg-background px-3 py-2 text-sm"
+            style={{
+              resize: 'vertical',
+              scrollbarGutter: 'stable'
+            }}
             value={config.population?.seedPrompt || ''}
             onChange={(e) =>
               setConfig({
@@ -613,6 +614,7 @@ function PopulationTab({ config, setConfig }: TabProps) {
                 </div>
                 <textarea
                   className="w-full h-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  style={{ scrollbarGutter: 'stable' }}
                   value={item.prompt}
                   onChange={(e) => updateManualPrompt(index, 'prompt', e.target.value)}
                   placeholder="Enter prompt text..."
@@ -800,6 +802,7 @@ function TestSetTab({ config, setConfig }: TabProps) {
               <Label>Test Prompt</Label>
               <textarea
                 className="w-full h-20 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                style={{ scrollbarGutter: 'stable' }}
                 value={test.prompt}
                 onChange={(e) => updateTest(test.id, { prompt: e.target.value })}
                 placeholder="Enter test prompt..."
@@ -1514,6 +1517,7 @@ function FitnessTab({ config, setConfig }: TabProps) {
               <div key={index} className="flex gap-2 items-start">
                 <textarea
                   className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[80px]"
+                  style={{ scrollbarGutter: 'stable' }}
                   value={guardrail}
                   onChange={(e) => {
                     const newGuardrails = [...(config.fitness?.guardrails || [])];
