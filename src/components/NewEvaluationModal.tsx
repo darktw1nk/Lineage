@@ -1083,7 +1083,7 @@ function VariationsTab({ config, setConfig }: TabProps) {
               <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" />
             </TooltipTrigger>
             <TooltipContent className="max-w-md">
-              <p>Varies LLM parameters (like temperature) to explore different model behaviors while keeping the prompt unchanged. Helps find optimal generation settings.</p>
+              <p>Varies LLM parameters (for now only temperature) to explore different model behaviors while keeping the prompt unchanged. Helps find optimal generation settings.</p>
             </TooltipContent>
           </Tooltip>
         </div>
@@ -1101,7 +1101,11 @@ function VariationsTab({ config, setConfig }: TabProps) {
                     ? {
                         enabled: true,
                         share: config.operators?.paramVariation?.share || 0.2,
-                        temperature: config.operators?.paramVariation?.temperature || { enabled: false, min: 0.5, max: 1.5 },
+                        temperature: { 
+                          enabled: true, 
+                          min: config.operators?.paramVariation?.temperature?.min || 0.5, 
+                          max: config.operators?.paramVariation?.temperature?.max || 1.5 
+                        },
                       }
                     : {
                         enabled: false,
@@ -1112,7 +1116,7 @@ function VariationsTab({ config, setConfig }: TabProps) {
               })
             }
           />
-          <Label htmlFor="paramVariation">Enable Parameter Variation</Label>
+          <Label htmlFor="paramVariation">Enable Parameter Variation (Temperature)</Label>
         </div>
 
         {config.operators?.paramVariation?.enabled && (
@@ -1145,92 +1149,65 @@ function VariationsTab({ config, setConfig }: TabProps) {
               </div>
             </div>
 
-            {/* Temperature Variation */}
-            <div className="pl-4 border-l-2 space-y-3">
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="tempVariation"
-                  checked={config.operators?.paramVariation?.temperature?.enabled || false}
-                  onCheckedChange={(checked) =>
-                    setConfig({
-                      ...config,
-                      operators: {
-                        ...config.operators!,
-                        paramVariation: {
-                          ...config.operators!.paramVariation!,
-                          temperature: checked
-                            ? {
-                                enabled: true,
-                                min: config.operators?.paramVariation?.temperature?.min || 0.5,
-                                max: config.operators?.paramVariation?.temperature?.max || 1.5,
-                              }
-                            : { enabled: false, min: 0.5, max: 1.5 },
+            {/* Temperature Range */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Temperature Range</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="tempMin">Min Temperature</Label>
+                  <Input
+                    id="tempMin"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="2"
+                    value={config.operators?.paramVariation?.temperature?.min || 0.5}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        operators: {
+                          ...config.operators!,
+                          paramVariation: {
+                            ...config.operators!.paramVariation!,
+                            temperature: {
+                              enabled: true,
+                              min: parseFloat(e.target.value) || 0.5,
+                              max: config.operators!.paramVariation!.temperature!.max,
+                            },
+                          },
                         },
-                      },
-                    })
-                  }
-                />
-                <Label htmlFor="tempVariation">Temperature Variation</Label>
-              </div>
-
-              {config.operators?.paramVariation?.temperature?.enabled && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label htmlFor="tempMin">Min Temperature</Label>
-                    <Input
-                      id="tempMin"
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="2"
-                      value={config.operators?.paramVariation?.temperature?.min || 0.5}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          operators: {
-                            ...config.operators!,
-                            paramVariation: {
-                              ...config.operators!.paramVariation!,
-                              temperature: {
-                                enabled: true,
-                                min: parseFloat(e.target.value) || 0.5,
-                                max: config.operators!.paramVariation!.temperature!.max,
-                              },
-                            },
-                          },
-                        })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="tempMax">Max Temperature</Label>
-                    <Input
-                      id="tempMax"
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="2"
-                      value={config.operators?.paramVariation?.temperature?.max || 1.5}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          operators: {
-                            ...config.operators!,
-                            paramVariation: {
-                              ...config.operators!.paramVariation!,
-                              temperature: {
-                                enabled: true,
-                                min: config.operators!.paramVariation!.temperature!.min,
-                                max: parseFloat(e.target.value) || 1.5,
-                              },
-                            },
-                          },
-                        })
-                      }
-                    />
-                  </div>
+                      })
+                    }
+                  />
                 </div>
-              )}
+                <div>
+                  <Label htmlFor="tempMax">Max Temperature</Label>
+                  <Input
+                    id="tempMax"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="2"
+                    value={config.operators?.paramVariation?.temperature?.max || 1.5}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        operators: {
+                          ...config.operators!,
+                          paramVariation: {
+                            ...config.operators!.paramVariation!,
+                            temperature: {
+                              enabled: true,
+                              min: config.operators!.paramVariation!.temperature!.min,
+                              max: parseFloat(e.target.value) || 1.5,
+                            },
+                          },
+                        },
+                      })
+                    }
+                  />
+                </div>
+              </div>
             </div>
           </>
         )}
