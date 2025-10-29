@@ -32,6 +32,7 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
     selection: {
       policy: 'topk',
       topK: 4,
+      eliteShare: 0.05,
     },
     operators: {
       mutationFactor: 0.5,
@@ -399,6 +400,34 @@ function MainTab({ config, setConfig }: TabProps) {
           </div>
         </div>
       )}
+
+      <div>
+        <Label htmlFor="eliteShare">Elite Share (0-1)</Label>
+        <Input
+          id="eliteShare"
+          type="number"
+          step="0.05"
+          min="0"
+          max="0.5"
+          value={config.selection?.eliteShare || 0}
+          onChange={(e) =>
+            setConfig({
+              ...config,
+              selection: {
+                ...config.selection!,
+                eliteShare: parseFloat(e.target.value) || 0,
+              },
+            })
+          }
+          placeholder="0.1"
+        />
+        <div className="text-xs text-muted-foreground mt-1">
+          {config.selection?.eliteShare && config.selection.eliteShare > 0
+            ? `Will carry over ${Math.round((config.selection.eliteShare) * 100)}% best nodes from previous generation (${Math.round((config.selection.eliteShare) * (config.population?.size || 10))} elite${Math.round((config.selection.eliteShare) * (config.population?.size || 10)) === 1 ? '' : 's'})`
+            : 'Elitism disabled. Default 0.05 (5%) preserves best candidates from each generation'
+          }
+        </div>
+      </div>
 
       <div className="flex items-center space-x-2">
         <Switch

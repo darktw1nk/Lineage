@@ -75,6 +75,7 @@ export interface EvaluationConfig {
     policy: 'topk' | 'topp';
     topK?: number;        // when policy = 'topk': fixed number (e.g., 4)
     topP?: number;        // when policy = 'topp': cumulative probability (0..1, e.g., 0.8)
+    eliteShare?: number;  // 0..1: fraction of generation to preserve from previous generation (default 0.05 = 5%)
   };
   operators: {
     mutationFactor: number; // 0..1

@@ -774,7 +774,8 @@ async function moveToNextGeneration(
     topPerformers,
     currentGen,
     state.currentGeneration,
-    state.config
+    state.config,
+    state.run.generations // Pass all generations for elitism
   );
   
   const newGenNodes = result.newNodes;

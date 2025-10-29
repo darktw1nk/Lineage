@@ -3,6 +3,7 @@
  * 
  * Handles:
  * - Selection (Top-K, Top-P)
+ * - Elitism: carry over best performers from PREVIOUS generation
  * - Fair weighted distribution: better parents get more children proportional to rank
  * - Fixed population size: each generation has exactly the same number of nodes
  * - Guaranteed participation: when Y >= N, every parent gets at least 1 child
@@ -10,27 +11,29 @@
  * - Parameter variation (temperature)
  * - Proper lineage tracking (crossover tracks BOTH parents)
  * 
- * Parent Assignment Algorithm:
- * 1. Select top X performers (Top-K or Top-P)
- * 2. Calculate rank weights: best=X, 2nd=X-1, ..., worst=1
- * 3. If Y >= X: seed 1 child per parent, then distribute remaining (Y-X) proportionally
- *    If Y < X: distribute all Y children proportionally (some parents may get 0)
- * 4. Use largest-remainder method to handle fractional allocations
- * 5. Shuffle assignments for randomness while preserving counts
+ * Generation Creation Flow:
+ * 1. Elitism Phase (optional, if eliteShare > 0, default 0.05):
+ *    - Calculate elite count: E = round(popSize * eliteShare)
+ *    - Collect finished nodes from PREVIOUS generation only
+ *    - Sort by fitness (best first)
+ *    - Clone top E nodes to new generation (keep prompt/params, reset status)
  * 
- * Operator Assignment Algorithm:
- * 1. Calculate exact operator counts from shares (mutation, crossover, meta, carry)
- * 2. Shuffle operator assignments independently from parents
- * 3. Create exactly Y children, each with assigned (parent, operator, model, temperature)
+ * 2. Genetic Operators Phase (remaining children):
+ *    a. Select top X performers from CURRENT generation (Top-K or Top-P)
+ *    b. Calculate rank weights: best=X, 2nd=X-1, ..., worst=1
+ *    c. Assign parents to (popSize - E) children:
+ *       - If remaining >= X: seed 1 per parent, distribute rest proportionally
+ *       - If remaining < X: pure proportional (some may get 0)
+ *    d. Calculate operator counts from shares and shuffle
+ *    e. Create children with assigned (parent, operator, model, temperature)
  * 
- * Example (3 parents, 10 children):
- *   Seed: P1=1, P2=1, P3=1 (total=3)
- *   Remaining: 7 children
- *   Weights: [3, 2, 1] → total=6
- *   Quotas: P1=3.5, P2=2.33, P3=1.17
- *   Floors: P1=3, P2=2, P3=1 (total=6)
- *   Remainders: P1=0.5, P2=0.33, P3=0.17 → P1 gets +1
- *   Final: P1=1+3+1=5, P2=1+2=3, P3=1+1=2 ✅ (total=10, all participate)
+ * Example (10 nodes, eliteShare=0.05, 3 current-gen parents):
+ *   Elite: 1 node (best from previous generation)
+ *   Remaining: 9 children
+ *   Parent weights: [3, 2, 1]
+ *   Seed: P1=1, P2=1, P3=1 (3 total)
+ *   Distribute 6 more: P1=3, P2=2, P3=1 (by weights)
+ *   Final: 1 elite + [P1=4, P2=3, P3=2] = 10 ✅
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -206,7 +209,8 @@ export async function createNextGeneration(
   topPerformers: CandidateNode[],
   currentGeneration: CandidateNode[],
   nextGenerationNumber: number,
-  config: EvaluationConfig
+  config: EvaluationConfig,
+  allGenerations: CandidateNode[][] // All previous generations for elitism
 ): Promise<GenerationResult> {
   const newGenNodes: CandidateNode[] = [];
   
@@ -214,7 +218,55 @@ export async function createNextGeneration(
   const targetPopSize = currentGeneration.length;
   console.log(`[Generation] Creating ${targetPopSize} children from ${topPerformers.length} parents`);
   
-  // Operator shares
+  // Elitism: carry over best nodes from LAST generation
+  let numElite = 0;
+  const eliteShare = config.selection.eliteShare || 0;
+  if (eliteShare > 0 && nextGenerationNumber > 0) {
+    numElite = Math.round(targetPopSize * eliteShare);
+    
+    if (numElite > 0) {
+      // Collect finished nodes from LAST generation only
+      const lastGenFinishedNodes: CandidateNode[] = [];
+      const lastGen = allGenerations[allGenerations.length - 1]; // Previous generation
+      for (const node of lastGen) {
+        if (node.status === 'finished' && node.metrics?.fitness !== undefined) {
+          lastGenFinishedNodes.push(node);
+        }
+      }
+      
+      // Sort by fitness descending
+      lastGenFinishedNodes.sort((a, b) => b.metrics!.fitness! - a.metrics!.fitness!);
+      
+      // Take top N elites from last generation
+      const elites = lastGenFinishedNodes.slice(0, Math.min(numElite, lastGenFinishedNodes.length));
+      
+      console.log(`[Generation] Elitism: carrying over ${elites.length} best nodes from generation ${nextGenerationNumber - 1}`);
+      
+      // Clone elites to new generation (reset status, update generation number)
+      for (const elite of elites) {
+        const eliteClone: CandidateNode = {
+          ...elite,
+          id: uuidv4(),
+          generation: nextGenerationNumber,
+          status: 'awaiting',
+          lineageParents: [elite.id],
+          changeLog: [{ label: 'ELITE', text: `Elite from gen ${elite.generation} (fitness=${elite.metrics?.fitness?.toFixed(3)})` }],
+          // Keep same prompt and params
+        };
+        newGenNodes.push(eliteClone);
+        
+        // Track as "carry forward" for operator effectiveness
+        (eliteClone as any)._operatorType = 'carry';
+        (eliteClone as any)._parentFitness = elite.metrics?.fitness || 0;
+      }
+    }
+  }
+  
+  // Calculate remaining children to create via genetic operators
+  const remainingChildren = targetPopSize - numElite;
+  console.log(`[Generation] Creating ${remainingChildren} new children via genetic operators (${numElite} elites already added)`);
+  
+  // Operator shares (applied to remaining children, not elites)
   const mutationFactor = config.operators.mutationFactor;
   const crossoverFactor = config.operators.crossoverFactor;
   const metaPromptShare = config.operators.metaPrompting?.enabled 
@@ -224,19 +276,19 @@ export async function createNextGeneration(
     ? (config.operators.paramVariation.share || 0.2) 
     : 0;
   
-  // Calculate operator counts
-  let numMeta = Math.round(targetPopSize * metaPromptShare);
-  let numCrossover = Math.round(targetPopSize * crossoverFactor);
-  let numMutation = Math.round(targetPopSize * mutationFactor);
+  // Calculate operator counts for remaining children
+  let numMeta = Math.round(remainingChildren * metaPromptShare);
+  let numCrossover = Math.round(remainingChildren * crossoverFactor);
+  let numMutation = Math.round(remainingChildren * mutationFactor);
   
   // Remaining go to carry-forward
-  let numCarryForward = targetPopSize - numMeta - numCrossover - numMutation;
+  let numCarryForward = remainingChildren - numMeta - numCrossover - numMutation;
   
   // Fix remainders to ensure exact count
-  while (numMeta + numCrossover + numMutation + numCarryForward < targetPopSize) {
+  while (numMeta + numCrossover + numMutation + numCarryForward < remainingChildren) {
     numMutation++; // Favor mutation for remainder
   }
-  while (numMeta + numCrossover + numMutation + numCarryForward > targetPopSize) {
+  while (numMeta + numCrossover + numMutation + numCarryForward > remainingChildren) {
     if (numCarryForward > 0) numCarryForward--;
     else if (numMutation > 0) numMutation--;
     else if (numCrossover > 0) numCrossover--;
@@ -245,8 +297,8 @@ export async function createNextGeneration(
   
   console.log(`[Generation] Operator counts: meta=${numMeta}, crossover=${numCrossover}, mutation=${numMutation}, carry=${numCarryForward}`);
   
-  // Assign parents to children with fair weighted distribution
-  const parentAssignments = assignParentsToChildren(topPerformers, targetPopSize);
+  // Assign parents to remaining children with fair weighted distribution
+  const parentAssignments = assignParentsToChildren(topPerformers, remainingChildren);
   
   // Shuffle operators for random distribution
   const operators: Array<'meta' | 'crossover' | 'mutation' | 'carry'> = [];
@@ -267,10 +319,10 @@ export async function createNextGeneration(
   let totalUsd = 0;
   let totalCalls = 0;
   
-  // Create children
-  for (let i = 0; i < targetPopSize; i++) {
+  // Create remaining children via genetic operators
+  for (let i = 0; i < remainingChildren; i++) {
     const parent = parentAssignments[i]; // Direct assignment, no need for modulo
-    const model = config.enabledModels[i % config.enabledModels.length];
+    const model = config.enabledModels[(numElite + i) % config.enabledModels.length]; // Offset by numElite
     const parentFitness = parent.metrics?.fitness || 0;
     const operator = operators[i];
     
