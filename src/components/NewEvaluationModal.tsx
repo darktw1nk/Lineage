@@ -371,7 +371,6 @@ function MainTab({ config, setConfig }: TabProps) {
         <Input
           id="eliteShare"
           type="number"
-          step="0.05"
           min="0"
           max="0.5"
           value={config.selection?.eliteShare || 0}
@@ -384,12 +383,12 @@ function MainTab({ config, setConfig }: TabProps) {
               },
             })
           }
-          placeholder="0.1"
+          placeholder="0.05"
         />
         <div className="text-xs text-muted-foreground mt-1">
           {config.selection?.eliteShare && config.selection.eliteShare > 0
-            ? `Will carry over ${Math.round((config.selection.eliteShare) * 100)}% best nodes from previous generation (${Math.round((config.selection.eliteShare) * (config.population?.size || 10))} elite${Math.round((config.selection.eliteShare) * (config.population?.size || 10)) === 1 ? '' : 's'})`
-            : 'Elitism disabled. Default 0.05 (5%) preserves best candidates from each generation'
+            ? `Will carry over ${Math.round((config.selection.eliteShare) * 100)}% best nodes from previous generation (minimum 1, currently ${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.size || 10)))} elite${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.size || 10))) === 1 ? '' : 's'})`
+            : 'Elitism disabled. When enabled, always carries at least 1 best node from previous generation'
           }
         </div>
       </div>

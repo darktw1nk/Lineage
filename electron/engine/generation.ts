@@ -13,7 +13,7 @@
  * 
  * Generation Creation Flow:
  * 1. Elitism Phase (optional, if eliteShare > 0, default 0.05):
- *    - Calculate elite count: E = round(popSize * eliteShare)
+ *    - Calculate elite count: E = max(1, round(popSize * eliteShare)) - minimum 1 elite when enabled
  *    - Collect finished nodes from PREVIOUS generation only
  *    - Sort by fitness (best first)
  *    - Clone top E nodes to new generation (keep prompt/params, reset status)
@@ -234,7 +234,8 @@ export async function createNextGeneration(
   let numElite = 0;
   const eliteShare = config.selection.eliteShare || 0;
   if (eliteShare > 0 && nextGenerationNumber > 0) {
-    numElite = Math.round(targetPopSize * eliteShare);
+    // When elitism is enabled, always carry at least 1 best node
+    numElite = Math.max(1, Math.round(targetPopSize * eliteShare));
     
     if (numElite > 0) {
       // Collect finished nodes from LAST generation only
