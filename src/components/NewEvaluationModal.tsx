@@ -203,7 +203,13 @@ Here is the bug report:
   return (
     <TooltipProvider>
       <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent 
+          className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+          style={{
+            WebkitFontSmoothing: 'antialiased',
+            backfaceVisibility: 'hidden'
+          }}
+        >
         <DialogHeader>
           <DialogTitle>New Evaluation</DialogTitle>
           <DialogDescription>
@@ -233,7 +239,14 @@ Here is the bug report:
             <TabsTrigger value="advanced">Advanced</TabsTrigger>
           </TabsList>
 
-          <div className="overflow-y-auto p-4 h-[500px] min-h-0">
+          <div 
+            className="overflow-y-auto p-4 h-[500px] min-h-0"
+            style={{
+              scrollbarGutter: 'stable',
+              WebkitFontSmoothing: 'antialiased',
+              backfaceVisibility: 'hidden'
+            }}
+          >
             <TabsContent value="main" className="space-y-4 mt-0">
               <MainTab config={config} setConfig={setConfig} />
             </TabsContent>
