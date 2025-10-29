@@ -70,7 +70,7 @@ function createAutoShellNodes(config: EvaluationConfig): CandidateNode[] {
   
   const nodes: CandidateNode[] = [];
   
-  for (let i = 0; i < config.population.size; i++) {
+  for (let i = 0; i < config.population.initialSize; i++) {
     const model = config.enabledModels[i % config.enabledModels.length];
     
     const node: CandidateNode = {

@@ -89,7 +89,8 @@ export interface EvaluationConfig {
     };
   };
   population: {
-    size: number; // default 10
+    initialSize: number; // size of generation 0 (default 10)
+    generationSize: number; // size of subsequent generations (default 10)
     seedPrompt: string;
     fill: 'auto' | 'manual';
   };

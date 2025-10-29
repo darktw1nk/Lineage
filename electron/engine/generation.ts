@@ -226,8 +226,10 @@ export async function createNextGeneration(
 ): Promise<GenerationResult> {
   const newGenNodes: CandidateNode[] = [];
   
-  // Determine target population size (same as current generation)
-  const targetPopSize = currentGeneration.length;
+  // Determine target population size
+  // Gen 0 → N+1: use config.population.generationSize
+  // Gen 0 has config.population.initialSize (but we're never called for gen 0)
+  const targetPopSize = config.population.generationSize;
   console.log(`[Generation] Creating ${targetPopSize} children from ${topPerformers.length} parents`);
   
   // Elitism: carry over best nodes from LAST generation

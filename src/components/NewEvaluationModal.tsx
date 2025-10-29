@@ -52,7 +52,8 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
       },
     },
     population: {
-      size: 3,
+      initialSize: 10,
+      generationSize: 10,
       seedPrompt: `Please read the following bug report and extract the key information into a JSON format.
 
 The JSON should have the bug id, a summary, the priority, if it is a UI bug, and a list of components that are affected.
@@ -153,8 +154,8 @@ Here is the bug report:
       const manualPrompts = (config.population as any)?.manualPrompts || [];
       if (manualPrompts.length === 0) {
         newErrors.population = 'Manual mode requires at least one prompt';
-      } else if (manualPrompts.length < (config.population?.size || 10)) {
-        newErrors.population = `Manual mode requires ${config.population?.size || 10} prompts (you have ${manualPrompts.length})`;
+      } else if (manualPrompts.length < (config.population?.initialSize || 10)) {
+        newErrors.population = `Manual mode requires ${config.population?.initialSize || 10} prompts (you have ${manualPrompts.length})`;
       } else {
         // Check if any prompt is empty
         for (let i = 0; i < manualPrompts.length; i++) {
@@ -324,7 +325,7 @@ function MainTab({ config, setConfig }: TabProps) {
             id="topK"
             type="number"
             min="1"
-            max={config.population?.size || 10}
+            max={config.population?.generationSize || 10}
             value={config.selection?.topK || 4}
             onChange={(e) =>
               setConfig({
@@ -387,7 +388,7 @@ function MainTab({ config, setConfig }: TabProps) {
         />
         <div className="text-xs text-muted-foreground mt-1">
           {config.selection?.eliteShare && config.selection.eliteShare > 0
-            ? `Will carry over ${Math.round((config.selection.eliteShare) * 100)}% best nodes from previous generation (minimum 1, currently ${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.size || 10)))} elite${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.size || 10))) === 1 ? '' : 's'})`
+            ? `Will carry over ${Math.round((config.selection.eliteShare) * 100)}% best nodes from previous generation (minimum 1, currently ${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.generationSize || 10)))} elite${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.generationSize || 10))) === 1 ? '' : 's'})`
             : 'Elitism disabled. When enabled, always carries at least 1 best node from previous generation'
           }
         </div>
@@ -452,22 +453,47 @@ function PopulationTab({ config, setConfig }: TabProps) {
   return (
     <div className="space-y-4">
       <div>
-        <Label htmlFor="popSize">Initial Population Size</Label>
+        <Label htmlFor="initialSize">Initial Population Size (Generation 0)</Label>
         <Input
-          id="popSize"
+          id="initialSize"
           type="number"
           min="1"
-          value={config.population?.size || 10}
+          value={config.population?.initialSize || 10}
           onChange={(e) =>
             setConfig({
               ...config,
               population: {
                 ...config.population!,
-                size: parseInt(e.target.value) || 10,
+                initialSize: parseInt(e.target.value) || 10,
               },
             })
           }
         />
+        <div className="text-xs text-muted-foreground mt-1">
+          Number of candidates in the first generation
+        </div>
+      </div>
+
+      <div>
+        <Label htmlFor="generationSize">Generation Size (Gen 1+)</Label>
+        <Input
+          id="generationSize"
+          type="number"
+          min="1"
+          value={config.population?.generationSize || 10}
+          onChange={(e) =>
+            setConfig({
+              ...config,
+              population: {
+                ...config.population!,
+                generationSize: parseInt(e.target.value) || 10,
+              },
+            })
+          }
+        />
+        <div className="text-xs text-muted-foreground mt-1">
+          Number of candidates in each subsequent generation
+        </div>
       </div>
 
       <div>
@@ -510,19 +536,19 @@ function PopulationTab({ config, setConfig }: TabProps) {
             placeholder="Enter the initial prompt to evolve..."
           />
           <div className="text-xs text-muted-foreground mt-1">
-            The seed prompt will be used to generate {config.population?.size || 10} variations
+            The seed prompt will be used to generate {config.population?.initialSize || 10} variations for generation 0
           </div>
         </div>
       ) : (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <Label>Manual Prompts ({manualPrompts.length} / {config.population?.size || 10})</Label>
+            <Label>Manual Prompts ({manualPrompts.length} / {config.population?.initialSize || 10})</Label>
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={addManualPrompt}
-              disabled={manualPrompts.length >= (config.population?.size || 10)}
+              disabled={manualPrompts.length >= (config.population?.initialSize || 10)}
             >
               + Add Prompt
             </Button>
@@ -572,10 +598,10 @@ function PopulationTab({ config, setConfig }: TabProps) {
             ))}
           </div>
 
-          {manualPrompts.length < (config.population?.size || 10) && manualPrompts.length > 0 && (
+          {manualPrompts.length < (config.population?.initialSize || 10) && manualPrompts.length > 0 && (
             <div className="text-sm text-yellow-600 bg-yellow-50 p-3 rounded-md">
-              ⚠ You have {manualPrompts.length} prompt(s), but population size is {config.population?.size || 10}. 
-              Add {(config.population?.size || 10) - manualPrompts.length} more prompt(s).
+              ⚠ You have {manualPrompts.length} prompt(s), but initial population size is {config.population?.initialSize || 10}. 
+              Add {(config.population?.initialSize || 10) - manualPrompts.length} more prompt(s).
             </div>
           )}
         </div>
