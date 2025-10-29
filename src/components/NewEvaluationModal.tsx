@@ -743,7 +743,7 @@ function TestSetTab({ config, setConfig }: TabProps) {
         <LabelWithTooltip 
           htmlFor="testset-section" 
           label="Define tests for evaluating prompt quality"
-          tooltip="Tests evaluate candidate prompts. Exact Match: compares output to expected string (strict=exact, or use distance metrics like Levenshtein/Hamming for fuzzy matching). LLM Graded: uses service model to grade quality on 0-10 scale based on rubric/criteria."
+          tooltip="Each candidate prompt is evaluated against the entire test set, one test at a time. All test results are aggregated to compute the final quality score. Test Modes: (1) Exact Match - compares LLM output to expected string: 'strict' mode requires perfect match, or use distance metrics (Levenshtein/Hamming/Jaro) for fuzzy matching with configurable thresholds. (2) LLM Graded - service model evaluates output quality on 0-10 scale based on your rubric/criteria, useful for subjective or complex evaluations."
         />
         <Button size="sm" onClick={addTest}>
           Add Test
@@ -1082,7 +1082,7 @@ function VariationsTab({ config, setConfig }: TabProps) {
             <TooltipTrigger asChild>
               <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" />
             </TooltipTrigger>
-            <TooltipContent className="max-w-sm">
+            <TooltipContent className="max-w-md">
               <p>Varies LLM parameters (like temperature) to explore different model behaviors while keeping the prompt unchanged. Helps find optimal generation settings.</p>
             </TooltipContent>
           </Tooltip>

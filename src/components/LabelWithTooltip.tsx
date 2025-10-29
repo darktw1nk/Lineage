@@ -16,7 +16,7 @@ export function LabelWithTooltip({ htmlFor, label, tooltip }: LabelWithTooltipPr
         <TooltipTrigger asChild>
           <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" />
         </TooltipTrigger>
-        <TooltipContent className="max-w-sm">
+        <TooltipContent className="max-w-md">
           <p>{tooltip}</p>
         </TooltipContent>
       </Tooltip>
