@@ -808,7 +808,7 @@ function TestSetTab({ config, setConfig }: TabProps) {
 
 // Variations Tab
 function VariationsTab({ config, setConfig }: TabProps) {
-  // Calculate normalized shares for display
+  // Calculate normalized shares for display (all shares are normalized to 100%)
   const mutationShare = config.operators?.mutationShare || 0;
   const crossoverShare = config.operators?.crossoverShare || 0;
   const metaShare = config.operators?.metaPrompting?.enabled ? (config.operators.metaPrompting.share || 0) : 0;
@@ -816,20 +816,19 @@ function VariationsTab({ config, setConfig }: TabProps) {
   const paramShare = config.operators?.paramVariation?.enabled ? (config.operators.paramVariation.share || 0) : 0;
   
   const totalShare = mutationShare + crossoverShare + metaShare + modelShare + paramShare;
-  const carryForwardShare = Math.max(0, 1 - totalShare);
   
+  // Normalize to percentages (shares are automatically scaled to sum to 100%)
   const normalizedMutation = totalShare > 0 ? (mutationShare / totalShare) * 100 : 0;
   const normalizedCrossover = totalShare > 0 ? (crossoverShare / totalShare) * 100 : 0;
   const normalizedMeta = totalShare > 0 ? (metaShare / totalShare) * 100 : 0;
   const normalizedModel = totalShare > 0 ? (modelShare / totalShare) * 100 : 0;
   const normalizedParam = totalShare > 0 ? (paramShare / totalShare) * 100 : 0;
-  const normalizedCarry = totalShare > 0 ? (carryForwardShare / totalShare) * 100 : 0;
 
   return (
     <div className="space-y-6">
       {/* Normalized Shares Display */}
       <div className="p-4 border rounded-lg bg-muted/30">
-        <h3 className="text-sm font-semibold mb-3">Operator Distribution (Normalized)</h3>
+        <h3 className="text-sm font-semibold mb-3">Operator Distribution (Normalized to 100%)</h3>
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
             <span>Mutation:</span>
@@ -851,13 +850,10 @@ function VariationsTab({ config, setConfig }: TabProps) {
             <span>Parameter Variation:</span>
             <span className="font-mono">{normalizedParam.toFixed(1)}%</span>
           </div>
-          <div className="flex justify-between border-t pt-2 mt-2">
-            <span>Carry-forward:</span>
-            <span className="font-mono">{normalizedCarry.toFixed(1)}%</span>
-          </div>
         </div>
         <div className="text-xs text-muted-foreground mt-3">
-          Total share: {totalShare.toFixed(2)} (carry-forward fills remaining: {carryForwardShare.toFixed(2)})
+          All operator shares are normalized to create exactly N children per generation.
+          {totalShare === 0 && ' (Warning: All shares are 0 - no genetic operators will be applied)'}
         </div>
       </div>
 

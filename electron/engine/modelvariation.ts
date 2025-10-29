@@ -55,17 +55,3 @@ export function varyModel(
   
   return result;
 }
-
-/**
- * Determine if model variation should be applied for this child
- * Based on configured share probability
- */
-export function shouldApplyModelVariation(config: EvaluationConfig): boolean {
-  if (!config.operators.modelVariation?.enabled) {
-    return false;
-  }
-  
-  const share = config.operators.modelVariation.share || 0.2;
-  return Math.random() < share;
-}
-

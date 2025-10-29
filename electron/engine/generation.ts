@@ -7,8 +7,8 @@
  * - Fair weighted distribution: better parents get more children proportional to rank
  * - Fixed population size: each generation has exactly the same number of nodes
  * - Guaranteed participation: when Y >= N, every parent gets at least 1 child
- * - Genetic operators (mutation, crossover, meta-prompting, carry-forward)
- * - Parameter variation (temperature, future: model, seed, etc.)
+ * - Unified operator model: mutation, crossover, meta-prompting, param variation, model variation
+ * - All operators treated equally: normalized shares, no layering
  * - Proper lineage tracking (crossover tracks BOTH parents)
  * 
  * Generation Creation Flow:
@@ -18,15 +18,24 @@
  *    - Sort by fitness (best first)
  *    - Clone top E nodes to new generation (keep prompt/params, reset status)
  * 
- * 2. Genetic Operators Phase (remaining children):
+ * 2. Operator Normalization Phase:
+ *    a. Collect all operator shares: mutation, crossover, meta, param, model
+ *    b. Normalize shares to sum to 100% (largest remainder method)
+ *    c. Calculate exact counts for each operator summing to (popSize - E)
+ *    d. Build shuffled operator plan for temporal fairness
+ * 
+ * 3. Parent Selection Phase:
  *    a. Select top X performers from CURRENT generation (Top-K or Top-P)
  *    b. Calculate rank weights: best=X, 2nd=X-1, ..., worst=1
  *    c. Assign parents to (popSize - E) children:
  *       - If remaining >= X: seed 1 per parent, distribute rest proportionally
  *       - If remaining < X: pure proportional (some may get 0)
- *    d. Calculate operator counts from shares and shuffle
- *    e. Create children with assigned (parent, operator)
- *    f. Apply parameter variation independently (via paramvariation.ts)
+ * 
+ * 4. Child Creation Phase:
+ *    - For each slot in operator plan:
+ *      - Get next parent from weighted stream
+ *      - Apply ONE operator (mutation/crossover/meta/param/model)
+ *      - No layering - each child gets exactly one transformation
  * 
  * Example (10 nodes, eliteShare=0.05, 3 current-gen parents):
  *   Elite: 1 node (best from previous generation)
@@ -45,8 +54,8 @@ import type {
   ChangeLogLine,
 } from '../../src/types/index.js';
 import { mutateNode, crossoverNodes, metaPromptNode } from './operators_v2.js';
-import { varyParameters, shouldApplyParamVariation } from './paramvariation.js';
-import { varyModel, shouldApplyModelVariation } from './modelvariation.js';
+import { varyParameters } from './paramvariation.js';
+import { varyModel } from './modelvariation.js';
 
 export interface GenerationResult {
   newNodes: CandidateNode[];
@@ -269,49 +278,79 @@ export async function createNextGeneration(
   const remainingChildren = targetPopSize - numElite;
   console.log(`[Generation] Creating ${remainingChildren} new children via genetic operators (${numElite} elites already added)`);
   
-  // Operator shares (applied to remaining children, not elites)
-  const mutationShare = config.operators.mutationShare;
-  const crossoverShare = config.operators.crossoverShare;
-  const metaPromptShare = config.operators.metaPrompting?.enabled 
-    ? (config.operators.metaPrompting.share || 0.2) 
-    : 0;
+  // Step 1: Collect operator shares (all treated equally)
+  const shareMutation = config.operators.mutationShare || 0;
+  const shareCrossover = config.operators.crossoverShare || 0;
+  const shareMeta = config.operators.metaPrompting?.enabled ? (config.operators.metaPrompting.share || 0) : 0;
+  const shareParam = config.operators.paramVariation?.enabled ? (config.operators.paramVariation.share || 0) : 0;
+  const shareModel = config.operators.modelVariation?.enabled ? (config.operators.modelVariation.share || 0) : 0;
   
-  // Calculate operator counts for remaining children
-  let numMeta = Math.round(remainingChildren * metaPromptShare);
-  let numCrossover = Math.round(remainingChildren * crossoverShare);
-  let numMutation = Math.round(remainingChildren * mutationShare);
+  const totalShare = shareMutation + shareCrossover + shareMeta + shareParam + shareModel;
   
-  // Remaining go to carry-forward
-  let numCarryForward = remainingChildren - numMeta - numCrossover - numMutation;
-  
-  // Fix remainders to ensure exact count
-  while (numMeta + numCrossover + numMutation + numCarryForward < remainingChildren) {
-    numMutation++; // Favor mutation for remainder
-  }
-  while (numMeta + numCrossover + numMutation + numCarryForward > remainingChildren) {
-    if (numCarryForward > 0) numCarryForward--;
-    else if (numMutation > 0) numMutation--;
-    else if (numCrossover > 0) numCrossover--;
-    else numMeta--;
+  if (totalShare === 0) {
+    console.warn(`[Generation] All operator shares are 0, using pure carry-forward`);
+    // Fall back to carrying forward all parents
   }
   
-  console.log(`[Generation] Operator counts: meta=${numMeta}, crossover=${numCrossover}, mutation=${numMutation}, carry=${numCarryForward}`);
+  // Step 2: Normalize shares and calculate exact counts
+  const wMutation = totalShare > 0 ? shareMutation / totalShare : 0;
+  const wCrossover = totalShare > 0 ? shareCrossover / totalShare : 0;
+  const wMeta = totalShare > 0 ? shareMeta / totalShare : 0;
+  const wParam = totalShare > 0 ? shareParam / totalShare : 0;
+  const wModel = totalShare > 0 ? shareModel / totalShare : 0;
   
-  // Assign parents to remaining children with fair weighted distribution
-  const parentAssignments = assignParentsToChildren(topPerformers, remainingChildren);
+  const qMutation = wMutation * remainingChildren;
+  const qCrossover = wCrossover * remainingChildren;
+  const qMeta = wMeta * remainingChildren;
+  const qParam = wParam * remainingChildren;
+  const qModel = wModel * remainingChildren;
   
-  // Shuffle operators for random distribution
-  const operators: Array<'meta' | 'crossover' | 'mutation' | 'carry'> = [];
-  for (let i = 0; i < numMeta; i++) operators.push('meta');
-  for (let i = 0; i < numCrossover; i++) operators.push('crossover');
-  for (let i = 0; i < numMutation; i++) operators.push('mutation');
-  for (let i = 0; i < numCarryForward; i++) operators.push('carry');
+  let numMutation = Math.floor(qMutation);
+  let numCrossover = Math.floor(qCrossover);
+  let numMeta = Math.floor(qMeta);
+  let numParam = Math.floor(qParam);
+  let numModel = Math.floor(qModel);
   
-  // Shuffle operators
-  for (let i = operators.length - 1; i > 0; i--) {
+  // Step 3: Distribute remainder using largest fractional parts
+  const remainders = [
+    { op: 'mutation', remainder: qMutation - numMutation, count: () => numMutation++, },
+    { op: 'crossover', remainder: qCrossover - numCrossover, count: () => numCrossover++, },
+    { op: 'meta', remainder: qMeta - numMeta, count: () => numMeta++, },
+    { op: 'param', remainder: qParam - numParam, count: () => numParam++, },
+    { op: 'model', remainder: qModel - numModel, count: () => numModel++, },
+  ];
+  
+  remainders.sort((a, b) => b.remainder - a.remainder);
+  
+  let slotsLeft = remainingChildren - (numMutation + numCrossover + numMeta + numParam + numModel);
+  for (let i = 0; i < slotsLeft && i < remainders.length; i++) {
+    remainders[i].count();
+  }
+  
+  console.log(`[Generation] Operator counts (normalized): mutation=${numMutation}, crossover=${numCrossover}, meta=${numMeta}, param=${numParam}, model=${numModel}`);
+  
+  // Step 4: Build shuffled operator plan
+  const operatorPlan: Array<'mutation' | 'crossover' | 'meta' | 'param' | 'model'> = [];
+  for (let i = 0; i < numMutation; i++) operatorPlan.push('mutation');
+  for (let i = 0; i < numCrossover; i++) operatorPlan.push('crossover');
+  for (let i = 0; i < numMeta; i++) operatorPlan.push('meta');
+  for (let i = 0; i < numParam; i++) operatorPlan.push('param');
+  for (let i = 0; i < numModel; i++) operatorPlan.push('model');
+  
+  // Step 5: Shuffle operator plan for fairness across time
+  for (let i = operatorPlan.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [operators[i], operators[j]] = [operators[j], operators[i]];
+    [operatorPlan[i], operatorPlan[j]] = [operatorPlan[j], operatorPlan[i]];
   }
+  
+  // Step 6: Create parent stream (weighted cycling with fair distribution)
+  const parentAssignments = assignParentsToChildren(topPerformers, remainingChildren);
+  let parentIndex = 0;
+  const nextParent = () => {
+    const parent = parentAssignments[parentIndex % parentAssignments.length];
+    parentIndex++;
+    return parent;
+  };
   
   // Cost tracking
   let totalPromptTokens = 0;
@@ -319,40 +358,37 @@ export async function createNextGeneration(
   let totalUsd = 0;
   let totalCalls = 0;
   
-  // Create remaining children via genetic operators
+  // Step 7: Create children per operator plan (one operator per child, no layering)
   for (let i = 0; i < remainingChildren; i++) {
-    const parent = parentAssignments[i]; // Direct assignment, no need for modulo
-    const model = config.enabledModels[(numElite + i) % config.enabledModels.length]; // Offset by numElite
+    const operator = operatorPlan[i];
+    const parent = nextParent();
     const parentFitness = parent.metrics?.fitness || 0;
-    const operator = operators[i];
     
     let prompt = parent.prompt;
     let changeLog: ChangeLogLine[] = [];
     let lineageParents: string[] = [parent.id];
-    let temperature = 0.7; // Default
-    let operatorType: 'mutation' | 'crossover' | 'meta' | 'param' | null = null;
+    let temperature = parent.params.temperature || 0.7;
+    let model = parent.params.model;
+    let operatorType: 'mutation' | 'crossover' | 'meta' | 'param' | 'model' | null = null;
     
     try {
-      if (operator === 'meta' && config.operators.metaPrompting?.enabled) {
-        // Meta-prompting
-        const result = await metaPromptNode(parent, config, currentGeneration);
+      if (operator === 'mutation') {
+        // MUTATE: apply mutation to prompt
+        const result = await mutateNode(parent.prompt, config);
         prompt = result.prompt;
         changeLog = result.changeLog;
-        operatorType = 'meta';
+        operatorType = 'mutation';
         
-        // Track costs
         totalPromptTokens += result.cost.promptTokens;
         totalCompletionTokens += result.cost.completionTokens;
         totalUsd += result.cost.usd;
         totalCalls += result.cost.calls;
         
-        console.log(`[Generation] Child ${i}: Meta-prompting from parent ${parent.id.slice(0, 8)}`);
-      } else if (operator === 'crossover' && topPerformers.length > 1) {
-        // Crossover - select second parent
-        let parentB: CandidateNode;
-        do {
-          parentB = topPerformers[Math.floor(Math.random() * topPerformers.length)];
-        } while (parentB.id === parent.id && topPerformers.length > 1);
+        console.log(`[Generation] Child ${i}: MUTATION from parent ${parent.id.slice(0, 8)}`);
+        
+      } else if (operator === 'crossover') {
+        // CROSSOVER: merge two distinct parents
+        const parentB = nextParent();
         
         const result = await crossoverNodes(parent, parentB, config);
         prompt = result.prompt;
@@ -360,66 +396,67 @@ export async function createNextGeneration(
         lineageParents = [parent.id, parentB.id]; // Track BOTH parents
         operatorType = 'crossover';
         
-        // Track costs
         totalPromptTokens += result.cost.promptTokens;
         totalCompletionTokens += result.cost.completionTokens;
         totalUsd += result.cost.usd;
         totalCalls += result.cost.calls;
         
-        console.log(`[Generation] Child ${i}: Crossover from ${parent.id.slice(0, 8)} × ${parentB.id.slice(0, 8)}`);
-      } else if (operator === 'mutation') {
-        // Mutation
-        const result = await mutateNode(parent.prompt, config);
+        console.log(`[Generation] Child ${i}: CROSSOVER from ${parent.id.slice(0, 8)} × ${parentB.id.slice(0, 8)}`);
+        
+      } else if (operator === 'meta') {
+        // META: targeted mutation from failure summary
+        const result = await metaPromptNode(parent, config, currentGeneration);
         prompt = result.prompt;
         changeLog = result.changeLog;
-        operatorType = 'mutation';
+        operatorType = 'meta';
         
-        // Track costs
         totalPromptTokens += result.cost.promptTokens;
         totalCompletionTokens += result.cost.completionTokens;
         totalUsd += result.cost.usd;
         totalCalls += result.cost.calls;
         
-        console.log(`[Generation] Child ${i}: Mutation from parent ${parent.id.slice(0, 8)}`);
-      } else {
-        // Carry forward
-        changeLog = [{ label: 'CARRY', text: 'Carried forward (no variation)' }];
-        console.log(`[Generation] Child ${i}: Carry forward from parent ${parent.id.slice(0, 8)}`);
+        console.log(`[Generation] Child ${i}: META from parent ${parent.id.slice(0, 8)}`);
+        
+      } else if (operator === 'param') {
+        // PARAM: apply parameter variation using dedicated function
+        const paramVariation = varyParameters(
+          temperature,
+          config,
+          true // Force variation since we're in param slot
+        );
+        
+        temperature = paramVariation.temperature;
+        changeLog = paramVariation.changeLog;
+        operatorType = 'param';
+        
+        console.log(`[Generation] Child ${i}: PARAM from parent ${parent.id.slice(0, 8)} (temp ${temperature.toFixed(2)})`);
+        
+      } else if (operator === 'model') {
+        // MODEL: apply model variation using dedicated function
+        const modelVariation = varyModel(
+          model,
+          config,
+          true, // Force variation since we're in model slot
+          config.enabledModels
+        );
+        
+        if (modelVariation.changeLog.length > 0) {
+          model = modelVariation.model;
+          changeLog = modelVariation.changeLog;
+          operatorType = 'model';
+          
+          console.log(`[Generation] Child ${i}: MODEL from parent ${parent.id.slice(0, 8)} (${model.provider}/${model.model})`);
+        } else {
+          // Shouldn't happen since we force variation, but safety fallback
+          changeLog = [{ label: 'CARRY', text: 'Model variation skipped (no other models available)' }];
+          console.log(`[Generation] Child ${i}: MODEL skipped (no alternatives)`);
+        }
       }
     } catch (error) {
       console.error(`[Generation] Operator '${operator}' failed for child ${i}:`, error);
       // Fallback to parent
       prompt = parent.prompt;
       changeLog = [{ label: 'ERROR', text: `Operator '${operator}' failed, using parent` }];
-    }
-    
-    // Parameter variation - applied independently of genetic operators
-    const paramVariation = varyParameters(
-      temperature,
-      config,
-      shouldApplyParamVariation(config)
-    );
-    
-    // Apply parameter variations
-    if (paramVariation.changeLog.length > 0) {
-      temperature = paramVariation.temperature;
-      changeLog.push(...paramVariation.changeLog);
-      if (!operatorType) operatorType = 'param';
-    }
-    
-    // Model variation - applied independently (major structural decision)
-    const modelVariation = varyModel(
-      model,
-      config,
-      shouldApplyModelVariation(config),
-      config.enabledModels
-    );
-    
-    // Apply model variation
-    if (modelVariation.changeLog.length > 0) {
-      model = modelVariation.model;
-      changeLog.push(...modelVariation.changeLog);
-      if (!operatorType) operatorType = 'param'; // Still counts as param-ish for tracking
     }
     
     const newNode: CandidateNode = {

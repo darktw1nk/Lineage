@@ -16,8 +16,8 @@ import type { CandidateNode, EvaluationConfig, ModelRef, ChangeLogLine } from '.
 export { mutateNode } from './mutations.js';
 export { crossoverNodes } from './crossover.js';
 export { metaPromptNode } from './metaprompting.js';
-export { varyParameters, shouldApplyParamVariation, getDefaultTemperature } from './paramvariation.js';
-export { varyModel, shouldApplyModelVariation } from './modelvariation.js';
+export { varyParameters, getDefaultTemperature } from './paramvariation.js';
+export { varyModel } from './modelvariation.js';
 
 /**
  * Creates shell nodes for initial population

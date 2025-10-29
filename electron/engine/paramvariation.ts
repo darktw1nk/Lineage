@@ -52,18 +52,6 @@ export function varyParameters(
   return result;
 }
 
-/**
- * Determine if parameter variation should be applied for this child
- * Based on configured share probability
- */
-export function shouldApplyParamVariation(config: EvaluationConfig): boolean {
-  if (!config.operators.paramVariation?.enabled) {
-    return false;
-  }
-  
-  const share = config.operators.paramVariation.share || 0.2;
-  return Math.random() < share;
-}
 
 /**
  * Get temperature within configured range (for fallback/default)
