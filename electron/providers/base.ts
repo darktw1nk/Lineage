@@ -33,7 +33,6 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     completionTokens: number;
     latencyMs: number;
     usd: number;
-    rawPath?: string;
   }> {
     // Wrap ALL API calls with global semaphore
     return withGlobalSemaphore(async () => {

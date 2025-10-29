@@ -6,6 +6,9 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Switch } from './ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
+import { LabelWithTooltip } from './LabelWithTooltip';
+import { HelpCircle } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import type { EvaluationConfig, TestCase, ModelRef, ModelCostEntry } from '../types';
 
@@ -97,7 +100,6 @@ Here is the bug report:
     serviceModel: settings?.serviceModel || undefined,
     parallelLimit: settings?.globalParallelLimit || 5,
     serviceModelMaxTokens: settings?.serviceModelMaxTokens || 20000, // Load from settings - applies to ALL models
-    rawBlobCapture: true,
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -199,8 +201,9 @@ Here is the bug report:
   };
 
   return (
-    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+    <TooltipProvider>
+      <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>New Evaluation</DialogTitle>
           <DialogDescription>
@@ -273,6 +276,7 @@ Here is the bug report:
         </div>
       </DialogContent>
     </Dialog>
+    </TooltipProvider>
   );
 }
 
@@ -290,7 +294,11 @@ function MainTab({ config, setConfig }: TabProps) {
       </div>
 
       <div>
-        <Label htmlFor="selectionPolicy">Selection Policy</Label>
+        <LabelWithTooltip 
+          htmlFor="selectionPolicy" 
+          label="Selection Policy"
+          tooltip="How to select parents for the next generation. Top-K selects the best K candidates. Top-P selects candidates until their cumulative fitness reaches P% of total fitness."
+        />
         <select
           id="selectionPolicy"
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -320,7 +328,11 @@ function MainTab({ config, setConfig }: TabProps) {
 
       {config.selection?.policy === 'topk' ? (
         <div>
-          <Label htmlFor="topK">Top K (number of candidates)</Label>
+          <LabelWithTooltip 
+            htmlFor="topK" 
+            label="Top K (number of candidates)"
+            tooltip="Number of best-performing candidates to select as parents for the next generation. Higher values maintain more diversity but may slow convergence."
+          />
           <Input
             id="topK"
             type="number"
@@ -368,7 +380,11 @@ function MainTab({ config, setConfig }: TabProps) {
       )}
 
       <div>
-        <Label htmlFor="eliteShare">Elite Share (0-1)</Label>
+        <LabelWithTooltip 
+          htmlFor="eliteShare" 
+          label="Elite Share (0-1)"
+          tooltip="Fraction of the best candidates from the previous generation to carry forward unchanged. Ensures the best solutions are never lost. Always carries at least 1 elite when enabled."
+        />
         <Input
           id="eliteShare"
           type="number"
@@ -453,7 +469,11 @@ function PopulationTab({ config, setConfig }: TabProps) {
   return (
     <div className="space-y-4">
       <div>
-        <Label htmlFor="initialSize">Initial Population Size (Generation 0)</Label>
+        <LabelWithTooltip 
+          htmlFor="initialSize" 
+          label="Initial Population Size (Generation 0)"
+          tooltip="Number of candidates in the first generation. Use a larger value for broader initial exploration or a smaller value for faster startup."
+        />
         <Input
           id="initialSize"
           type="number"
@@ -475,7 +495,11 @@ function PopulationTab({ config, setConfig }: TabProps) {
       </div>
 
       <div>
-        <Label htmlFor="generationSize">Generation Size (Gen 1+)</Label>
+        <LabelWithTooltip 
+          htmlFor="generationSize" 
+          label="Generation Size (Gen 1+)"
+          tooltip="Number of candidates in each generation after the first. This determines the population size for generations 1, 2, 3, etc."
+        />
         <Input
           id="generationSize"
           type="number"
@@ -716,9 +740,11 @@ function TestSetTab({ config, setConfig }: TabProps) {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <div className="text-sm text-muted-foreground">
-          Define tests for evaluating prompt quality
-        </div>
+        <LabelWithTooltip 
+          htmlFor="testset-section" 
+          label="Define tests for evaluating prompt quality"
+          tooltip="Tests evaluate candidate prompts. Exact Match: compares output to expected string (strict=exact, or use distance metrics like Levenshtein/Hamming for fuzzy matching). LLM Graded: uses service model to grade quality on 0-10 scale based on rubric/criteria."
+        />
         <Button size="sm" onClick={addTest}>
           Add Test
         </Button>
@@ -884,7 +910,11 @@ function VariationsTab({ config, setConfig }: TabProps) {
 
       {/* Mutation Share */}
       <div>
-        <Label htmlFor="mutationShare">Mutation Share (0-1)</Label>
+        <LabelWithTooltip 
+          htmlFor="mutationShare" 
+          label="Mutation Share (0-1)"
+          tooltip="Fraction of children created via random mutations. Mutations apply small, precise edits to prompts to explore variations."
+        />
         <Input
           id="mutationShare"
           type="number"
@@ -910,7 +940,11 @@ function VariationsTab({ config, setConfig }: TabProps) {
 
       {/* Crossover Share */}
       <div>
-        <Label htmlFor="crossoverShare">Crossover Share (0-1)</Label>
+        <LabelWithTooltip 
+          htmlFor="crossoverShare" 
+          label="Crossover Share (0-1)"
+          tooltip="Fraction of children created by merging two parent prompts. Crossover combines the best parts of successful prompts."
+        />
         <Input
           id="crossoverShare"
           type="number"
@@ -952,7 +986,11 @@ function VariationsTab({ config, setConfig }: TabProps) {
               })
             }
           />
-          <Label htmlFor="metaPrompting">Meta-Prompting</Label>
+          <LabelWithTooltip 
+            htmlFor="metaPrompting" 
+            label="Meta-Prompting"
+            tooltip="Uses LLM to analyze test failures and suggest targeted edits to fix them. When no failures exist, suggests general refinements for clarity, precision, and edge case handling."
+          />
         </div>
         {config.operators?.metaPrompting?.enabled && (
           <div>
@@ -1038,7 +1076,17 @@ function VariationsTab({ config, setConfig }: TabProps) {
 
       {/* Parameter Variation Section */}
       <div className="p-4 border rounded-lg space-y-4">
-        <h3 className="text-sm font-semibold">Parameter Variation</h3>
+        <div className="flex items-center gap-1.5 mb-2">
+          <h3 className="text-sm font-semibold">Parameter Variation</h3>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help flex-shrink-0" />
+            </TooltipTrigger>
+            <TooltipContent className="max-w-sm">
+              <p>Varies LLM parameters (like temperature) to explore different model behaviors while keeping the prompt unchanged. Helps find optimal generation settings.</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
         
         <div className="flex items-center space-x-2">
           <Switch
@@ -1225,9 +1273,11 @@ function FitnessTab({ config, setConfig }: TabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="text-sm text-muted-foreground">
-        Configure fitness function weights (will be auto-normalized)
-      </div>
+      <LabelWithTooltip 
+        htmlFor="fitness-section" 
+        label="Configure fitness function weights (will be auto-normalized)"
+        tooltip="Fitness function evaluates candidate prompts. Weights determine importance of each metric (Quality, Safety, Cost, Latency, Stability). All weights are normalized to sum to 1.0, so relative ratios matter. Higher weight = more influence on selection."
+      />
 
       {/* Formula Preview */}
       {normalized && (
@@ -1700,7 +1750,11 @@ function AdvancedTab({ config, setConfig }: TabProps) {
   return (
     <div className="space-y-4">
       <div>
-        <Label htmlFor="parallelLimit">Parallel Execution Limit</Label>
+        <LabelWithTooltip 
+          htmlFor="parallelLimit" 
+          label="Parallel Execution Limit"
+          tooltip="Maximum number of LLM API calls to run concurrently. Higher values speed up evaluation but may hit API rate limits."
+        />
         <Input
           id="parallelLimit"
           type="number"
@@ -1711,17 +1765,6 @@ function AdvancedTab({ config, setConfig }: TabProps) {
             setConfig({ ...config, parallelLimit: parseInt(e.target.value) || 5 })
           }
         />
-      </div>
-
-      <div className="flex items-center space-x-2">
-        <Switch
-          id="rawBlob"
-          checked={config.rawBlobCapture || false}
-          onCheckedChange={(checked) =>
-            setConfig({ ...config, rawBlobCapture: checked })
-          }
-        />
-        <Label htmlFor="rawBlob">Capture Raw API Responses</Label>
       </div>
 
       <div className="space-y-2">

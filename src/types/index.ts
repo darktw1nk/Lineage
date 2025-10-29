@@ -106,7 +106,6 @@ export interface EvaluationConfig {
   serviceModel: ModelRef; // for meta/mutation/crossover/grading
   parallelLimit: number;  // global N
   serviceModelMaxTokens: number; // Max tokens for ALL model calls (service + candidate)
-  rawBlobCapture?: boolean; // default false
 }
 
 export interface EvaluationRun {
@@ -158,7 +157,6 @@ export interface ProviderAdapter {
     completionTokens: number;
     latencyMs: number;
     usd: number;
-    rawPath?: string; // if rawBlobCapture enabled
   }>;
 }
 
