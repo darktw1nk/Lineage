@@ -46,6 +46,7 @@ import type {
 } from '../../src/types/index.js';
 import { mutateNode, crossoverNodes, metaPromptNode } from './operators_v2.js';
 import { varyParameters, shouldApplyParamVariation } from './paramvariation.js';
+import { varyModel, shouldApplyModelVariation } from './modelvariation.js';
 
 export interface GenerationResult {
   newNodes: CandidateNode[];
@@ -269,16 +270,16 @@ export async function createNextGeneration(
   console.log(`[Generation] Creating ${remainingChildren} new children via genetic operators (${numElite} elites already added)`);
   
   // Operator shares (applied to remaining children, not elites)
-  const mutationFactor = config.operators.mutationFactor;
-  const crossoverFactor = config.operators.crossoverFactor;
+  const mutationShare = config.operators.mutationShare;
+  const crossoverShare = config.operators.crossoverShare;
   const metaPromptShare = config.operators.metaPrompting?.enabled 
     ? (config.operators.metaPrompting.share || 0.2) 
     : 0;
   
   // Calculate operator counts for remaining children
   let numMeta = Math.round(remainingChildren * metaPromptShare);
-  let numCrossover = Math.round(remainingChildren * crossoverFactor);
-  let numMutation = Math.round(remainingChildren * mutationFactor);
+  let numCrossover = Math.round(remainingChildren * crossoverShare);
+  let numMutation = Math.round(remainingChildren * mutationShare);
   
   // Remaining go to carry-forward
   let numCarryForward = remainingChildren - numMeta - numCrossover - numMutation;
@@ -395,7 +396,6 @@ export async function createNextGeneration(
     // Parameter variation - applied independently of genetic operators
     const paramVariation = varyParameters(
       temperature,
-      model,
       config,
       shouldApplyParamVariation(config)
     );
@@ -403,11 +403,23 @@ export async function createNextGeneration(
     // Apply parameter variations
     if (paramVariation.changeLog.length > 0) {
       temperature = paramVariation.temperature;
-      if (paramVariation.model) {
-        model = paramVariation.model;
-      }
       changeLog.push(...paramVariation.changeLog);
       if (!operatorType) operatorType = 'param';
+    }
+    
+    // Model variation - applied independently (major structural decision)
+    const modelVariation = varyModel(
+      model,
+      config,
+      shouldApplyModelVariation(config),
+      config.enabledModels
+    );
+    
+    // Apply model variation
+    if (modelVariation.changeLog.length > 0) {
+      model = modelVariation.model;
+      changeLog.push(...modelVariation.changeLog);
+      if (!operatorType) operatorType = 'param'; // Still counts as param-ish for tracking
     }
     
     const newNode: CandidateNode = {

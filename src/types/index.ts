@@ -78,10 +78,15 @@ export interface EvaluationConfig {
     eliteShare?: number;  // 0..1: fraction of generation to preserve from previous generation (default 0.05 = 5%)
   };
   operators: {
-    mutationFactor: number; // 0..1
-    crossoverFactor: number; // 0..1
-    paramVariation?: { enabled: boolean; temperature: { min: number; max: number }; share: number };
+    mutationShare: number; // 0..1, renamed from mutationFactor
+    crossoverShare: number; // 0..1, renamed from crossoverFactor
     metaPrompting?: { enabled: boolean; share: number }; // default 0.2
+    modelVariation?: { enabled: boolean; share: number }; // random model selection
+    paramVariation?: { 
+      enabled: boolean; 
+      share: number; // param variation share (temperature, etc.)
+      temperature?: { enabled: boolean; min: number; max: number };
+    };
   };
   population: {
     size: number; // default 10

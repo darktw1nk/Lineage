@@ -35,16 +35,20 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
       eliteShare: 0.05,
     },
     operators: {
-      mutationFactor: 0.5,
-      crossoverFactor: 0.3,
-      paramVariation: {
-        enabled: false,
-        temperature: { min: 0.5, max: 1.5 },
-        share: 0.2,
-      },
+      mutationShare: 0.4,
+      crossoverShare: 0.3,
       metaPrompting: {
         enabled: false,
+        share: 0.1,
+      },
+      modelVariation: {
+        enabled: false,
         share: 0.2,
+      },
+      paramVariation: {
+        enabled: false,
+        share: 0.2,
+        temperature: { enabled: false, min: 0.5, max: 1.5 },
       },
     },
     population: {
@@ -204,7 +208,7 @@ Here is the bug report:
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className="grid w-full grid-cols-8">
             <TabsTrigger value="main" className={errors.main ? 'text-red-500' : ''}>
               Main
             </TabsTrigger>
@@ -217,6 +221,7 @@ Here is the bug report:
             <TabsTrigger value="testset" className={errors.testset ? 'text-red-500' : ''}>
               Test Set
             </TabsTrigger>
+            <TabsTrigger value="variations">Variations</TabsTrigger>
             <TabsTrigger value="fitness">Fitness</TabsTrigger>
             <TabsTrigger value="targets" className={errors.targets ? 'text-red-500' : ''}>
               Targets
@@ -239,6 +244,10 @@ Here is the bug report:
 
             <TabsContent value="testset" className="space-y-4 mt-0">
               <TestSetTab config={config} setConfig={setConfig} />
+            </TabsContent>
+
+            <TabsContent value="variations" className="space-y-4 mt-0">
+              <VariationsTab config={config} setConfig={setConfig} />
             </TabsContent>
 
             <TabsContent value="fitness" className="space-y-4 mt-0">
@@ -277,50 +286,6 @@ function MainTab({ config, setConfig }: TabProps) {
           value={config.name || ''}
           onChange={(e) => setConfig({ ...config, name: e.target.value })}
         />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="mutationFactor">Mutation Factor (0-1)</Label>
-          <Input
-            id="mutationFactor"
-            type="number"
-            step="0.1"
-            min="0"
-            max="1"
-            value={config.operators?.mutationFactor || 0.5}
-            onChange={(e) =>
-              setConfig({
-                ...config,
-                operators: {
-                  ...config.operators!,
-                  mutationFactor: parseFloat(e.target.value) || 0,
-                },
-              })
-            }
-          />
-        </div>
-
-        <div>
-          <Label htmlFor="crossoverFactor">Crossover Factor (0-1)</Label>
-          <Input
-            id="crossoverFactor"
-            type="number"
-            step="0.1"
-            min="0"
-            max="1"
-            value={config.operators?.crossoverFactor || 0.3}
-            onChange={(e) =>
-              setConfig({
-                ...config,
-                operators: {
-                  ...config.operators!,
-                  crossoverFactor: parseFloat(e.target.value) || 0,
-                },
-              })
-            }
-          />
-        </div>
       </div>
 
       <div>
@@ -428,144 +393,6 @@ function MainTab({ config, setConfig }: TabProps) {
           }
         </div>
       </div>
-
-      <div className="flex items-center space-x-2">
-        <Switch
-          id="tempVariation"
-          checked={config.operators?.paramVariation?.enabled || false}
-          onCheckedChange={(checked) =>
-            setConfig({
-              ...config,
-              operators: {
-                ...config.operators!,
-                paramVariation: {
-                  ...config.operators!.paramVariation!,
-                  enabled: checked,
-                },
-              },
-            })
-          }
-        />
-        <Label htmlFor="tempVariation">Enable Temperature Variations</Label>
-      </div>
-
-      {config.operators?.paramVariation?.enabled && (
-        <div className="grid grid-cols-3 gap-2 pl-6">
-          <div>
-            <Label htmlFor="tempMin">Min</Label>
-            <Input
-              id="tempMin"
-              type="number"
-              step="0.1"
-              value={config.operators?.paramVariation?.temperature.min || 0.5}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  operators: {
-                    ...config.operators!,
-                    paramVariation: {
-                      ...config.operators!.paramVariation!,
-                      temperature: {
-                        ...config.operators!.paramVariation!.temperature,
-                        min: parseFloat(e.target.value) || 0,
-                      },
-                    },
-                  },
-                })
-              }
-            />
-          </div>
-          <div>
-            <Label htmlFor="tempMax">Max</Label>
-            <Input
-              id="tempMax"
-              type="number"
-              step="0.1"
-              value={config.operators?.paramVariation?.temperature.max || 1.5}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  operators: {
-                    ...config.operators!,
-                    paramVariation: {
-                      ...config.operators!.paramVariation!,
-                      temperature: {
-                        ...config.operators!.paramVariation!.temperature,
-                        max: parseFloat(e.target.value) || 0,
-                      },
-                    },
-                  },
-                })
-              }
-            />
-          </div>
-          <div>
-            <Label htmlFor="tempShare">Share</Label>
-            <Input
-              id="tempShare"
-              type="number"
-              step="0.1"
-              value={config.operators?.paramVariation?.share || 0.2}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  operators: {
-                    ...config.operators!,
-                    paramVariation: {
-                      ...config.operators!.paramVariation!,
-                      share: parseFloat(e.target.value) || 0,
-                    },
-                  },
-                })
-              }
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-center space-x-2">
-        <Switch
-          id="metaPrompting"
-          checked={config.operators?.metaPrompting?.enabled || false}
-          onCheckedChange={(checked) =>
-            setConfig({
-              ...config,
-              operators: {
-                ...config.operators!,
-                metaPrompting: {
-                  ...config.operators!.metaPrompting!,
-                  enabled: checked,
-                },
-              },
-            })
-          }
-        />
-        <Label htmlFor="metaPrompting">Enable Meta-Prompting</Label>
-      </div>
-
-      {config.operators?.metaPrompting?.enabled && (
-        <div className="pl-6">
-          <Label htmlFor="metaShare">Meta-Prompting Share</Label>
-          <Input
-            id="metaShare"
-            type="number"
-            step="0.1"
-            value={config.operators?.metaPrompting?.share || 0.2}
-            onChange={(e) =>
-              setConfig({
-                ...config,
-                operators: {
-                  ...config.operators!,
-                  metaPrompting: {
-                    ...config.operators!.metaPrompting!,
-                    share: parseFloat(e.target.value) || 0,
-                  },
-                },
-              })
-            }
-          />
-        </div>
-      )}
     </div>
   );
 }
@@ -974,6 +801,370 @@ function TestSetTab({ config, setConfig }: TabProps) {
             )}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// Variations Tab
+function VariationsTab({ config, setConfig }: TabProps) {
+  // Calculate normalized shares for display
+  const mutationShare = config.operators?.mutationShare || 0;
+  const crossoverShare = config.operators?.crossoverShare || 0;
+  const metaShare = config.operators?.metaPrompting?.enabled ? (config.operators.metaPrompting.share || 0) : 0;
+  const modelShare = config.operators?.modelVariation?.enabled ? (config.operators.modelVariation.share || 0) : 0;
+  const paramShare = config.operators?.paramVariation?.enabled ? (config.operators.paramVariation.share || 0) : 0;
+  
+  const totalShare = mutationShare + crossoverShare + metaShare + modelShare + paramShare;
+  const carryForwardShare = Math.max(0, 1 - totalShare);
+  
+  const normalizedMutation = totalShare > 0 ? (mutationShare / totalShare) * 100 : 0;
+  const normalizedCrossover = totalShare > 0 ? (crossoverShare / totalShare) * 100 : 0;
+  const normalizedMeta = totalShare > 0 ? (metaShare / totalShare) * 100 : 0;
+  const normalizedModel = totalShare > 0 ? (modelShare / totalShare) * 100 : 0;
+  const normalizedParam = totalShare > 0 ? (paramShare / totalShare) * 100 : 0;
+  const normalizedCarry = totalShare > 0 ? (carryForwardShare / totalShare) * 100 : 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Normalized Shares Display */}
+      <div className="p-4 border rounded-lg bg-muted/30">
+        <h3 className="text-sm font-semibold mb-3">Operator Distribution (Normalized)</h3>
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span>Mutation:</span>
+            <span className="font-mono">{normalizedMutation.toFixed(1)}%</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Crossover:</span>
+            <span className="font-mono">{normalizedCrossover.toFixed(1)}%</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Meta-prompting:</span>
+            <span className="font-mono">{normalizedMeta.toFixed(1)}%</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Model Variation:</span>
+            <span className="font-mono">{normalizedModel.toFixed(1)}%</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Parameter Variation:</span>
+            <span className="font-mono">{normalizedParam.toFixed(1)}%</span>
+          </div>
+          <div className="flex justify-between border-t pt-2 mt-2">
+            <span>Carry-forward:</span>
+            <span className="font-mono">{normalizedCarry.toFixed(1)}%</span>
+          </div>
+        </div>
+        <div className="text-xs text-muted-foreground mt-3">
+          Total share: {totalShare.toFixed(2)} (carry-forward fills remaining: {carryForwardShare.toFixed(2)})
+        </div>
+      </div>
+
+      {/* Mutation Share */}
+      <div>
+        <Label htmlFor="mutationShare">Mutation Share (0-1)</Label>
+        <Input
+          id="mutationShare"
+          type="number"
+          step="0.05"
+          min="0"
+          max="1"
+          value={config.operators?.mutationShare || 0}
+          onChange={(e) =>
+            setConfig({
+              ...config,
+              operators: {
+                ...config.operators!,
+                mutationShare: parseFloat(e.target.value) || 0,
+              },
+            })
+          }
+          placeholder="0.4"
+        />
+        <div className="text-xs text-muted-foreground mt-1">
+          Fraction of children created via random mutations
+        </div>
+      </div>
+
+      {/* Crossover Share */}
+      <div>
+        <Label htmlFor="crossoverShare">Crossover Share (0-1)</Label>
+        <Input
+          id="crossoverShare"
+          type="number"
+          step="0.05"
+          min="0"
+          max="1"
+          value={config.operators?.crossoverShare || 0}
+          onChange={(e) =>
+            setConfig({
+              ...config,
+              operators: {
+                ...config.operators!,
+                crossoverShare: parseFloat(e.target.value) || 0,
+              },
+            })
+          }
+          placeholder="0.3"
+        />
+        <div className="text-xs text-muted-foreground mt-1">
+          Fraction of children created by combining two parents
+        </div>
+      </div>
+
+      {/* Meta-prompting */}
+      <div className="space-y-3">
+        <div className="flex items-center space-x-2">
+          <Switch
+            id="metaPrompting"
+            checked={config.operators?.metaPrompting?.enabled || false}
+            onCheckedChange={(checked) =>
+              setConfig({
+                ...config,
+                operators: {
+                  ...config.operators!,
+                  metaPrompting: checked
+                    ? { enabled: true, share: config.operators?.metaPrompting?.share || 0.1 }
+                    : { enabled: false, share: 0 },
+                },
+              })
+            }
+          />
+          <Label htmlFor="metaPrompting">Meta-Prompting</Label>
+        </div>
+        {config.operators?.metaPrompting?.enabled && (
+          <div>
+            <Label htmlFor="metaShare">Meta-Prompting Share (0-1)</Label>
+            <Input
+              id="metaShare"
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={config.operators?.metaPrompting?.share || 0}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  operators: {
+                    ...config.operators!,
+                    metaPrompting: {
+                      enabled: true,
+                      share: parseFloat(e.target.value) || 0,
+                    },
+                  },
+                })
+              }
+              placeholder="0.1"
+            />
+            <div className="text-xs text-muted-foreground mt-1">
+              Fraction of children created via LLM-driven prompt refinement based on test failures
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Model Variation */}
+      <div className="space-y-3">
+        <div className="flex items-center space-x-2">
+          <Switch
+            id="modelVariation"
+            checked={config.operators?.modelVariation?.enabled || false}
+            onCheckedChange={(checked) =>
+              setConfig({
+                ...config,
+                operators: {
+                  ...config.operators!,
+                  modelVariation: checked
+                    ? { enabled: true, share: config.operators?.modelVariation?.share || 0.2 }
+                    : { enabled: false, share: 0 },
+                },
+              })
+            }
+          />
+          <Label htmlFor="modelVariation">Model Variation</Label>
+        </div>
+        {config.operators?.modelVariation?.enabled && (
+          <div>
+            <Label htmlFor="modelShare">Model Variation Share (0-1)</Label>
+            <Input
+              id="modelShare"
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={config.operators?.modelVariation?.share || 0}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  operators: {
+                    ...config.operators!,
+                    modelVariation: {
+                      enabled: true,
+                      share: parseFloat(e.target.value) || 0,
+                    },
+                  },
+                })
+              }
+              placeholder="0.2"
+            />
+            <div className="text-xs text-muted-foreground mt-1">
+              Fraction of children with randomly selected models (explores different model capabilities)
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Parameter Variation Section */}
+      <div className="p-4 border rounded-lg space-y-4">
+        <h3 className="text-sm font-semibold">Parameter Variation</h3>
+        
+        <div className="flex items-center space-x-2">
+          <Switch
+            id="paramVariation"
+            checked={config.operators?.paramVariation?.enabled || false}
+            onCheckedChange={(checked) =>
+              setConfig({
+                ...config,
+                operators: {
+                  ...config.operators!,
+                  paramVariation: checked
+                    ? {
+                        enabled: true,
+                        share: config.operators?.paramVariation?.share || 0.2,
+                        temperature: config.operators?.paramVariation?.temperature || { enabled: false, min: 0.5, max: 1.5 },
+                      }
+                    : {
+                        enabled: false,
+                        share: 0,
+                        temperature: { enabled: false, min: 0.5, max: 1.5 },
+                      },
+                },
+              })
+            }
+          />
+          <Label htmlFor="paramVariation">Enable Parameter Variation</Label>
+        </div>
+
+        {config.operators?.paramVariation?.enabled && (
+          <>
+            <div>
+              <Label htmlFor="paramShare">Parameter Variation Share (0-1)</Label>
+              <Input
+                id="paramShare"
+                type="number"
+                step="0.05"
+                min="0"
+                max="1"
+                value={config.operators?.paramVariation?.share || 0}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    operators: {
+                      ...config.operators!,
+                      paramVariation: {
+                        ...config.operators!.paramVariation!,
+                        share: parseFloat(e.target.value) || 0,
+                      },
+                    },
+                  })
+                }
+                placeholder="0.2"
+              />
+              <div className="text-xs text-muted-foreground mt-1">
+                Overall fraction of children with varied execution parameters
+              </div>
+            </div>
+
+            {/* Temperature Variation */}
+            <div className="pl-4 border-l-2 space-y-3">
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="tempVariation"
+                  checked={config.operators?.paramVariation?.temperature?.enabled || false}
+                  onCheckedChange={(checked) =>
+                    setConfig({
+                      ...config,
+                      operators: {
+                        ...config.operators!,
+                        paramVariation: {
+                          ...config.operators!.paramVariation!,
+                          temperature: checked
+                            ? {
+                                enabled: true,
+                                min: config.operators?.paramVariation?.temperature?.min || 0.5,
+                                max: config.operators?.paramVariation?.temperature?.max || 1.5,
+                              }
+                            : { enabled: false, min: 0.5, max: 1.5 },
+                        },
+                      },
+                    })
+                  }
+                />
+                <Label htmlFor="tempVariation">Temperature Variation</Label>
+              </div>
+
+              {config.operators?.paramVariation?.temperature?.enabled && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label htmlFor="tempMin">Min Temperature</Label>
+                    <Input
+                      id="tempMin"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="2"
+                      value={config.operators?.paramVariation?.temperature?.min || 0.5}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          operators: {
+                            ...config.operators!,
+                            paramVariation: {
+                              ...config.operators!.paramVariation!,
+                              temperature: {
+                                enabled: true,
+                                min: parseFloat(e.target.value) || 0.5,
+                                max: config.operators!.paramVariation!.temperature!.max,
+                              },
+                            },
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="tempMax">Max Temperature</Label>
+                    <Input
+                      id="tempMax"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="2"
+                      value={config.operators?.paramVariation?.temperature?.max || 1.5}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          operators: {
+                            ...config.operators!,
+                            paramVariation: {
+                              ...config.operators!.paramVariation!,
+                              temperature: {
+                                enabled: true,
+                                min: config.operators!.paramVariation!.temperature!.min,
+                                max: parseFloat(e.target.value) || 1.5,
+                              },
+                            },
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
