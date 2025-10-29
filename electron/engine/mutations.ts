@@ -103,7 +103,11 @@ ${strategiesList}
 For each strategy above, propose a concrete edit. Return JSON list with the category prefix preserved:
 [{"label":"MUTATION","edit":"[Category] Specific change description"}]
 
-IMPORTANT: Keep the [Category] prefix from each strategy in your edit descriptions.`;
+IMPORTANT: Keep the [Category] prefix from each strategy in your edit descriptions. 
+VERY IMPORTANT: Return only this JSON, nothing else. 
+`;
+
+
     
     const proposalResult = await serviceAdapter.call({
       model: config.serviceModel.model,
