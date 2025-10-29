@@ -230,7 +230,7 @@ Here is the bug report:
             <TabsTrigger value="advanced">Advanced</TabsTrigger>
           </TabsList>
 
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="overflow-y-auto p-4 h-[500px] min-h-0">
             <TabsContent value="main" className="space-y-4 mt-0">
               <MainTab config={config} setConfig={setConfig} />
             </TabsContent>
