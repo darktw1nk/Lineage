@@ -1,14 +1,14 @@
 /**
  * Generation Creation and Selection
  * 
- * Handles:
+ * Orchestrates the creation of new generations through:
  * - Selection (Top-K, Top-P)
  * - Elitism: carry over best performers from PREVIOUS generation
  * - Fair weighted distribution: better parents get more children proportional to rank
  * - Fixed population size: each generation has exactly the same number of nodes
  * - Guaranteed participation: when Y >= N, every parent gets at least 1 child
  * - Genetic operators (mutation, crossover, meta-prompting, carry-forward)
- * - Parameter variation (temperature)
+ * - Parameter variation (temperature, future: model, seed, etc.)
  * - Proper lineage tracking (crossover tracks BOTH parents)
  * 
  * Generation Creation Flow:
@@ -25,7 +25,8 @@
  *       - If remaining >= X: seed 1 per parent, distribute rest proportionally
  *       - If remaining < X: pure proportional (some may get 0)
  *    d. Calculate operator counts from shares and shuffle
- *    e. Create children with assigned (parent, operator, model, temperature)
+ *    e. Create children with assigned (parent, operator)
+ *    f. Apply parameter variation independently (via paramvariation.ts)
  * 
  * Example (10 nodes, eliteShare=0.05, 3 current-gen parents):
  *   Elite: 1 node (best from previous generation)
@@ -44,6 +45,7 @@ import type {
   ChangeLogLine,
 } from '../../src/types/index.js';
 import { mutateNode, crossoverNodes, metaPromptNode } from './operators_v2.js';
+import { varyParameters, shouldApplyParamVariation } from './paramvariation.js';
 
 export interface GenerationResult {
   newNodes: CandidateNode[];
@@ -272,9 +274,6 @@ export async function createNextGeneration(
   const metaPromptShare = config.operators.metaPrompting?.enabled 
     ? (config.operators.metaPrompting.share || 0.2) 
     : 0;
-  const paramVariationShare = config.operators.paramVariation?.enabled 
-    ? (config.operators.paramVariation.share || 0.2) 
-    : 0;
   
   // Calculate operator counts for remaining children
   let numMeta = Math.round(remainingChildren * metaPromptShare);
@@ -393,15 +392,22 @@ export async function createNextGeneration(
       changeLog = [{ label: 'ERROR', text: `Operator '${operator}' failed, using parent` }];
     }
     
-    // Parameter variation (temperature) - applied independently
-    if (config.operators.paramVariation?.enabled && Math.random() < paramVariationShare) {
-      const tempConfig = config.operators.paramVariation.temperature;
-      const min = tempConfig.min || 0.3;
-      const max = tempConfig.max || 1.5;
-      temperature = min + Math.random() * (max - min);
-      changeLog.push({ label: 'PARAM', text: `Temperature varied to ${temperature.toFixed(2)}` });
+    // Parameter variation - applied independently of genetic operators
+    const paramVariation = varyParameters(
+      temperature,
+      model,
+      config,
+      shouldApplyParamVariation(config)
+    );
+    
+    // Apply parameter variations
+    if (paramVariation.changeLog.length > 0) {
+      temperature = paramVariation.temperature;
+      if (paramVariation.model) {
+        model = paramVariation.model;
+      }
+      changeLog.push(...paramVariation.changeLog);
       if (!operatorType) operatorType = 'param';
-      console.log(`[Generation] Child ${i}: Temperature varied to ${temperature.toFixed(2)}`);
     }
     
     const newNode: CandidateNode = {

@@ -7,6 +7,7 @@
  * Note: Basic mutation moved to mutations.ts
  * Note: Crossover moved to crossover.ts
  * Note: Meta-prompting moved to metaprompting.ts
+ * Note: Parameter variation moved to paramvariation.ts
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -14,6 +15,7 @@ import type { CandidateNode, EvaluationConfig, ModelRef, ChangeLogLine } from '.
 export { mutateNode } from './mutations.js';
 export { crossoverNodes } from './crossover.js';
 export { metaPromptNode } from './metaprompting.js';
+export { varyParameters, shouldApplyParamVariation, getDefaultTemperature } from './paramvariation.js';
 
 /**
  * Creates shell nodes for initial population
