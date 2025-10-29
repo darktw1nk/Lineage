@@ -19,6 +19,7 @@ interface NewEvaluationModalProps {
 
 export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalProps) {
   const [activeTab, setActiveTab] = useState('main');
+  const [isSimpleMode, setIsSimpleMode] = useState(true);
   
   // Generate new ID each time modal is opened to avoid conflicts
   const [configId] = useState(() => uuidv4());
@@ -41,11 +42,11 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
       mutationShare: 0.4,
       crossoverShare: 0.3,
       metaPrompting: {
-        enabled: false,
-        share: 0.1,
+        enabled: true,
+        share: 0.2,
       },
       modelVariation: {
-        enabled: false,
+        enabled: true,
         share: 0.2,
       },
       paramVariation: {
@@ -116,6 +117,25 @@ Here is the bug report:
       }));
     }
   }, [settings]);
+
+  // Ensure topK doesn't exceed generationSize in simple mode
+  useEffect(() => {
+    if (isSimpleMode && config.selection?.policy === 'topk') {
+      const generationSize = config.population?.generationSize || 10;
+      const currentTopK = config.selection?.topK || 4;
+      const maxTopK = Math.min(4, generationSize);
+      
+      if (currentTopK > maxTopK) {
+        setConfig(prev => ({
+          ...prev,
+          selection: {
+            ...prev.selection!,
+            topK: maxTopK,
+          },
+        }));
+      }
+    }
+  }, [isSimpleMode, config.population?.generationSize, config.selection?.policy]);
 
   const createEvaluation = useMutation({
     mutationFn: async (config: EvaluationConfig) => {
@@ -205,14 +225,24 @@ Here is the bug report:
       <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>New Evaluation</DialogTitle>
+          <div className="flex items-center justify-between pr-8">
+            <DialogTitle>New Evaluation</DialogTitle>
+            <div className="flex items-center gap-2 text-sm">
+              <span className={isSimpleMode ? 'font-medium' : 'text-muted-foreground'}>Simple</span>
+              <Switch
+                checked={!isSimpleMode}
+                onCheckedChange={(checked) => setIsSimpleMode(!checked)}
+              />
+              <span className={!isSimpleMode ? 'font-medium' : 'text-muted-foreground'}>Advanced</span>
+            </div>
+          </div>
           <DialogDescription>
             Configure and start a new prompt evolution evaluation
           </DialogDescription>
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-8">
+          <TabsList className={`grid w-full ${isSimpleMode ? 'grid-cols-6' : 'grid-cols-8'}`}>
             <TabsTrigger value="main" className={errors.main ? 'text-red-500' : ''}>
               Main
             </TabsTrigger>
@@ -225,12 +255,16 @@ Here is the bug report:
             <TabsTrigger value="testset" className={errors.testset ? 'text-red-500' : ''}>
               Test Set
             </TabsTrigger>
-            <TabsTrigger value="variations">Variations</TabsTrigger>
+            {!isSimpleMode && (
+              <TabsTrigger value="variations">Variations</TabsTrigger>
+            )}
             <TabsTrigger value="fitness">Fitness</TabsTrigger>
             <TabsTrigger value="targets" className={errors.targets ? 'text-red-500' : ''}>
               Targets
             </TabsTrigger>
-            <TabsTrigger value="advanced">Advanced</TabsTrigger>
+            {!isSimpleMode && (
+              <TabsTrigger value="advanced">Service</TabsTrigger>
+            )}
           </TabsList>
 
           <div 
@@ -245,11 +279,11 @@ Here is the bug report:
             } as React.CSSProperties}
           >
             <TabsContent value="main" className="space-y-4 mt-0">
-              <MainTab config={config} setConfig={setConfig} />
+              <MainTab config={config} setConfig={setConfig} isSimpleMode={isSimpleMode} />
             </TabsContent>
 
             <TabsContent value="population" className="space-y-4 mt-0">
-              <PopulationTab config={config} setConfig={setConfig} />
+              <PopulationTab config={config} setConfig={setConfig} isSimpleMode={isSimpleMode} />
             </TabsContent>
 
             <TabsContent value="models" className="space-y-4 mt-0">
@@ -257,12 +291,14 @@ Here is the bug report:
             </TabsContent>
 
             <TabsContent value="testset" className="space-y-4 mt-0">
-              <TestSetTab config={config} setConfig={setConfig} />
+              <TestSetTab config={config} setConfig={setConfig} isSimpleMode={isSimpleMode} />
             </TabsContent>
 
-            <TabsContent value="variations" className="space-y-4 mt-0">
-              <VariationsTab config={config} setConfig={setConfig} />
-            </TabsContent>
+            {!isSimpleMode && (
+              <TabsContent value="variations" className="space-y-4 mt-0">
+                <VariationsTab config={config} setConfig={setConfig} />
+              </TabsContent>
+            )}
 
             <TabsContent value="fitness" className="space-y-4 mt-0">
               <FitnessTab config={config} setConfig={setConfig} />
@@ -272,9 +308,11 @@ Here is the bug report:
               <TargetsTab config={config} setConfig={setConfig} />
             </TabsContent>
 
-            <TabsContent value="advanced" className="space-y-4 mt-0">
-              <AdvancedTab config={config} setConfig={setConfig} />
-            </TabsContent>
+            {!isSimpleMode && (
+              <TabsContent value="advanced" className="space-y-4 mt-0">
+                <AdvancedTab config={config} setConfig={setConfig} />
+              </TabsContent>
+            )}
           </div>
         </Tabs>
 
@@ -291,7 +329,7 @@ Here is the bug report:
 }
 
 // Main Tab
-function MainTab({ config, setConfig }: TabProps) {
+function MainTab({ config, setConfig, isSimpleMode }: TabProps) {
   return (
     <div className="space-y-4">
       <div>
@@ -303,13 +341,15 @@ function MainTab({ config, setConfig }: TabProps) {
         />
       </div>
 
-      <div>
-        <LabelWithTooltip 
-          htmlFor="selectionPolicy" 
-          label="Selection Policy"
-          tooltip="How to select parents for the next generation. Top-K selects the best K candidates. Top-P selects candidates until their cumulative fitness reaches P% of total fitness."
-        />
-        <select
+      {!isSimpleMode && (
+        <>
+          <div>
+            <LabelWithTooltip 
+              htmlFor="selectionPolicy" 
+              label="Selection Policy"
+              tooltip="How to select parents for the next generation. Top-K selects the best K candidates. Top-P selects candidates until their cumulative fitness reaches P% of total fitness."
+            />
+            <select
           id="selectionPolicy"
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           value={config.selection?.policy || 'topk'}
@@ -389,42 +429,44 @@ function MainTab({ config, setConfig }: TabProps) {
         </div>
       )}
 
-      <div>
-        <LabelWithTooltip 
-          htmlFor="eliteShare" 
-          label="Elite Share (0-1)"
-          tooltip="Fraction of the best candidates from the previous generation to carry forward unchanged. Ensures the best solutions are never lost. Always carries at least 1 elite when enabled."
-        />
-        <Input
-          id="eliteShare"
-          type="number"
-          min="0"
-          max="0.5"
-          value={config.selection?.eliteShare || 0}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              selection: {
-                ...config.selection!,
-                eliteShare: parseFloat(e.target.value) || 0,
-              },
-            })
-          }
-          placeholder="0.05"
-        />
-        <div className="text-xs text-muted-foreground mt-1">
-          {config.selection?.eliteShare && config.selection.eliteShare > 0
-            ? `Will carry over ${Math.round((config.selection.eliteShare) * 100)}% best nodes from previous generation (minimum 1, currently ${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.generationSize || 10)))} elite${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.generationSize || 10))) === 1 ? '' : 's'})`
-            : 'Elitism disabled. When enabled, always carries at least 1 best node from previous generation'
-          }
-        </div>
-      </div>
+          <div>
+            <LabelWithTooltip 
+              htmlFor="eliteShare" 
+              label="Elite Share (0-1)"
+              tooltip="Fraction of the best candidates from the previous generation to carry forward unchanged. Ensures the best solutions are never lost. Always carries at least 1 elite when enabled."
+            />
+            <Input
+              id="eliteShare"
+              type="number"
+              min="0"
+              max="0.5"
+              value={config.selection?.eliteShare || 0}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  selection: {
+                    ...config.selection!,
+                    eliteShare: parseFloat(e.target.value) || 0,
+                  },
+                })
+              }
+              placeholder="0.05"
+            />
+            <div className="text-xs text-muted-foreground mt-1">
+              {config.selection?.eliteShare && config.selection.eliteShare > 0
+                ? `Will carry over ${Math.round((config.selection.eliteShare) * 100)}% best nodes from previous generation (minimum 1, currently ${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.generationSize || 10)))} elite${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.generationSize || 10))) === 1 ? '' : 's'})`
+                : 'Elitism disabled. When enabled, always carries at least 1 best node from previous generation'
+              }
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
 // Population Tab
-function PopulationTab({ config, setConfig }: TabProps) {
+function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
   const { data: costs = [] } = useQuery<ModelCostEntry[]>({
     queryKey: ['costs'],
     queryFn: () => window.electronAPI.costs.getAll(),
@@ -478,82 +520,119 @@ function PopulationTab({ config, setConfig }: TabProps) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <LabelWithTooltip 
-          htmlFor="initialSize" 
-          label="Initial Population Size (Generation 0)"
-          tooltip="Number of candidates in the first generation. Use a larger value for broader initial exploration or a smaller value for faster startup."
-        />
-        <Input
-          id="initialSize"
-          type="number"
-          min="1"
-          value={config.population?.initialSize || 10}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              population: {
-                ...config.population!,
-                initialSize: parseInt(e.target.value) || 10,
-              },
-            })
-          }
-        />
-        <div className="text-xs text-muted-foreground mt-1">
-          Number of candidates in the first generation
+      {isSimpleMode ? (
+        <div>
+          <LabelWithTooltip 
+            htmlFor="populationSize" 
+            label="Population Size"
+            tooltip="Number of candidate prompts in each generation. Higher values explore more variations but take longer to evaluate."
+          />
+          <Input
+            id="populationSize"
+            type="number"
+            min="1"
+            value={config.population?.generationSize || 10}
+            onChange={(e) => {
+              const size = parseInt(e.target.value) || 10;
+              setConfig({
+                ...config,
+                population: {
+                  ...config.population!,
+                  initialSize: size,
+                  generationSize: size,
+                },
+              });
+            }}
+          />
+          <div className="text-xs text-muted-foreground mt-1">
+            Number of candidates per generation
+          </div>
         </div>
-      </div>
+      ) : (
+        <>
+          <div>
+            <LabelWithTooltip 
+              htmlFor="initialSize" 
+              label="Initial Population Size (Generation 0)"
+              tooltip="Number of candidates in the first generation. Use a larger value for broader initial exploration or a smaller value for faster startup."
+            />
+            <Input
+              id="initialSize"
+              type="number"
+              min="1"
+              value={config.population?.initialSize || 10}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  population: {
+                    ...config.population!,
+                    initialSize: parseInt(e.target.value) || 10,
+                  },
+                })
+              }
+            />
+            <div className="text-xs text-muted-foreground mt-1">
+              Number of candidates in the first generation
+            </div>
+          </div>
 
-      <div>
-        <LabelWithTooltip 
-          htmlFor="generationSize" 
-          label="Generation Size (Gen 1+)"
-          tooltip="Number of candidates in each generation after the first. This determines the population size for generations 1, 2, 3, etc."
-        />
-        <Input
-          id="generationSize"
-          type="number"
-          min="1"
-          value={config.population?.generationSize || 10}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              population: {
-                ...config.population!,
-                generationSize: parseInt(e.target.value) || 10,
-              },
-            })
-          }
-        />
-        <div className="text-xs text-muted-foreground mt-1">
-          Number of candidates in each subsequent generation
-        </div>
-      </div>
+          <div>
+            <LabelWithTooltip 
+              htmlFor="generationSize" 
+              label="Generation Size (Gen 1+)"
+              tooltip="Number of candidates in each generation after the first. This determines the population size for generations 1, 2, 3, etc."
+            />
+            <Input
+              id="generationSize"
+              type="number"
+              min="1"
+              value={config.population?.generationSize || 10}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  population: {
+                    ...config.population!,
+                    generationSize: parseInt(e.target.value) || 10,
+                  },
+                })
+              }
+            />
+            <div className="text-xs text-muted-foreground mt-1">
+              Number of candidates in each subsequent generation
+            </div>
+          </div>
 
-      <div>
-        <Label htmlFor="fill">Population Fill Mode</Label>
-        <select
-          id="fill"
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          value={config.population?.fill || 'auto'}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              population: {
-                ...config.population!,
-                fill: e.target.value as 'auto' | 'manual',
-              },
-            })
-          }
-        >
-          <option value="auto">Auto (generate via mutations from seed)</option>
-          <option value="manual">Manual (specify each prompt)</option>
-        </select>
-      </div>
+          <div>
+            <Label htmlFor="fill">Population Fill Mode</Label>
+            <select
+              id="fill"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={config.population?.fill || 'auto'}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  population: {
+                    ...config.population!,
+                    fill: e.target.value as 'auto' | 'manual',
+                  },
+                })
+              }
+            >
+              <option value="auto">Auto (generate via mutations from seed)</option>
+              <option value="manual">Manual (specify each prompt)</option>
+            </select>
+          </div>
+        </>
+      )}
 
       {!isManualMode ? (
         <div>
           <Label htmlFor="seedPrompt">Seed Prompt</Label>
+          {isSimpleMode && (
+            <div className="text-xs text-muted-foreground mb-2">
+              The initial population will be generated by mutating this seed prompt
+            </div>
+          )}
           <textarea
             id="seedPrompt"
             className="w-full h-32 rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -721,7 +800,7 @@ function ModelsTab({ config, setConfig }: TabProps) {
 }
 
 // Test Set Tab
-function TestSetTab({ config, setConfig }: TabProps) {
+function TestSetTab({ config, setConfig, isSimpleMode }: TabProps) {
   const addTest = () => {
     const newTest: TestCase = {
       id: uuidv4(),
@@ -765,6 +844,12 @@ function TestSetTab({ config, setConfig }: TabProps) {
         </Button>
       </div>
 
+      {isSimpleMode && (
+        <div className="text-xs text-muted-foreground">
+          Tests are evaluated using LLM grading on a 0-10 scale
+        </div>
+      )}
+
       <div className="space-y-4">
         {(config.testSet || []).map((test) => (
           <div key={test.id} className="border rounded-lg p-4 space-y-3">
@@ -784,19 +869,21 @@ function TestSetTab({ config, setConfig }: TabProps) {
               </Button>
             </div>
 
-            <div>
-              <Label>Mode</Label>
-              <select
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={test.mode}
-                onChange={(e) =>
-                  updateTest(test.id, { mode: e.target.value as any })
-                }
-              >
-                <option value="llm_grade">LLM Graded (1-10)</option>
-                <option value="exact_match">Exact Match</option>
-              </select>
-            </div>
+            {!isSimpleMode && (
+              <div>
+                <Label>Mode</Label>
+                <select
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={test.mode}
+                  onChange={(e) =>
+                    updateTest(test.id, { mode: e.target.value as any })
+                  }
+                >
+                  <option value="llm_grade">LLM Graded (1-10)</option>
+                  <option value="exact_match">Exact Match</option>
+                </select>
+              </div>
+            )}
 
             <div>
               <Label>Test Prompt</Label>
@@ -1734,7 +1821,7 @@ function TargetsTab({ config, setConfig }: TabProps) {
   );
 }
 
-// Advanced Tab
+// Service Tab
 function AdvancedTab({ config, setConfig }: TabProps) {
   const { data: costs = [] } = useQuery<ModelCostEntry[]>({
     queryKey: ['costs'],
@@ -1795,5 +1882,6 @@ function AdvancedTab({ config, setConfig }: TabProps) {
 type TabProps = {
   config: Partial<EvaluationConfig>;
   setConfig: (config: Partial<EvaluationConfig>) => void;
+  isSimpleMode?: boolean;
 };
 
