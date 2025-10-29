@@ -1,7 +1,7 @@
 {
   "name": "evolution2",
   "version": "1.0.0",
-  "description": "Prompt Evolution - Genetic Algorithm for LLM Prompt Optimization",
+  "description": "PromptEngine.AI - Genetic Algorithm for LLM Prompt Optimization",
   "author": "",
   "main": "dist-electron/main.js",
   "type": "module",

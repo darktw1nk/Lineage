@@ -1,4 +1,4 @@
-# Prompt Evolution
+# PromptEngine.AI
 
 A desktop application for evolving and optimizing LLM prompts using genetic algorithms.
 
