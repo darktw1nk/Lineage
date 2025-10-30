@@ -389,15 +389,20 @@ function MainTab({ config, setConfig, isSimpleMode }: TabProps) {
             min="1"
             max={config.population?.generationSize || 10}
             value={config.selection?.topK || 4}
-            onChange={(e) =>
-              setConfig({
-                ...config,
-                selection: {
-                  ...config.selection!,
-                  topK: parseInt(e.target.value) || 4,
-                },
-              })
-            }
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value === '') return;
+              const num = parseInt(value);
+              if (!isNaN(num) && num > 0) {
+                setConfig({
+                  ...config,
+                  selection: {
+                    ...config.selection!,
+                    topK: num,
+                  },
+                });
+              }
+            }}
           />
           <div className="text-xs text-muted-foreground mt-1">
             Will select top {config.selection?.topK || 4} candidates from each generation
@@ -533,15 +538,19 @@ function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
             min="1"
             value={config.population?.generationSize || 10}
             onChange={(e) => {
-              const size = parseInt(e.target.value) || 10;
-              setConfig({
-                ...config,
-                population: {
-                  ...config.population!,
-                  initialSize: size,
-                  generationSize: size,
-                },
-              });
+              const value = e.target.value;
+              if (value === '') return; // Allow clearing
+              const size = parseInt(value);
+              if (!isNaN(size) && size > 0) {
+                setConfig({
+                  ...config,
+                  population: {
+                    ...config.population!,
+                    initialSize: size,
+                    generationSize: size,
+                  },
+                });
+              }
             }}
           />
           <div className="text-xs text-muted-foreground mt-1">
@@ -561,15 +570,20 @@ function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
               type="number"
               min="1"
               value={config.population?.initialSize || 10}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  population: {
-                    ...config.population!,
-                    initialSize: parseInt(e.target.value) || 10,
-                  },
-                })
-              }
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === '') return;
+                const size = parseInt(value);
+                if (!isNaN(size) && size > 0) {
+                  setConfig({
+                    ...config,
+                    population: {
+                      ...config.population!,
+                      initialSize: size,
+                    },
+                  });
+                }
+              }}
             />
             <div className="text-xs text-muted-foreground mt-1">
               Number of candidates in the first generation
@@ -587,15 +601,20 @@ function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
               type="number"
               min="1"
               value={config.population?.generationSize || 10}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  population: {
-                    ...config.population!,
-                    generationSize: parseInt(e.target.value) || 10,
-                  },
-                })
-              }
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === '') return;
+                const size = parseInt(value);
+                if (!isNaN(size) && size > 0) {
+                  setConfig({
+                    ...config,
+                    population: {
+                      ...config.population!,
+                      generationSize: size,
+                    },
+                  });
+                }
+              }}
             />
             <div className="text-xs text-muted-foreground mt-1">
               Number of candidates in each subsequent generation
@@ -1795,15 +1814,29 @@ function TargetsTab({ config, setConfig }: TabProps) {
               type="number"
               min="1"
               value={config.targets?.maxGenerations || ''}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  targets: {
-                    ...config.targets!,
-                    maxGenerations: parseInt(e.target.value) || undefined,
-                  },
-                })
-              }
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === '') {
+                  setConfig({
+                    ...config,
+                    targets: {
+                      ...config.targets!,
+                      maxGenerations: undefined,
+                    },
+                  });
+                  return;
+                }
+                const num = parseInt(value);
+                if (!isNaN(num) && num > 0) {
+                  setConfig({
+                    ...config,
+                    targets: {
+                      ...config.targets!,
+                      maxGenerations: num,
+                    },
+                  });
+                }
+              }}
               placeholder="10"
               className="w-24"
             />
@@ -1842,9 +1875,14 @@ function AdvancedTab({ config, setConfig }: TabProps) {
           min="1"
           max="20"
           value={config.parallelLimit || 5}
-          onChange={(e) =>
-            setConfig({ ...config, parallelLimit: parseInt(e.target.value) || 5 })
-          }
+          onChange={(e) => {
+            const value = e.target.value;
+            if (value === '') return;
+            const num = parseInt(value);
+            if (!isNaN(num) && num > 0) {
+              setConfig({ ...config, parallelLimit: num });
+            }
+          }}
         />
       </div>
 

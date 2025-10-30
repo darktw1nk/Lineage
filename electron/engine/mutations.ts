@@ -102,6 +102,7 @@ ${strategiesList}
 
 For each strategy above, propose a concrete edit. Return JSON list with the category prefix preserved:
 [{"label":"MUTATION","edit":"[Category] Specific change description"}]
+Always answer in JSON format, not simple text, json. 
 
 IMPORTANT: Keep the [Category] prefix from each strategy in your edit descriptions. 
 VERY IMPORTANT: Return only this JSON, nothing else. 
