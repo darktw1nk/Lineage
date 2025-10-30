@@ -89,13 +89,13 @@ Here is the bug report:
         stability: 0,
       },
       guardrails: [],
-      costNorm: { mode: 'absolute', maxUSDPerCall: 0.1 },
-      latencyNorm: { mode: 'absolute', maxMs: 30000 },
+      costNorm: { mode: 'relative', maxUSDPerCall: 0.1 },
+      latencyNorm: { mode: 'relative', maxMs: 30000 },
     },
     targets: {
       timeLimitMs: 3600000, // 1 hour
       budgetUSD: 10,
-      targetFitness: 9.0,
+      targetFitness: undefined, // Disabled by default
       maxGenerations: 3,
     },
     serviceModel: settings?.serviceModel || undefined,
@@ -120,7 +120,7 @@ Here is the bug report:
     }
   }, [settings]);
 
-  // Ensure topK doesn't exceed generationSize in simple mode
+  // Ensure topK doesn't exceed generationSize in simple mode (debounced to avoid interfering with typing)
   useEffect(() => {
     if (isSimpleMode && config.selection?.policy === 'topk') {
       const generationSize = config.population?.generationSize || 10;
@@ -128,13 +128,17 @@ Here is the bug report:
       const maxTopK = Math.min(4, generationSize);
       
       if (currentTopK > maxTopK) {
-        setConfig(prev => ({
-          ...prev,
-          selection: {
-            ...prev.selection!,
-            topK: maxTopK,
-          },
-        }));
+        // Debounce to avoid interfering with user typing
+        const timer = setTimeout(() => {
+          setConfig(prev => ({
+            ...prev,
+            selection: {
+              ...prev.selection!,
+              topK: maxTopK,
+            },
+          }));
+        }, 500); // Wait 500ms after user stops typing
+        return () => clearTimeout(timer);
       }
     }
   }, [isSimpleMode, config.population?.generationSize, config.selection?.policy]);
