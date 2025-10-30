@@ -106,6 +106,7 @@ export interface EvaluationConfig {
   serviceModel: ModelRef; // for meta/mutation/crossover/grading
   parallelLimit: number;  // global N
   serviceModelMaxTokens: number; // Max tokens for ALL model calls (service + candidate)
+  retries: number; // Number of retry attempts for JSON parsing failures (copied from global settings)
 }
 
 export interface EvaluationRun {
@@ -139,6 +140,7 @@ export interface AppSettings {
   };
   serviceModel: ModelRef;
   serviceModelMaxTokens: number; // Max tokens for service model calls (mutations, grading, safety)
+  retries: number; // Global retry limit for JSON parsing and other non-network failures (default: 3)
 }
 
 // Provider Adapter Interface

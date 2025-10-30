@@ -2,6 +2,7 @@
  * Mutation Operations
  * 
  * Handles prompt mutation using LLM-based edit proposals and application
+ * Includes retry logic for JSON parsing failures with cost tracking
  */
 
 import type { EvaluationConfig, ChangeLogLine } from '../../src/types/index.js';
@@ -78,115 +79,132 @@ export async function mutateNode(
 ): Promise<{ prompt: string; changeLog: ChangeLogLine[]; cost: { promptTokens: number; completionTokens: number; usd: number; calls: number } }> {
   const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
+  const maxRetries = config.retries ?? 3;
   
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
   let totalUsd = 0;
   let totalCalls = 0;
   
-  try {
-    // Select 1-3 random mutation strategies
-    const numStrategies = Math.floor(Math.random() * 3) + 1; // 1-3 strategies
-    const selectedStrategies = selectRandomStrategies(numStrategies);
-    
-    console.log(`[Mutation] Selected ${numStrategies} strategies:`, selectedStrategies);
-    
-    // Step 1: Propose edits using selected strategies
-    const strategiesList = selectedStrategies.map((s, i) => `${i + 1}. ${s}`).join('\n');
-    const proposalPrompt = `SYSTEM: You will get a prompt from a user, 
-    propose SMALL, PRECISE mutations to improve a prompt based on strategies below.
+  // Select 1-3 random mutation strategies (once, reused across retries)
+  const numStrategies = Math.floor(Math.random() * 3) + 1;
+  const selectedStrategies = selectRandomStrategies(numStrategies);
+  console.log(`[Mutation] Selected ${numStrategies} strategies:`, selectedStrategies);
+  
+  const strategiesList = selectedStrategies.map((s, i) => `${i + 1}. ${s}`).join('\n');
+  const proposalPrompt = `SYSTEM: You will get a prompt from a user, 
+  propose SMALL, PRECISE mutations to improve a prompt based on strategies below.
 
 Apply these specific mutation strategies:
 ${strategiesList}
-    
+  
 For each strategy above, propose a concrete edit. 
 
 Return JSON list with the category prefix preserved:
 [{"label":"MUTATION","edit":"[Category] Specific change description"}]
 Always answer in JSON format, not simple text, json. 
 IMPORTANT: Keep the [Category] prefix from each strategy in your edit descriptions. 
-    
+  
 USER: Candidate prompt: <<<
 ${basePrompt}
 >>>`;
 
-
-    
-    const proposalResult = await serviceAdapter.call({
-      model: config.serviceModel.model,
-      prompt: proposalPrompt,
-      temperature: 1.0,
-      maxTokens,
-    });
-    
-    totalPromptTokens += proposalResult.promptTokens;
-    totalCompletionTokens += proposalResult.completionTokens;
-    totalUsd += proposalResult.usd;
-    totalCalls++;
-    
-    if (!proposalResult.output || proposalResult.output.trim() === '') {
-      throw new Error('Empty response from service model (proposal step)');
-    }
-    
-    // Parse edits
-    let edits: any[];
+  // Step 1: Propose edits with retry for JSON parsing
+  let edits: any[];
+  let lastProposalError: Error | undefined;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
+      if (attempt > 0) {
+        console.log(`[Mutation] Retry attempt ${attempt + 1}/${maxRetries} for proposal step`);
+      }
+      
+      const proposalResult = await serviceAdapter.call({
+        model: config.serviceModel.model,
+        prompt: proposalPrompt,
+        temperature: 1.0,
+        maxTokens,
+      });
+      
+      // ALWAYS track costs, even if parsing fails later
+      totalPromptTokens += proposalResult.promptTokens;
+      totalCompletionTokens += proposalResult.completionTokens;
+      totalUsd += proposalResult.usd;
+      totalCalls++;
+      
+      console.log(`[Mutation] Proposal attempt ${attempt + 1} cost: $${proposalResult.usd.toFixed(6)}`);
+      
+      if (!proposalResult.output || proposalResult.output.trim() === '') {
+        throw new Error('Empty response from service model (proposal step)');
+      }
+      
+      // Try to parse JSON
       const cleaned = proposalResult.output.replace(/```json\n?/g, '').replace(/```/g, '').trim();
-      console.log(`[Mutation] Raw output:`, proposalResult.output);
-      console.log(`[Mutation] Cleaned output:`, cleaned);
       edits = JSON.parse(cleaned);
-      console.log(`[Mutation] Parsed edits:`, edits);
+      console.log(`[Mutation] Successfully parsed edits on attempt ${attempt + 1}:`, edits);
+      
+      // Success! Break out of retry loop
+      break;
     } catch (error) {
-      console.error(`[Mutation] Parse error:`, error);
-      console.error(`[Mutation] Failed to parse:`, proposalResult.output);
-      throw new Error(`Failed to parse edit proposals as JSON: ${error instanceof Error ? error.message : String(error)}`);
+      lastProposalError = error instanceof Error ? error : new Error(String(error));
+      console.error(`[Mutation] Proposal attempt ${attempt + 1} failed:`, error);
+      
+      // If this was the last attempt, throw
+      if (attempt === maxRetries - 1) {
+        console.error(`[Mutation] All ${maxRetries} proposal attempts failed. Total cost: $${totalUsd.toFixed(6)}`);
+        throw lastProposalError;
+      }
+      
+      // Wait before retry (exponential backoff)
+     // const waitMs = Math.min(500 * Math.pow(2, attempt), 5000);
+     // console.log(`[Mutation] Waiting ${waitMs}ms before retry...`);
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
-    
-    // Step 2: Apply edits
-    const applyPrompt = `SYSTEM: You apply edit instructions to a prompt faithfully.
+  }
+  
+  // Step 2: Apply edits (no retry needed here, simpler operation)
+  const applyPrompt = `SYSTEM: You apply edit instructions to a prompt faithfully.
 USER: Original: <<<
 ${basePrompt}
 >>>
 Edits: ${JSON.stringify(edits)}
 Produce the NEW prompt ONLY.`;
-    
-    const applyResult = await serviceAdapter.call({
-      model: config.serviceModel.model,
-      prompt: applyPrompt,
-      temperature: 0.3,
-      maxTokens,
-    });
-    
-    totalPromptTokens += applyResult.promptTokens;
-    totalCompletionTokens += applyResult.completionTokens;
-    totalUsd += applyResult.usd;
-    totalCalls++;
-    
-    if (!applyResult.output || applyResult.output.trim() === '') {
-      throw new Error('Empty response from service model (apply step)');
-    }
-    
-    const newPrompt = applyResult.output.trim();
-    
-    // Build changelog
-    const changeLog: ChangeLogLine[] = edits.map(e => ({
-      label: 'MUTATION' as const,
-      text: e.edit || 'Unknown edit',
-    }));
-    
-    return {
-      prompt: newPrompt,
-      changeLog,
-      cost: {
-        promptTokens: totalPromptTokens,
-        completionTokens: totalCompletionTokens,
-        usd: totalUsd,
-        calls: totalCalls,
-      },
-    };
-  } catch (error) {
-    console.error('[Mutation] Failed:', error);
-    throw error;
+  
+  const applyResult = await serviceAdapter.call({
+    model: config.serviceModel.model,
+    prompt: applyPrompt,
+    temperature: 0.3,
+    maxTokens,
+  });
+  
+  totalPromptTokens += applyResult.promptTokens;
+  totalCompletionTokens += applyResult.completionTokens;
+  totalUsd += applyResult.usd;
+  totalCalls++;
+  
+  if (!applyResult.output || applyResult.output.trim() === '') {
+    throw new Error('Empty response from service model (apply step)');
   }
+  
+  const newPrompt = applyResult.output.trim();
+  
+  // Build changelog
+  const changeLog: ChangeLogLine[] = edits!.map(e => ({
+    label: 'MUTATION' as const,
+    text: e.edit || 'Unknown edit',
+  }));
+  
+  console.log(`[Mutation] Success! Total cost: $${totalUsd.toFixed(6)}, ${totalCalls} calls`);
+  
+  return {
+    prompt: newPrompt,
+    changeLog,
+    cost: {
+      promptTokens: totalPromptTokens,
+      completionTokens: totalCompletionTokens,
+      usd: totalUsd,
+      calls: totalCalls,
+    },
+  };
 }
 

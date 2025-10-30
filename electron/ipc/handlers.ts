@@ -422,6 +422,7 @@ async function getSettings(): Promise<AppSettings> {
     globalParallelLimit: 5,
     serviceModel: { provider: 'openai', model: '' },
     serviceModelMaxTokens: 20000, // Default 20k tokens for ALL model calls (service + candidate)
+    retries: 3, // Default 3 retries for JSON parsing failures
   };
 }
 

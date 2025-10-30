@@ -56,6 +56,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     globalParallelLimit: 5,
     serviceModel: { provider: 'openai', model: '' },
     serviceModelMaxTokens: 20000, // Default 20k tokens for ALL models
+    retries: 3, // Default 3 retries for JSON parsing failures
   });
   
   const [localCosts, setLocalCosts] = useState<ModelCostEntry[]>([]);
@@ -182,6 +183,31 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               />
               <div className="text-xs text-muted-foreground mt-1">
                 Maximum tokens for ALL model calls (service model AND candidate models). Essential for reasoning models like o1/gpt-5 which need space to think.
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="retries">Retries for JSON Parsing Failures</Label>
+              <Input
+                id="retries"
+                type="number"
+                min="0"
+                max="10"
+                value={localSettings.retries ?? 3}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === '') return;
+                  const num = parseInt(value);
+                  if (!isNaN(num) && num >= 0) {
+                    setLocalSettings({
+                      ...localSettings,
+                      retries: num,
+                    });
+                  }
+                }}
+              />
+              <div className="text-xs text-muted-foreground mt-1">
+                Number of retry attempts when service model returns invalid JSON (e.g., mutations, crossover, grading). Higher values improve reliability with cheap models but increase costs on repeated failures.
               </div>
             </div>
           </TabsContent>

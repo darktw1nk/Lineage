@@ -101,6 +101,7 @@ Here is the bug report:
     serviceModel: settings?.serviceModel || undefined,
     parallelLimit: settings?.globalParallelLimit || 5,
     serviceModelMaxTokens: settings?.serviceModelMaxTokens || 20000, // Load from settings - applies to ALL models
+    retries: settings?.retries ?? 3, // Load from settings
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -114,6 +115,7 @@ Here is the bug report:
         serviceModel: settings.serviceModel,
         parallelLimit: settings.globalParallelLimit || 5,
         serviceModelMaxTokens: settings.serviceModelMaxTokens || 20000,
+        retries: settings.retries ?? 3,
       }));
     }
   }, [settings]);
