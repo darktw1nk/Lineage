@@ -41,6 +41,12 @@ export function LeftSidebar({
   const queryClient = useQueryClient();
   const [currentTime, setCurrentTime] = useState(Date.now());
   const frozenTimesRef = useRef<Map<string, number>>(new Map());
+  const [width, setWidth] = useState(() => {
+    const saved = localStorage.getItem('leftSidebarWidth');
+    return saved ? parseInt(saved, 10) : 256; // 256px = w-64
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   
   // Update current time every second for running evaluations
   useEffect(() => {
@@ -50,6 +56,40 @@ export function LeftSidebar({
     
     return () => clearInterval(interval);
   }, []);
+
+  // Handle resize
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!panelRef.current) return;
+      const newWidth = e.clientX;
+      // Min width: 200px, Max width: 500px
+      const clampedWidth = Math.max(200, Math.min(500, newWidth));
+      setWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      localStorage.setItem('leftSidebarWidth', width.toString());
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    // Prevent text selection and show resize cursor globally while dragging
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, width]);
   
   // Get evaluations from database (for list of all evaluations)
   const { data: dbEvaluations = [] } = useQuery<EvaluationRun[]>({
@@ -176,7 +216,17 @@ export function LeftSidebar({
   };
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-card">
+    <div 
+      ref={panelRef}
+      className="relative flex h-full flex-col border-r bg-card"
+      style={{ width: `${width}px` }}
+    >
+      {/* Resize Handle */}
+      <div
+        className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-primary/50 active:bg-primary transition-colors z-10"
+        onMouseDown={() => setIsResizing(true)}
+      />
+      
       {/* Logo */}
       <div className="p-4">
         <h1 className="text-xl font-bold">PromptEngine.AI</h1>
