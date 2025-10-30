@@ -262,21 +262,19 @@ export async function createNextGeneration(
       
       console.log(`[Generation] Elitism: carrying over ${elites.length} best nodes from generation ${nextGenerationNumber - 1}`);
       
-      // Clone elites to new generation (reset status, update generation number)
+      // Clone elites - keep them finished so they don't get re-evaluated
       for (const elite of elites) {
         const eliteClone: CandidateNode = {
-          ...elite,
-          id: uuidv4(),
-          generation: nextGenerationNumber,
-          status: 'awaiting',
+          ...elite,  // Copy everything
+          id: uuidv4(),  // New ID
+          generation: nextGenerationNumber,  // New generation number
+          status: 'finished',  // KEEP AS FINISHED - don't re-evaluate
           lineageParents: [elite.id],
           changeLog: [{ label: 'ELITE', text: `Elite from gen ${elite.generation} (fitness=${elite.metrics?.fitness?.toFixed(3)})` }],
-          // Keep same prompt and params
         };
         newGenNodes.push(eliteClone);
         
-        // Track as "carry forward" for operator effectiveness
-        (eliteClone as any)._operatorType = 'carry';
+        (eliteClone as any)._operatorType = 'elite';
         (eliteClone as any)._parentFitness = elite.metrics?.fitness || 0;
       }
     }
