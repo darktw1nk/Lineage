@@ -7,12 +7,13 @@
 
 import type { EvaluationConfig, ChangeLogLine } from '../../src/types/index.js';
 import { getProviderAdapter } from '../providers/index.js';
+import { store } from '../store.js';
 
 /**
- * Mutation Strategy Catalog
+ * Default Mutation Strategy Catalog
  * Specific, actionable mutation techniques organized by category
  */
-const MUTATION_STRATEGIES = {
+const DEFAULT_MUTATION_STRATEGIES = {
   structure: [
     'Reorder sections (role → goals → constraints → output spec)',
     'Convert paragraphs to bullet checklists',
@@ -39,16 +40,86 @@ const MUTATION_STRATEGIES = {
   ],
 };
 
+const DEFAULT_PROPOSAL_PROMPT = `SYSTEM: You will get a prompt from a user, 
+  propose SMALL, PRECISE mutations to improve a prompt based on strategies below.
+
+Apply these specific mutation strategies:
+\${strategiesList}
+  
+For each strategy above, propose a concrete edit. 
+
+Return JSON list with the category prefix preserved:
+[{"label":"MUTATION","edit":"[Category] Specific change description"}]
+Always answer in JSON format, not simple text, json. 
+IMPORTANT: Keep the [Category] prefix from each strategy in your edit descriptions. 
+  
+USER: Candidate prompt: <<<
+\${basePrompt}
+>>>`;
+
+const DEFAULT_APPLY_PROMPT = `SYSTEM: You apply edit instructions to a prompt faithfully.
+USER: Original: <<<
+\${basePrompt}
+>>>
+Edits: \${edits}
+Produce the NEW prompt ONLY.`;
+
+/**
+ * Load mutation strategies from storage or use defaults
+ */
+function getMutationStrategies(): Record<string, string[]> {
+  try {
+    const prompts = store.get('systemPrompts', null) as any;
+    if (prompts && prompts.mutationStrategies) {
+      return JSON.parse(prompts.mutationStrategies);
+    }
+  } catch (error) {
+    console.error('[Mutations] Failed to load custom strategies, using defaults:', error);
+  }
+  return DEFAULT_MUTATION_STRATEGIES;
+}
+
+/**
+ * Load proposal prompt template from storage or use default
+ */
+function getProposalPromptTemplate(): string {
+  try {
+    const prompts = store.get('systemPrompts', null) as any;
+    if (prompts && prompts.mutationProposalPrompt) {
+      return prompts.mutationProposalPrompt;
+    }
+  } catch (error) {
+    console.error('[Mutations] Failed to load custom proposal prompt, using default:', error);
+  }
+  return DEFAULT_PROPOSAL_PROMPT;
+}
+
+/**
+ * Load apply prompt template from storage or use default
+ */
+function getApplyPromptTemplate(): string {
+  try {
+    const prompts = store.get('systemPrompts', null) as any;
+    if (prompts && prompts.mutationApplyPrompt) {
+      return prompts.mutationApplyPrompt;
+    }
+  } catch (error) {
+    console.error('[Mutations] Failed to load custom apply prompt, using default:', error);
+  }
+  return DEFAULT_APPLY_PROMPT;
+}
+
 /**
  * Randomly select N mutation strategies from the catalog
  * Returns strategies with category prefix: "[Category] Strategy description"
  */
 function selectRandomStrategies(count: number = 2): string[] {
+  const MUTATION_STRATEGIES = getMutationStrategies();
   const allStrategies: Array<{ category: string; strategy: string }> = [];
   
   // Flatten all strategies with their categories
   for (const category of Object.keys(MUTATION_STRATEGIES)) {
-    const strategies = MUTATION_STRATEGIES[category as keyof typeof MUTATION_STRATEGIES];
+    const strategies = MUTATION_STRATEGIES[category];
     for (const strategy of strategies) {
       allStrategies.push({
         category: category.charAt(0).toUpperCase() + category.slice(1), // Capitalize first letter
@@ -92,22 +163,12 @@ export async function mutateNode(
   console.log(`[Mutation] Selected ${numStrategies} strategies:`, selectedStrategies);
   
   const strategiesList = selectedStrategies.map((s, i) => `${i + 1}. ${s}`).join('\n');
-  const proposalPrompt = `SYSTEM: You will get a prompt from a user, 
-  propose SMALL, PRECISE mutations to improve a prompt based on strategies below.
-
-Apply these specific mutation strategies:
-${strategiesList}
   
-For each strategy above, propose a concrete edit. 
-
-Return JSON list with the category prefix preserved:
-[{"label":"MUTATION","edit":"[Category] Specific change description"}]
-Always answer in JSON format, not simple text, json. 
-IMPORTANT: Keep the [Category] prefix from each strategy in your edit descriptions. 
-  
-USER: Candidate prompt: <<<
-${basePrompt}
->>>`;
+  // Load proposal prompt template and substitute variables
+  const proposalPromptTemplate = getProposalPromptTemplate();
+  const proposalPrompt = proposalPromptTemplate
+    .replace(/\$\{strategiesList\}/g, strategiesList)
+    .replace(/\$\{basePrompt\}/g, basePrompt);
 
   // Step 1: Propose edits with retry for JSON parsing
   let edits: any[];
@@ -163,12 +224,10 @@ ${basePrompt}
   }
   
   // Step 2: Apply edits (no retry needed here, simpler operation)
-  const applyPrompt = `SYSTEM: You apply edit instructions to a prompt faithfully.
-USER: Original: <<<
-${basePrompt}
->>>
-Edits: ${JSON.stringify(edits)}
-Produce the NEW prompt ONLY.`;
+  const applyPromptTemplate = getApplyPromptTemplate();
+  const applyPrompt = applyPromptTemplate
+    .replace(/\$\{basePrompt\}/g, basePrompt)
+    .replace(/\$\{edits\}/g, JSON.stringify(edits));
   
   const applyResult = await serviceAdapter.call({
     model: config.serviceModel.model,

@@ -7,6 +7,12 @@ export interface LogEntry {
   args: any[];
 }
 
+export interface SystemPrompts {
+  mutationStrategies: string; // JSON string
+  mutationProposalPrompt: string;
+  mutationApplyPrompt: string;
+}
+
 export interface ElectronAPI {
   eval: {
     create: (config: EvaluationConfig) => Promise<EvaluationRun>;
@@ -39,6 +45,10 @@ export interface ElectronAPI {
   logs: {
     getBuffer: () => Promise<LogEntry[]>;
     subscribe: (callback: (entry: LogEntry) => void) => () => void;
+  };
+  systemPrompts: {
+    get: () => Promise<SystemPrompts | null>;
+    set: (prompts: SystemPrompts) => Promise<void>;
   };
   dev: {
     createTestEvals: (count: number) => Promise<string[]>;

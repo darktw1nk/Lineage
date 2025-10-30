@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, useRef } from 'react';
 import { Button } from './ui/button';
-import { Plus, Settings, Download, Upload, Trash2, FileText } from 'lucide-react';
+import { Plus, Settings, Download, Upload, Trash2, FileText, Code2 } from 'lucide-react';
 import type { UUID, EvaluationRun, EvaluationConfig } from '../types';
 import { useEvaluationStore } from '../store/evaluationStore';
 import { toast } from 'sonner';
@@ -25,6 +25,7 @@ interface LeftSidebarProps {
   onNewEvaluation: () => void;
   onImportConfig: (config: Partial<EvaluationConfig>) => void;
   onSettings: () => void;
+  onSystemPrompts: () => void;
   onLogs: () => void;
   onSelectEvaluation: (id: UUID) => void;
   selectedEvaluationId: UUID | null;
@@ -34,6 +35,7 @@ export function LeftSidebar({
   onNewEvaluation,
   onImportConfig,
   onSettings,
+  onSystemPrompts,
   onLogs,
   onSelectEvaluation,
   selectedEvaluationId,
@@ -371,11 +373,11 @@ export function LeftSidebar({
         })}
       </div>
 
-      {/* Settings and Import Button */}
+      {/* Bottom Buttons */}
       <div className="border-t p-4 space-y-2">
-        <Button onClick={() => importMutation.mutate()} variant="outline" className="w-full" size="sm">
-          <Upload className="mr-2 h-4 w-4" />
-          Import
+        <Button onClick={onSystemPrompts} variant="outline" className="w-full">
+          <Code2 className="mr-2 h-4 w-4" />
+          System Prompts
         </Button>
         <Button onClick={onSettings} variant="outline" className="w-full">
           <Settings className="mr-2 h-4 w-4" />

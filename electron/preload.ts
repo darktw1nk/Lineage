@@ -54,6 +54,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
   
+  // System Prompts methods
+  systemPrompts: {
+    get: () => ipcRenderer.invoke('systemPrompts:get'),
+    set: (prompts) => ipcRenderer.invoke('systemPrompts:set', prompts),
+  },
+  
   // Dev Tools (only available in development)
   dev: {
     createTestEvals: (count: number) => ipcRenderer.invoke('dev:createTestEvals', count),

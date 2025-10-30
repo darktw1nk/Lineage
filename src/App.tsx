@@ -6,6 +6,7 @@ import { CenterView } from './components/CenterView';
 import { RightPanel } from './components/RightPanel';
 import { Footer } from './components/Footer';
 import { SettingsModal } from './components/SettingsModal';
+import { SystemPromptsModal } from './components/SystemPromptsModal';
 import { NewEvaluationModal } from './components/NewEvaluationModal';
 import { EvaluationConfigPanel } from './components/EvaluationConfigPanel';
 import { LogsPanel } from './components/LogsPanel';
@@ -17,6 +18,7 @@ function App() {
   const [selectedEvaluationId, setSelectedEvaluationId] = useState<UUID | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<UUID | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showSystemPrompts, setShowSystemPrompts] = useState(false);
   const [showNewEvaluation, setShowNewEvaluation] = useState(false);
   const [modalKey, setModalKey] = useState(0); // Force modal remount
   const [importedConfig, setImportedConfig] = useState<Partial<EvaluationConfig> | null>(null);
@@ -62,6 +64,7 @@ function App() {
             setShowNewEvaluation(true);
           }}
           onSettings={() => setShowSettings(true)}
+          onSystemPrompts={() => setShowSystemPrompts(true)}
           onLogs={() => setShowLogs(!showLogs)}
           onSelectEvaluation={setSelectedEvaluationId}
           selectedEvaluationId={selectedEvaluationId}
@@ -103,6 +106,9 @@ function App() {
         {/* Modals */}
         {showSettings && (
           <SettingsModal onClose={() => setShowSettings(false)} />
+        )}
+        {showSystemPrompts && (
+          <SystemPromptsModal onClose={() => setShowSystemPrompts(false)} />
         )}
         {showNewEvaluation && (
           <NewEvaluationModal

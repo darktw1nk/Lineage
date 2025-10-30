@@ -94,6 +94,15 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
     return getAllModelCosts();
   });
 
+  // System Prompts handlers
+  ipcMain.handle('systemPrompts:get', async () => {
+    return getSystemPrompts();
+  });
+
+  ipcMain.handle('systemPrompts:set', async (_event, prompts: any) => {
+    return setSystemPrompts(prompts);
+  });
+
   // Dev Tools (only in development)
   if (process.env.NODE_ENV !== 'production') {
     ipcMain.handle('dev:createTestEvals', async (_event, count: number) => {
@@ -557,5 +566,24 @@ async function getAllModelCosts(): Promise<ModelCostEntry[]> {
     promptUSDper1k: row.prompt_usd_per_1k,
     completionUSDper1k: row.completion_usd_per_1k,
   }));
+}
+
+async function getSystemPrompts(): Promise<any | null> {
+  try {
+    const prompts = store.get('systemPrompts', null) as any;
+    return prompts;
+  } catch (error) {
+    console.error('Error getting system prompts:', error);
+    return null;
+  }
+}
+
+async function setSystemPrompts(prompts: any): Promise<void> {
+  try {
+    store.set('systemPrompts', prompts);
+  } catch (error) {
+    console.error('Error saving system prompts:', error);
+    throw error;
+  }
 }
 
