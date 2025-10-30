@@ -17,8 +17,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getConfig: (runId) => ipcRenderer.invoke('eval:getConfig', runId),
     subscribe: (runId, callback) => {
       const channel = `eval:updates:${runId}`;
-      ipcRenderer.on(channel, (event, data) => callback(event, data));
-      return () => ipcRenderer.removeAllListeners(channel);
+      const listener = (event, data) => callback(event, data);
+      ipcRenderer.on(channel, listener);
+      // Return unsubscribe function that removes ONLY this specific listener
+      return () => ipcRenderer.removeListener(channel, listener);
     },
   },
   
