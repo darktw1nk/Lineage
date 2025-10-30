@@ -40,7 +40,7 @@ export interface CandidateParams {
   seed?: number;       // for stability runs
 }
 
-export type ChangeLabel = 'MUTATION' | 'CROSSOVER' | 'META' | 'PARAM';
+export type ChangeLabel = 'MUTATION' | 'CROSSOVER' | 'META' | 'PARAM' | 'MODEL' | 'ELITE' | 'CARRY' | 'ERROR';
 
 export interface ChangeLogLine {
   label: ChangeLabel;

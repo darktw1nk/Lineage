@@ -242,7 +242,12 @@ export async function createNextGeneration(
     if (numElite > 0) {
       // Collect finished nodes from LAST generation only
       const lastGenFinishedNodes: CandidateNode[] = [];
-      const lastGen = allGenerations[allGenerations.length - 1]; // Previous generation
+      // Note: allGenerations may have an empty array at the end (current generation being created)
+      // So we need to get the second-to-last or the last non-empty generation
+      const lastGen = allGenerations.length >= 2 && allGenerations[allGenerations.length - 1].length === 0
+        ? allGenerations[allGenerations.length - 2] // If last is empty, get second-to-last
+        : allGenerations[allGenerations.length - 1]; // Otherwise get last
+      
       for (const node of lastGen) {
         if (node.status === 'finished' && node.metrics?.fitness !== undefined) {
           lastGenFinishedNodes.push(node);
