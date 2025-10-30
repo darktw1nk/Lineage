@@ -51,6 +51,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeAllListeners('log:entry');
     },
   },
+  
+  // Dev Tools (only available in development)
+  dev: {
+    createTestEvals: (count: number) => ipcRenderer.invoke('dev:createTestEvals', count),
+  },
 });
 
 // TypeScript definitions are in src/window.d.ts

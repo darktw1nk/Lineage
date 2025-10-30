@@ -18,6 +18,7 @@ function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<UUID | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showNewEvaluation, setShowNewEvaluation] = useState(false);
+  const [modalKey, setModalKey] = useState(0); // Force modal remount
   const [importedConfig, setImportedConfig] = useState<Partial<EvaluationConfig> | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
@@ -51,9 +52,13 @@ function App() {
       <div className="flex h-screen w-screen overflow-hidden bg-background">
         {/* Left Sidebar */}
         <LeftSidebar
-          onNewEvaluation={() => setShowNewEvaluation(true)}
+          onNewEvaluation={() => {
+            setModalKey(k => k + 1);
+            setShowNewEvaluation(true);
+          }}
           onImportConfig={(config) => {
             setImportedConfig(config);
+            setModalKey(k => k + 1);
             setShowNewEvaluation(true);
           }}
           onSettings={() => setShowSettings(true)}
@@ -101,6 +106,7 @@ function App() {
         )}
         {showNewEvaluation && (
           <NewEvaluationModal
+            key={modalKey}
             initialConfig={importedConfig}
             onClose={() => {
               setShowNewEvaluation(false);

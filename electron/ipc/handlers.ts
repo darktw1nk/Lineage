@@ -93,6 +93,14 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('costs:getAll', async () => {
     return getAllModelCosts();
   });
+
+  // Dev Tools (only in development)
+  if (process.env.NODE_ENV !== 'production') {
+    ipcMain.handle('dev:createTestEvals', async (_event, count: number) => {
+      const { createTestEvaluations } = await import('../dev-tools/createTestEvaluations.js');
+      return createTestEvaluations(count);
+    });
+  }
 }
 
 // Implementation functions

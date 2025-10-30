@@ -25,88 +25,118 @@ export function NewEvaluationModal({ onClose, onCreated, initialConfig }: NewEva
   // Generate new ID each time modal is opened to avoid conflicts
   const [configId] = useState(() => uuidv4());
   
-  // Load settings to get service model
-  const { data: settings } = useQuery({
+  // Load settings synchronously from cache or fetch (blocks until ready)
+  const { data: settings, isLoading } = useQuery({
     queryKey: ['settings'],
     queryFn: () => window.electronAPI.settings.get(),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
   
-  const defaultConfig: Partial<EvaluationConfig> = {
-    id: configId,
-    name: 'New Evaluation',
-    selection: {
-      policy: 'topk',
-      topK: 4,
-      eliteShare: 0.05,
-    },
-    operators: {
-      mutationShare: 0.4,
-      crossoverShare: 0.3,
-      metaPrompting: {
-        enabled: true,
-        share: 0.2,
+  // Don't render modal until settings are loaded
+  if (isLoading || !settings) {
+    return null;
+  }
+  
+  return <NewEvaluationModalContent 
+    onClose={onClose} 
+    onCreated={onCreated} 
+    initialConfig={initialConfig}
+    settings={settings}
+  />;
+}
+
+function NewEvaluationModalContent({ 
+  onClose, 
+  onCreated, 
+  initialConfig,
+  settings 
+}: NewEvaluationModalProps & { settings: any }) {
+  const [activeTab, setActiveTab] = useState('main');
+  const [isSimpleMode, setIsSimpleMode] = useState(true);
+  
+  // Generate new ID each time modal is opened to avoid conflicts
+  const [configId] = useState(() => uuidv4());
+  
+  // Initialize config once with settings already loaded
+  const [config, setConfig] = useState<Partial<EvaluationConfig>>(() => {
+    const defaultConfig: Partial<EvaluationConfig> = {
+      id: configId,
+      name: 'New Evaluation',
+      selection: {
+        policy: 'topk',
+        topK: 4,
+        eliteShare: 0.05,
       },
-      modelVariation: {
-        enabled: true,
-        share: 0.2,
+      operators: {
+        mutationShare: 0.4,
+        crossoverShare: 0.3,
+        metaPrompting: {
+          enabled: true,
+          share: 0.2,
+        },
+        modelVariation: {
+          enabled: true,
+          share: 0.2,
+        },
+        paramVariation: {
+          enabled: false,
+          share: 0.2,
+          temperature: { enabled: false, min: 0.5, max: 1.5 },
+        },
       },
-      paramVariation: {
-        enabled: false,
-        share: 0.2,
-        temperature: { enabled: false, min: 0.5, max: 1.5 },
-      },
-    },
-    population: {
-      initialSize: 10,
-      generationSize: 10,
-      seedPrompt: `Please read the following bug report and extract the key information into a JSON format.
+      population: {
+        initialSize: 10,
+        generationSize: 10,
+        seedPrompt: `Please read the following bug report and extract the key information into a JSON format.
 
 The JSON should have the bug id, a summary, the priority, if it is a UI bug, and a list of components that are affected.
 
 Here is the bug report:
 -----------`,
-      fill: 'auto',
-    },
-    enabledModels: [
-      { provider: 'openai', model: 'gpt-5-mini' },
-      { provider: 'openai', model: 'gpt-5-nano' },
-      { provider: 'openai', model: 'gpt-4.1-mini' },
-      { provider: 'openai', model: 'gpt-4.1-nano' },
-    ],
-    testSet: [
-      {
-        id: uuidv4(),
-        name: 'Bug Report Test',
-        prompt: `Okay, so my user ID is 952. When I click the 'Export' button on the main dashboard, the whole app crashes. It's super frustrating. I'd say this is a high priority issue. It seems to affect the Reporting and Dashboard modules.`,
-        mode: 'llm_grade',
+        fill: 'auto',
       },
-    ],
-    fitness: {
-      weights: {
-        quality: 0.4,
-        safety: 0,
-        cost: 0.3,
-        latency: 0.3,
-        stability: 0,
+      enabledModels: [
+        { provider: 'openai', model: 'gpt-5-mini' },
+        { provider: 'openai', model: 'gpt-5-nano' },
+        { provider: 'openai', model: 'gpt-4.1-mini' },
+        { provider: 'openai', model: 'gpt-4.1-nano' },
+      ],
+      testSet: [
+        {
+          id: uuidv4(),
+          name: 'Bug Report Test',
+          prompt: `Okay, so my user ID is 952. When I click the 'Export' button on the main dashboard, the whole app crashes. It's super frustrating. I'd say this is a high priority issue. It seems to affect the Reporting and Dashboard modules.`,
+          mode: 'llm_grade',
+        },
+      ],
+      fitness: {
+        weights: {
+          quality: 0.4,
+          safety: 0,
+          cost: 0.3,
+          latency: 0.3,
+          stability: 0,
+        },
+        guardrails: [],
+        costNorm: { mode: 'relative', maxUSDPerCall: 0.1 },
+        latencyNorm: { mode: 'relative', maxMs: 30000 },
       },
-      guardrails: [],
-      costNorm: { mode: 'relative', maxUSDPerCall: 0.1 },
-      latencyNorm: { mode: 'relative', maxMs: 30000 },
-    },
-    targets: {
-      timeLimitMs: 3600000, // 1 hour
-      budgetUSD: 10,
-      targetFitness: undefined, // Disabled by default
-      maxGenerations: 3,
-    },
-    serviceModel: settings?.serviceModel || undefined,
-    parallelLimit: settings?.globalParallelLimit || 5,
-    serviceModelMaxTokens: settings?.serviceModelMaxTokens || 20000, // Load from settings - applies to ALL models
-    retries: settings?.retries ?? 3, // Load from settings
-  };
+      targets: {
+        timeLimitMs: 3600000, // 1 hour
+        budgetUSD: 10,
+        targetFitness: undefined, // Disabled by default
+        maxGenerations: 3,
+      },
+      serviceModel: settings?.serviceModel,
+      parallelLimit: settings?.globalParallelLimit || 5,
+      serviceModelMaxTokens: settings?.serviceModelMaxTokens || 20000,
+      retries: settings?.retries ?? 3,
+    };
 
-  // Merge defaultConfig with initialConfig (if imported)
-  const [config, setConfig] = useState<Partial<EvaluationConfig>>(() => {
+    // Merge with initialConfig if provided
     if (initialConfig) {
       return {
         ...defaultConfig,
@@ -141,42 +171,25 @@ Here is the bug report:
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Update serviceModel when settings load
-  useEffect(() => {
-    if (settings?.serviceModel && !config.serviceModel?.model) {
-      console.log('[NewEval] Updating serviceModel from settings:', settings.serviceModel);
-      setConfig(prev => ({
-        ...prev,
-        serviceModel: settings.serviceModel,
-        parallelLimit: settings.globalParallelLimit || 5,
-        serviceModelMaxTokens: settings.serviceModelMaxTokens || 20000,
-        retries: settings.retries ?? 3,
-      }));
-    }
-  }, [settings]);
-
-  // Ensure topK doesn't exceed generationSize in simple mode (debounced to avoid interfering with typing)
+  // Ensure topK doesn't exceed generationSize in simple mode
   useEffect(() => {
     if (isSimpleMode && config.selection?.policy === 'topk') {
       const generationSize = config.population?.generationSize || 10;
       const currentTopK = config.selection?.topK || 4;
       const maxTopK = Math.min(4, generationSize);
       
+      // Only update if topK actually exceeds the limit
       if (currentTopK > maxTopK) {
-        // Debounce to avoid interfering with user typing
-        const timer = setTimeout(() => {
-          setConfig(prev => ({
-            ...prev,
-            selection: {
-              ...prev.selection!,
-              topK: maxTopK,
-            },
-          }));
-        }, 500); // Wait 500ms after user stops typing
-        return () => clearTimeout(timer);
+        setConfig(prev => ({
+          ...prev,
+          selection: {
+            ...prev.selection!,
+            topK: maxTopK,
+          },
+        }));
       }
     }
-  }, [isSimpleMode, config.population?.generationSize, config.selection?.policy]);
+  }, [isSimpleMode, config.population?.generationSize, config.selection?.policy, config.selection?.topK]);
 
   const createEvaluation = useMutation({
     mutationFn: async (config: EvaluationConfig) => {
@@ -263,8 +276,8 @@ Here is the bug report:
 
   return (
     <TooltipProvider>
-      <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <Dialog open onOpenChange={(open) => !open && onClose()} modal>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onPointerDownOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <div className="flex items-center justify-between pr-8">
             <DialogTitle>New Evaluation</DialogTitle>
@@ -516,6 +529,10 @@ function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
   const { data: costs = [] } = useQuery<ModelCostEntry[]>({
     queryKey: ['costs'],
     queryFn: () => window.electronAPI.costs.getAll(),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   const isManualMode = config.population?.fill === 'manual';
@@ -580,7 +597,7 @@ function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
             value={config.population?.generationSize || 10}
             onChange={(e) => {
               const value = e.target.value;
-              if (value === '') return; // Allow clearing
+              if (value === '') return;
               const size = parseInt(value);
               if (!isNaN(size) && size > 0) {
                 setConfig({
@@ -793,6 +810,10 @@ function ModelsTab({ config, setConfig }: TabProps) {
   const { data: costs = [] } = useQuery<ModelCostEntry[]>({
     queryKey: ['costs'],
     queryFn: () => window.electronAPI.costs.getAll(),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   const availableModels: ModelRef[] = costs.map(cost => ({
@@ -1900,6 +1921,10 @@ function AdvancedTab({ config, setConfig }: TabProps) {
   const { data: costs = [] } = useQuery<ModelCostEntry[]>({
     queryKey: ['costs'],
     queryFn: () => window.electronAPI.costs.getAll(),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   return (

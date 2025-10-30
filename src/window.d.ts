@@ -40,6 +40,9 @@ export interface ElectronAPI {
     getBuffer: () => Promise<LogEntry[]>;
     subscribe: (callback: (entry: LogEntry) => void) => () => void;
   };
+  dev: {
+    createTestEvals: (count: number) => Promise<string[]>;
+  };
 }
 
 declare global {

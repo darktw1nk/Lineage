@@ -103,7 +103,11 @@ export function LeftSidebar({
     mutationFn: async (runId: string) => {
       return await window.electronAPI.eval.delete(runId);
     },
-    onSuccess: () => {
+    onSuccess: (_, deletedId) => {
+      // Clear selection if deleted evaluation was selected
+      if (selectedEvaluationId === deletedId) {
+        onSelectEvaluation(null as any);
+      }
       queryClient.invalidateQueries({ queryKey: ['evaluations'] });
     },
     onError: (error: any) => {
@@ -339,7 +343,6 @@ export function LeftSidebar({
 function getEvaluationName(evaluation: EvaluationRun): string {
   // Try to get config name from evaluation (added by backend)
   const configName = (evaluation as any).configName;
-  console.log(`[LeftSidebar] Eval ${evaluation.id.slice(0, 8)}: configName =`, configName);
   if (configName) {
     return configName;
   }
