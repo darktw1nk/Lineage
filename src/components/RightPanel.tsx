@@ -1,8 +1,9 @@
 import { X, Copy, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from './ui/button';
 import { useState, useRef, useEffect } from 'react';
-import type { UUID, EvaluationRun, CandidateNode } from '../types';
+import type { UUID, EvaluationRun, CandidateNode, EvaluationConfig } from '../types';
 import { useEvaluation } from '../hooks/useEvaluation';
+import { useQuery } from '@tanstack/react-query';
 
 interface RightPanelProps {
   evaluationId: UUID | null;
@@ -24,6 +25,16 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
   const { evaluation } = useEvaluation(evaluationId);
 
   const node = findNode(evaluation, nodeId);
+
+  // Fetch config to get test names
+  const { data: config } = useQuery<EvaluationConfig | null>({
+    queryKey: ['evaluation-config', evaluationId],
+    queryFn: async () => {
+      if (!evaluationId) return null;
+      return window.electronAPI.eval.getConfig(evaluationId);
+    },
+    enabled: !!evaluationId,
+  });
 
   useEffect(() => {
     if (!isResizing) return;
@@ -80,6 +91,15 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
       newExpanded.add(testId);
     }
     setExpandedReasonings(newExpanded);
+  };
+
+  // Helper to get test name by testId
+  const getTestName = (testId: UUID): string => {
+    const testCase = config?.testSet?.find(t => t.id === testId);
+    if (testCase?.name && testCase.name.trim() !== '') {
+      return testCase.name;
+    }
+    return `Test ${testId.substring(0, 8)}`;
   };
 
   const copyPrompt = () => {
@@ -194,7 +214,7 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
                         <ChevronRight className="h-4 w-4" />
                       )}
                       <span className="text-sm font-medium">
-                        Test {test.testId.substring(0, 8)}
+                        {getTestName(test.testId)}
                       </span>
                       <span className={`text-xs ${test.passed ? 'text-green-600' : 'text-red-600'}`}>
                         {test.passed ? '✓ Passed' : '✗ Failed'}
