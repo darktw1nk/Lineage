@@ -317,7 +317,6 @@ async function evaluationLoop(runId: UUID): Promise<void> {
   
   console.log(`[Evaluator] Evaluation loop started for ${runId.slice(0, 8)}`);
   console.log(`[Evaluator] Queue length: ${state.queue.length}, InProgress: ${state.inProgress.size}`);
-  console.log(`[Evaluator] Call stack:`, new Error().stack);
   
   while (state.queue.length > 0 && state.status === 'running') {
     // Check stopping conditions
@@ -767,12 +766,6 @@ async function moveToNextGeneration(
   
   // Select top performers
   const currentGen = state.run.generations[state.currentGeneration];
-  console.log(`[Evaluator] ===== BEFORE PARENT SELECTION =====`);
-  console.log(`[Evaluator] Generation ${state.currentGeneration} has ${currentGen.length} total nodes:`);
-  currentGen.forEach((n, i) => {
-    const isElite = n.changeLog.some(c => c.label === 'ELITE');
-    console.log(`  ${i+1}. ${n.id.slice(0,8)} ${isElite ? '👑👑👑 ELITE' : ''} status=${n.status} fitness=${n.metrics?.fitness?.toFixed(3) || 'NONE'}`);
-  });
   const topPerformers = selectTopPerformers(currentGen, state.config);
   
   if (topPerformers.length === 0) {
