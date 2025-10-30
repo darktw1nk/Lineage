@@ -93,20 +93,22 @@ export async function mutateNode(
     
     // Step 1: Propose edits using selected strategies
     const strategiesList = selectedStrategies.map((s, i) => `${i + 1}. ${s}`).join('\n');
-    const proposalPrompt = `SYSTEM: You propose SMALL, PRECISE edits to improve a prompt.
-USER: Candidate prompt: <<<
-${basePrompt}
->>>
+    const proposalPrompt = `SYSTEM: You will get a prompt from a user, 
+    propose SMALL, PRECISE mutations to improve a prompt based on strategies below.
+
 Apply these specific mutation strategies:
 ${strategiesList}
+    
+For each strategy above, propose a concrete edit. 
 
-For each strategy above, propose a concrete edit. Return JSON list with the category prefix preserved:
+Return JSON list with the category prefix preserved:
 [{"label":"MUTATION","edit":"[Category] Specific change description"}]
 Always answer in JSON format, not simple text, json. 
-
 IMPORTANT: Keep the [Category] prefix from each strategy in your edit descriptions. 
-VERY IMPORTANT: Return only this JSON, nothing else. 
-`;
+    
+USER: Candidate prompt: <<<
+${basePrompt}
+>>>`;
 
 
     
