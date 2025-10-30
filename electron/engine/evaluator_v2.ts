@@ -45,6 +45,8 @@ interface EvaluationState {
     crossover: { totalDelta: number; count: number };
     meta: { totalDelta: number; count: number };
     param: { totalDelta: number; count: number };
+    model: { totalDelta: number; count: number };
+    elite: { totalDelta: number; count: number };
   };
   pausedAt?: number; // Timestamp when paused (if currently paused)
   totalPausedMs: number; // Total time spent paused
@@ -175,6 +177,8 @@ export async function startEvaluation(
       crossover: { totalDelta: 0, count: 0 },
       meta: { totalDelta: 0, count: 0 },
       param: { totalDelta: 0, count: 0 },
+      model: { totalDelta: 0, count: 0 },
+      elite: { totalDelta: 0, count: 0 },
     },
     totalPausedMs: 0,
   };
@@ -533,12 +537,17 @@ async function processNode(
     const operatorType = (node as any)._operatorType;
     const parentFitness = (node as any)._parentFitness;
     if (operatorType && parentFitness !== undefined && node.metrics?.fitness !== undefined) {
-      const fitnessDelta = node.metrics.fitness - parentFitness;
-      state.operatorEffectiveness[operatorType].totalDelta += fitnessDelta;
-      state.operatorEffectiveness[operatorType].count++;
-      
-      const avgDelta = state.operatorEffectiveness[operatorType].totalDelta / state.operatorEffectiveness[operatorType].count;
-      console.log(`[Evaluator] Operator effectiveness [${operatorType}]: avgΔ=${avgDelta.toFixed(3)} (count=${state.operatorEffectiveness[operatorType].count})`);
+      // Check if this operator type is tracked
+      if (state.operatorEffectiveness[operatorType as keyof typeof state.operatorEffectiveness]) {
+        const fitnessDelta = node.metrics.fitness - parentFitness;
+        state.operatorEffectiveness[operatorType].totalDelta += fitnessDelta;
+        state.operatorEffectiveness[operatorType].count++;
+        
+        const avgDelta = state.operatorEffectiveness[operatorType].totalDelta / state.operatorEffectiveness[operatorType].count;
+        console.log(`[Evaluator] Operator effectiveness [${operatorType}]: avgΔ=${avgDelta.toFixed(3)} (count=${state.operatorEffectiveness[operatorType].count})`);
+      } else {
+        console.warn(`[Evaluator] Unknown operator type: ${operatorType} (skipping effectiveness tracking)`);
+      }
     }
   } catch (error) {
     console.error(`[Evaluator] Node ${node.id.slice(0, 8)} failed:`, error);
