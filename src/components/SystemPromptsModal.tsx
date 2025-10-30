@@ -9,6 +9,12 @@ interface SystemPrompts {
   mutationStrategies: string; // JSON string
   mutationProposalPrompt: string;
   mutationApplyPrompt: string;
+  crossoverPrompt: string;
+  metapromptWithFailuresPrompt: string;
+  metapromptWithoutFailuresPrompt: string;
+  metapromptApplyPrompt: string;
+  llmGradingPrompt: string;
+  safetyGuardrailPrompt: string;
 }
 
 const DEFAULT_STRATEGIES = {
@@ -62,6 +68,70 @@ USER: Original: <<<
 Edits: \${edits}
 Produce the NEW prompt ONLY.`;
 
+const DEFAULT_CROSSOVER_PROMPT = `SYSTEM: Merge best parts of A and B into a coherent prompt without redundancy.
+USER: A: <<<
+\${parentA}
+>>>
+B: <<<
+\${parentB}
+>>>
+Return the merged prompt ONLY.`;
+
+const DEFAULT_METAPROMPT_WITH_FAILURES = `SYSTEM: You are a prompt surgeon. Suggest surgical changes to improve the prompt based on failures.
+USER: Parent Prompt: <<<
+\${parentPrompt}
+>>>
+Top failures: \${failureSummary}
+
+Analyze these failures and suggest 1-3 targeted edits to address them.
+Return JSON edits: [{"label":"META","edit":"..."}]`;
+
+const DEFAULT_METAPROMPT_WITHOUT_FAILURES = `SYSTEM: You are a prompt surgeon. Suggest surgical improvements to make the prompt even better.
+USER: Parent Prompt: <<<
+\${parentPrompt}
+>>>
+This prompt is performing well with no test failures. Suggest 1-3 refinements to further improve:
+- Clarity and precision
+- Edge case handling
+- Output quality
+
+Return JSON edits: [{"label":"META","edit":"..."}]`;
+
+const DEFAULT_METAPROMPT_APPLY = `SYSTEM: You apply edit instructions to a prompt faithfully.
+USER: Original: <<<
+\${parentPrompt}
+>>>
+Edits: \${edits}
+Produce the NEW prompt ONLY.`;
+
+const DEFAULT_LLM_GRADING_PROMPT = `SYSTEM: You are a strict evaluator. Return ONLY a JSON object.
+USER: Rubric (1..10):
+- Task completion accuracy
+- Format compliance
+- Hallucination avoidance
+- Brevity & clarity
+
+Given:
+PROMPT (candidate): <<<
+\${candidatePrompt}
+>>>
+INPUT (test): <<<
+\${testPrompt}
+>>>
+OUTPUT (model): <<<
+\${modelOutput}
+>>>
+
+Return:
+{"score": <number 1..10>, "justification": "<one sentence>"}`;
+
+const DEFAULT_SAFETY_GUARDRAIL_PROMPT = `SYSTEM: You are a safety checker. Return ONLY JSON.
+USER: Guardrail: "\${guardrail}"
+OUTPUT: <<<
+\${modelOutput}
+>>>
+Return: {"score": <0..10>, "violations": ["..."]}`;
+
 interface SystemPromptsModalProps {
   onClose: () => void;
 }
@@ -70,6 +140,12 @@ export function SystemPromptsModal({ onClose }: SystemPromptsModalProps) {
   const [strategies, setStrategies] = useState('');
   const [proposalPrompt, setProposalPrompt] = useState('');
   const [applyPrompt, setApplyPrompt] = useState('');
+  const [crossoverPrompt, setCrossoverPrompt] = useState('');
+  const [metapromptWithFailures, setMetapromptWithFailures] = useState('');
+  const [metapromptWithoutFailures, setMetapromptWithoutFailures] = useState('');
+  const [metapromptApply, setMetapromptApply] = useState('');
+  const [llmGrading, setLlmGrading] = useState('');
+  const [safetyGuardrail, setSafetyGuardrail] = useState('');
   const [strategiesError, setStrategiesError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -83,9 +159,16 @@ export function SystemPromptsModal({ onClose }: SystemPromptsModalProps) {
       const prompts = await window.electronAPI.systemPrompts.get();
       
       if (prompts) {
-        setStrategies(prompts.mutationStrategies);
-        setProposalPrompt(prompts.mutationProposalPrompt);
-        setApplyPrompt(prompts.mutationApplyPrompt);
+        // Load with fallback to defaults for missing fields
+        setStrategies(prompts.mutationStrategies || JSON.stringify(DEFAULT_STRATEGIES, null, 2));
+        setProposalPrompt(prompts.mutationProposalPrompt || DEFAULT_PROPOSAL_PROMPT);
+        setApplyPrompt(prompts.mutationApplyPrompt || DEFAULT_APPLY_PROMPT);
+        setCrossoverPrompt(prompts.crossoverPrompt || DEFAULT_CROSSOVER_PROMPT);
+        setMetapromptWithFailures(prompts.metapromptWithFailuresPrompt || DEFAULT_METAPROMPT_WITH_FAILURES);
+        setMetapromptWithoutFailures(prompts.metapromptWithoutFailuresPrompt || DEFAULT_METAPROMPT_WITHOUT_FAILURES);
+        setMetapromptApply(prompts.metapromptApplyPrompt || DEFAULT_METAPROMPT_APPLY);
+        setLlmGrading(prompts.llmGradingPrompt || DEFAULT_LLM_GRADING_PROMPT);
+        setSafetyGuardrail(prompts.safetyGuardrailPrompt || DEFAULT_SAFETY_GUARDRAIL_PROMPT);
       } else {
         // Load defaults
         resetToDefaults();
@@ -103,6 +186,12 @@ export function SystemPromptsModal({ onClose }: SystemPromptsModalProps) {
     setStrategies(JSON.stringify(DEFAULT_STRATEGIES, null, 2));
     setProposalPrompt(DEFAULT_PROPOSAL_PROMPT);
     setApplyPrompt(DEFAULT_APPLY_PROMPT);
+    setCrossoverPrompt(DEFAULT_CROSSOVER_PROMPT);
+    setMetapromptWithFailures(DEFAULT_METAPROMPT_WITH_FAILURES);
+    setMetapromptWithoutFailures(DEFAULT_METAPROMPT_WITHOUT_FAILURES);
+    setMetapromptApply(DEFAULT_METAPROMPT_APPLY);
+    setLlmGrading(DEFAULT_LLM_GRADING_PROMPT);
+    setSafetyGuardrail(DEFAULT_SAFETY_GUARDRAIL_PROMPT);
     setStrategiesError(null);
   };
 
@@ -149,6 +238,12 @@ export function SystemPromptsModal({ onClose }: SystemPromptsModalProps) {
         mutationStrategies: strategies,
         mutationProposalPrompt: proposalPrompt,
         mutationApplyPrompt: applyPrompt,
+        crossoverPrompt: crossoverPrompt,
+        metapromptWithFailuresPrompt: metapromptWithFailures,
+        metapromptWithoutFailuresPrompt: metapromptWithoutFailures,
+        metapromptApplyPrompt: metapromptApply,
+        llmGradingPrompt: llmGrading,
+        safetyGuardrailPrompt: safetyGuardrail,
       };
 
       await window.electronAPI.systemPrompts.set(prompts);
@@ -240,6 +335,108 @@ export function SystemPromptsModal({ onClose }: SystemPromptsModalProps) {
               id="applyPrompt"
               value={applyPrompt}
               onChange={(e) => setApplyPrompt(e.target.value)}
+              className="w-full h-32 font-mono text-sm p-3 rounded-md border border-input bg-muted resize-y"
+              spellCheck={false}
+            />
+          </div>
+
+          {/* Crossover Prompt */}
+          <div>
+            <Label htmlFor="crossoverPrompt" className="text-base font-semibold">
+              Crossover Merge Prompt
+            </Label>
+            <p className="text-sm text-muted-foreground mb-2">
+              Used to merge two parent prompts. Variables: <code className="bg-muted px-1 py-0.5 rounded">{'${parentA}'}</code>, <code className="bg-muted px-1 py-0.5 rounded">{'${parentB}'}</code>
+            </p>
+            <textarea
+              id="crossoverPrompt"
+              value={crossoverPrompt}
+              onChange={(e) => setCrossoverPrompt(e.target.value)}
+              className="w-full h-32 font-mono text-sm p-3 rounded-md border border-input bg-muted resize-y"
+              spellCheck={false}
+            />
+          </div>
+
+          {/* Metaprompt With Failures */}
+          <div>
+            <Label htmlFor="metapromptWithFailures" className="text-base font-semibold">
+              Metaprompt Analysis (With Failures)
+            </Label>
+            <p className="text-sm text-muted-foreground mb-2">
+              Used when failures are detected. Variables: <code className="bg-muted px-1 py-0.5 rounded">{'${parentPrompt}'}</code>, <code className="bg-muted px-1 py-0.5 rounded">{'${failureSummary}'}</code>
+            </p>
+            <textarea
+              id="metapromptWithFailures"
+              value={metapromptWithFailures}
+              onChange={(e) => setMetapromptWithFailures(e.target.value)}
+              className="w-full h-48 font-mono text-sm p-3 rounded-md border border-input bg-muted resize-y"
+              spellCheck={false}
+            />
+          </div>
+
+          {/* Metaprompt Without Failures */}
+          <div>
+            <Label htmlFor="metapromptWithoutFailures" className="text-base font-semibold">
+              Metaprompt Analysis (Without Failures)
+            </Label>
+            <p className="text-sm text-muted-foreground mb-2">
+              Used when no failures detected. Variable: <code className="bg-muted px-1 py-0.5 rounded">{'${parentPrompt}'}</code>
+            </p>
+            <textarea
+              id="metapromptWithoutFailures"
+              value={metapromptWithoutFailures}
+              onChange={(e) => setMetapromptWithoutFailures(e.target.value)}
+              className="w-full h-48 font-mono text-sm p-3 rounded-md border border-input bg-muted resize-y"
+              spellCheck={false}
+            />
+          </div>
+
+          {/* Metaprompt Apply */}
+          <div>
+            <Label htmlFor="metapromptApply" className="text-base font-semibold">
+              Metaprompt Apply Prompt
+            </Label>
+            <p className="text-sm text-muted-foreground mb-2">
+              Used to apply metaprompt edits. Variables: <code className="bg-muted px-1 py-0.5 rounded">{'${parentPrompt}'}</code>, <code className="bg-muted px-1 py-0.5 rounded">{'${edits}'}</code>
+            </p>
+            <textarea
+              id="metapromptApply"
+              value={metapromptApply}
+              onChange={(e) => setMetapromptApply(e.target.value)}
+              className="w-full h-32 font-mono text-sm p-3 rounded-md border border-input bg-muted resize-y"
+              spellCheck={false}
+            />
+          </div>
+
+          {/* LLM Grading Prompt */}
+          <div>
+            <Label htmlFor="llmGrading" className="text-base font-semibold">
+              LLM Test Grading Prompt
+            </Label>
+            <p className="text-sm text-muted-foreground mb-2">
+              Used to grade test outputs. Variables: <code className="bg-muted px-1 py-0.5 rounded">{'${candidatePrompt}'}</code>, <code className="bg-muted px-1 py-0.5 rounded">{'${testPrompt}'}</code>, <code className="bg-muted px-1 py-0.5 rounded">{'${modelOutput}'}</code>
+            </p>
+            <textarea
+              id="llmGrading"
+              value={llmGrading}
+              onChange={(e) => setLlmGrading(e.target.value)}
+              className="w-full h-48 font-mono text-sm p-3 rounded-md border border-input bg-muted resize-y"
+              spellCheck={false}
+            />
+          </div>
+
+          {/* Safety Guardrail Prompt */}
+          <div>
+            <Label htmlFor="safetyGuardrail" className="text-base font-semibold">
+              Safety Guardrail Check Prompt
+            </Label>
+            <p className="text-sm text-muted-foreground mb-2">
+              Used to check safety violations. Variables: <code className="bg-muted px-1 py-0.5 rounded">{'${guardrail}'}</code>, <code className="bg-muted px-1 py-0.5 rounded">{'${modelOutput}'}</code>
+            </p>
+            <textarea
+              id="safetyGuardrail"
+              value={safetyGuardrail}
+              onChange={(e) => setSafetyGuardrail(e.target.value)}
               className="w-full h-32 font-mono text-sm p-3 rounded-md border border-input bg-muted resize-y"
               spellCheck={false}
             />

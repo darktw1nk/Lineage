@@ -11,6 +11,12 @@ export interface SystemPrompts {
   mutationStrategies: string; // JSON string
   mutationProposalPrompt: string;
   mutationApplyPrompt: string;
+  crossoverPrompt: string;
+  metapromptWithFailuresPrompt: string;
+  metapromptWithoutFailuresPrompt: string;
+  metapromptApplyPrompt: string;
+  llmGradingPrompt: string;
+  safetyGuardrailPrompt: string;
 }
 
 export interface ElectronAPI {

@@ -7,6 +7,57 @@
 
 import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../../src/types/index.js';
 import { getProviderAdapter } from '../providers/index.js';
+import { store } from '../store.js';
+
+const DEFAULT_METAPROMPT_WITH_FAILURES = `SYSTEM: You are a prompt surgeon. Suggest surgical changes to improve the prompt based on failures.
+USER: Parent Prompt: <<<
+\${parentPrompt}
+>>>
+Top failures: \${failureSummary}
+
+Analyze these failures and suggest 1-3 targeted edits to address them.
+Return JSON edits: [{"label":"META","edit":"..."}]`;
+
+const DEFAULT_METAPROMPT_WITHOUT_FAILURES = `SYSTEM: You are a prompt surgeon. Suggest surgical improvements to make the prompt even better.
+USER: Parent Prompt: <<<
+\${parentPrompt}
+>>>
+This prompt is performing well with no test failures. Suggest 1-3 refinements to further improve:
+- Clarity and precision
+- Edge case handling
+- Output quality
+
+Return JSON edits: [{"label":"META","edit":"..."}]`;
+
+const DEFAULT_METAPROMPT_APPLY = `SYSTEM: You apply edit instructions to a prompt faithfully.
+USER: Original: <<<
+\${parentPrompt}
+>>>
+Edits: \${edits}
+Produce the NEW prompt ONLY.`;
+
+/**
+ * Load metaprompt templates from storage or use defaults
+ */
+function getMetapromptTemplates(): { withFailures: string; withoutFailures: string; apply: string } {
+  try {
+    const prompts = store.get('systemPrompts', null) as any;
+    if (prompts) {
+      return {
+        withFailures: prompts.metapromptWithFailuresPrompt || DEFAULT_METAPROMPT_WITH_FAILURES,
+        withoutFailures: prompts.metapromptWithoutFailuresPrompt || DEFAULT_METAPROMPT_WITHOUT_FAILURES,
+        apply: prompts.metapromptApplyPrompt || DEFAULT_METAPROMPT_APPLY,
+      };
+    }
+  } catch (error) {
+    console.error('[Metaprompt] Failed to load custom prompts, using defaults:', error);
+  }
+  return {
+    withFailures: DEFAULT_METAPROMPT_WITH_FAILURES,
+    withoutFailures: DEFAULT_METAPROMPT_WITHOUT_FAILURES,
+    apply: DEFAULT_METAPROMPT_APPLY,
+  };
+}
 
 /**
  * Meta-prompt a node based on failure analysis
@@ -50,28 +101,18 @@ export async function metaPromptNode(
   
   console.log(`[MetaPrompt] ${hasFailures ? `Failures found: ${failureSummary}` : 'No failures found, suggesting general improvements'}`);
   
+  // Load prompt templates
+  const templates = getMetapromptTemplates();
+  
   // Step 1: Propose surgical edits - either based on failures or general improvements
   let metaPrompt: string;
   if (hasFailures) {
-    metaPrompt = `SYSTEM: You are a prompt surgeon. Suggest surgical changes to improve the prompt based on failures.
-USER: Parent Prompt: <<<
-${parent.prompt}
->>>
-Top failures: ${failureSummary}
-
-Analyze these failures and suggest 1-3 targeted edits to address them.
-Return JSON edits: [{"label":"META","edit":"..."}]`;
+    metaPrompt = templates.withFailures
+      .replace(/\$\{parentPrompt\}/g, parent.prompt)
+      .replace(/\$\{failureSummary\}/g, failureSummary);
   } else {
-    metaPrompt = `SYSTEM: You are a prompt surgeon. Suggest surgical improvements to make the prompt even better.
-USER: Parent Prompt: <<<
-${parent.prompt}
->>>
-This prompt is performing well with no test failures. Suggest 1-3 refinements to further improve:
-- Clarity and precision
-- Edge case handling
-- Output quality
-
-Return JSON edits: [{"label":"META","edit":"..."}]`;
+    metaPrompt = templates.withoutFailures
+      .replace(/\$\{parentPrompt\}/g, parent.prompt);
   }
   
   const proposalResult = await serviceAdapter.call({
@@ -105,12 +146,9 @@ Return JSON edits: [{"label":"META","edit":"..."}]`;
   }
   
   // Step 2: Apply edits
-  const applyPrompt = `SYSTEM: You apply edit instructions to a prompt faithfully.
-USER: Original: <<<
-${parent.prompt}
->>>
-Edits: ${JSON.stringify(edits)}
-Produce the NEW prompt ONLY.`;
+  const applyPrompt = templates.apply
+    .replace(/\$\{parentPrompt\}/g, parent.prompt)
+    .replace(/\$\{edits\}/g, JSON.stringify(edits));
   
   const applyResult = await serviceAdapter.call({
     model: config.serviceModel.model,
