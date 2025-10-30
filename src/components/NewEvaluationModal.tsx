@@ -15,9 +15,10 @@ import type { EvaluationConfig, TestCase, ModelRef, ModelCostEntry } from '../ty
 interface NewEvaluationModalProps {
   onClose: () => void;
   onCreated: (evalId: string) => void;
+  initialConfig?: Partial<EvaluationConfig> | null;
 }
 
-export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalProps) {
+export function NewEvaluationModal({ onClose, onCreated, initialConfig }: NewEvaluationModalProps) {
   const [activeTab, setActiveTab] = useState('main');
   const [isSimpleMode, setIsSimpleMode] = useState(true);
   
@@ -30,7 +31,7 @@ export function NewEvaluationModal({ onClose, onCreated }: NewEvaluationModalPro
     queryFn: () => window.electronAPI.settings.get(),
   });
   
-  const [config, setConfig] = useState<Partial<EvaluationConfig>>({
+  const defaultConfig: Partial<EvaluationConfig> = {
     id: configId,
     name: 'New Evaluation',
     selection: {
@@ -102,6 +103,40 @@ Here is the bug report:
     parallelLimit: settings?.globalParallelLimit || 5,
     serviceModelMaxTokens: settings?.serviceModelMaxTokens || 20000, // Load from settings - applies to ALL models
     retries: settings?.retries ?? 3, // Load from settings
+  };
+
+  // Merge defaultConfig with initialConfig (if imported)
+  const [config, setConfig] = useState<Partial<EvaluationConfig>>(() => {
+    if (initialConfig) {
+      return {
+        ...defaultConfig,
+        ...initialConfig,
+        id: configId, // Always use new ID
+        // Deep merge nested objects
+        selection: { ...defaultConfig.selection, ...initialConfig.selection },
+        operators: {
+          ...defaultConfig.operators,
+          ...initialConfig.operators,
+          metaPrompting: { ...defaultConfig.operators?.metaPrompting, ...initialConfig.operators?.metaPrompting },
+          modelVariation: { ...defaultConfig.operators?.modelVariation, ...initialConfig.operators?.modelVariation },
+          paramVariation: {
+            ...defaultConfig.operators?.paramVariation,
+            ...initialConfig.operators?.paramVariation,
+            temperature: { ...defaultConfig.operators?.paramVariation?.temperature, ...initialConfig.operators?.paramVariation?.temperature },
+          },
+        },
+        population: { ...defaultConfig.population, ...initialConfig.population },
+        fitness: {
+          ...defaultConfig.fitness,
+          ...initialConfig.fitness,
+          weights: { ...defaultConfig.fitness?.weights, ...initialConfig.fitness?.weights },
+          costNorm: { ...defaultConfig.fitness?.costNorm, ...initialConfig.fitness?.costNorm },
+          latencyNorm: { ...defaultConfig.fitness?.latencyNorm, ...initialConfig.fitness?.latencyNorm },
+        },
+        targets: { ...defaultConfig.targets, ...initialConfig.targets },
+      };
+    }
+    return defaultConfig;
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});

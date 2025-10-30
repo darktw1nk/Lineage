@@ -9,7 +9,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { NewEvaluationModal } from './components/NewEvaluationModal';
 import { EvaluationConfigPanel } from './components/EvaluationConfigPanel';
 import { LogsPanel } from './components/LogsPanel';
-import type { CandidateNode, UUID } from './types';
+import type { CandidateNode, UUID, EvaluationConfig } from './types';
 
 const queryClient = new QueryClient();
 
@@ -18,6 +18,7 @@ function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<UUID | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showNewEvaluation, setShowNewEvaluation] = useState(false);
+  const [importedConfig, setImportedConfig] = useState<Partial<EvaluationConfig> | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
 
@@ -51,6 +52,10 @@ function App() {
         {/* Left Sidebar */}
         <LeftSidebar
           onNewEvaluation={() => setShowNewEvaluation(true)}
+          onImportConfig={(config) => {
+            setImportedConfig(config);
+            setShowNewEvaluation(true);
+          }}
           onSettings={() => setShowSettings(true)}
           onLogs={() => setShowLogs(!showLogs)}
           onSelectEvaluation={setSelectedEvaluationId}
@@ -96,9 +101,14 @@ function App() {
         )}
         {showNewEvaluation && (
           <NewEvaluationModal
-            onClose={() => setShowNewEvaluation(false)}
+            initialConfig={importedConfig}
+            onClose={() => {
+              setShowNewEvaluation(false);
+              setImportedConfig(null);
+            }}
             onCreated={(evalId) => {
               setShowNewEvaluation(false);
+              setImportedConfig(null);
               setSelectedEvaluationId(evalId);
             }}
           />

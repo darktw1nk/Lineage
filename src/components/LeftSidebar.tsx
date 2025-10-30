@@ -2,8 +2,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, useRef } from 'react';
 import { Button } from './ui/button';
 import { Plus, Settings, Download, Upload, Trash2, FileText } from 'lucide-react';
-import type { UUID, EvaluationRun } from '../types';
+import type { UUID, EvaluationRun, EvaluationConfig } from '../types';
 import { useEvaluationStore } from '../store/evaluationStore';
+import { toast } from 'sonner';
 
 // Format elapsed time in a compact format for sidebar
 function formatElapsedTimeCompact(ms: number): string {
@@ -22,6 +23,7 @@ function formatElapsedTimeCompact(ms: number): string {
 
 interface LeftSidebarProps {
   onNewEvaluation: () => void;
+  onImportConfig: (config: Partial<EvaluationConfig>) => void;
   onSettings: () => void;
   onLogs: () => void;
   onSelectEvaluation: (id: UUID) => void;
@@ -30,6 +32,7 @@ interface LeftSidebarProps {
 
 export function LeftSidebar({
   onNewEvaluation,
+  onImportConfig,
   onSettings,
   onLogs,
   onSelectEvaluation,
@@ -108,6 +111,66 @@ export function LeftSidebar({
     },
   });
 
+  // Export evaluation config to JSON file
+  const handleExportConfig = async (evaluationId: UUID) => {
+    try {
+      const config = await window.electronAPI.eval.getConfig(evaluationId);
+      if (!config) {
+        toast.error('Config not found');
+        return;
+      }
+
+      // Create JSON blob
+      const json = JSON.stringify(config, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      // Trigger download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${config.name || 'evaluation'}-config.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.success('Config exported successfully');
+    } catch (error) {
+      toast.error('Failed to export config');
+      console.error(error);
+    }
+  };
+
+  // Import evaluation config from JSON file
+  const handleImportConfig = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async (e: any) => {
+      try {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const text = await file.text();
+        const config = JSON.parse(text);
+
+        // Validate it's a config (basic check)
+        if (!config.selection || !config.operators || !config.population) {
+          toast.error('Invalid config file');
+          return;
+        }
+
+        // Open modal with imported config
+        onImportConfig(config);
+        toast.success('Config imported successfully');
+      } catch (error) {
+        toast.error('Failed to import config');
+        console.error(error);
+      }
+    };
+    input.click();
+  };
+
   return (
     <div className="flex h-full w-64 flex-col border-r bg-card">
       {/* Logo */}
@@ -115,11 +178,15 @@ export function LeftSidebar({
         <h1 className="text-xl font-bold">PromptEngine.AI</h1>
       </div>
 
-      {/* New Evaluation Button */}
-      <div className="px-4 pb-4">
+      {/* New Evaluation Buttons */}
+      <div className="px-4 pb-4 space-y-2">
         <Button onClick={onNewEvaluation} className="w-full">
           <Plus className="mr-2 h-4 w-4" />
           New Evaluation
+        </Button>
+        <Button onClick={handleImportConfig} variant="outline" className="w-full">
+          <Upload className="mr-2 h-4 w-4" />
+          Import Config
         </Button>
       </div>
 
@@ -179,10 +246,28 @@ export function LeftSidebar({
                   <span
                     onClick={(e) => {
                       e.stopPropagation();
+                      handleExportConfig(evaluation.id);
+                    }}
+                    className="p-1 hover:bg-accent rounded cursor-pointer inline-flex"
+                    title="Export Config"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.stopPropagation();
+                        handleExportConfig(evaluation.id);
+                      }
+                    }}
+                  >
+                    <FileText className="h-3 w-3" />
+                  </span>
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
                       exportMutation.mutate(evaluation.id);
                     }}
                     className="p-1 hover:bg-accent rounded cursor-pointer inline-flex"
-                    title="Export"
+                    title="Export Results"
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
