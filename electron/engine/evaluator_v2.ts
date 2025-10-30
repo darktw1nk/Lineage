@@ -306,7 +306,7 @@ async function mutatePopulationInBackground(
 }
 
 /**
- * Main evaluation loop
+ * Main evaluation loop - Rolling queue implementation for maximum parallelism
  */
 async function evaluationLoop(runId: UUID): Promise<void> {
   const state = activeEvaluations.get(runId);
@@ -318,28 +318,63 @@ async function evaluationLoop(runId: UUID): Promise<void> {
   console.log(`[Evaluator] Evaluation loop started for ${runId.slice(0, 8)}`);
   console.log(`[Evaluator] Queue length: ${state.queue.length}, InProgress: ${state.inProgress.size}`);
   
-  while (state.queue.length > 0 && state.status === 'running') {
+  // Track active node processing promises
+  const activePromises = new Set<Promise<void>>();
+  
+  // Helper to start processing a node
+  const startNodeProcessing = (node: CandidateNode): Promise<void> => {
+    const promise = processNode(runId, node, state).then(() => {
+      activePromises.delete(promise);
+      // After a node completes, check if we should process more
+      processNextNode();
+    });
+    activePromises.add(promise);
+    return promise;
+  };
+  
+  // Helper to process next node from queue if we have capacity
+  const processNextNode = () => {
     // Check stopping conditions
     if (shouldStop(state)) {
-      finishEvaluation(runId, state);
       return;
     }
     
-    // Process next batch of nodes in parallel (up to parallelLimit)
-    // Global semaphore will ensure we don't exceed total API concurrency
-    const batch = state.queue.splice(0, state.config.parallelLimit);
+    // Check if we should pause or stop
+    if (state.status !== 'running') {
+      return;
+    }
     
-    console.log(`[Evaluator] Processing batch of ${batch.length} nodes in parallel`);
-    
-    // Process all nodes in batch in parallel
-    await Promise.all(batch.map(node => processNode(runId, node, state)));
-    
-    // Check if we were paused during the batch (status can change externally)
-    const currentStatus = state.status as EvaluationState['status'];
-    if (currentStatus === 'pausing') {
-      console.log(`[Evaluator] Pause detected, exiting loop`);
+    // Check if we have capacity and nodes to process
+    if (activePromises.size < state.config.parallelLimit && state.queue.length > 0) {
+      const node = state.queue.shift();
+      if (node) {
+        console.log(`[Evaluator] Starting node ${node.id.slice(0, 8)} (active: ${activePromises.size + 1}/${state.config.parallelLimit}, queue: ${state.queue.length})`);
+        startNodeProcessing(node);
+        
+        // Try to fill remaining capacity immediately
+        if (activePromises.size < state.config.parallelLimit && state.queue.length > 0) {
+          setImmediate(() => processNextNode());
+        }
+      }
+    }
+  };
+  
+  // Start initial batch up to parallelLimit
+  const initialBatchSize = Math.min(state.config.parallelLimit, state.queue.length);
+  console.log(`[Evaluator] Starting initial batch of ${initialBatchSize} nodes`);
+  for (let i = 0; i < initialBatchSize; i++) {
+    processNextNode();
+  }
+  
+  // Wait for all active processing to complete
+  while (activePromises.size > 0 || state.queue.length > 0) {
+    if (state.status !== 'running') {
+      console.log(`[Evaluator] Status changed to ${state.status}, stopping node initiation`);
       break;
     }
+    
+    // Wait a bit before checking again
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     // Check if generation is complete
     const currentGen = state.run.generations[state.currentGeneration];
@@ -347,10 +382,10 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       n.status === 'finished' || n.status === 'failed' || n.status === 'skipped'
     );
     
-    if (allFinished && state.queue.length === 0) {
+    if (allFinished && state.queue.length === 0 && activePromises.size === 0) {
       console.log(`[Evaluator] Generation ${state.currentGeneration} complete`);
       
-      // Check stopping conditions again
+      // Check stopping conditions
       if (shouldStop(state)) {
         finishEvaluation(runId, state);
         return;
@@ -368,6 +403,13 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       
       // Move to next generation
       await moveToNextGeneration(runId, state);
+      
+      // Start processing nodes from the new generation
+      const newInitialBatchSize = Math.min(state.config.parallelLimit, state.queue.length);
+      console.log(`[Evaluator] Starting ${newInitialBatchSize} nodes from new generation`);
+      for (let i = 0; i < newInitialBatchSize; i++) {
+        processNextNode();
+      }
     }
   }
   
@@ -375,9 +417,14 @@ async function evaluationLoop(runId: UUID): Promise<void> {
   
   // If we exited because of pause, wait for any remaining in-progress nodes
   if (state.status === 'pausing') {
-    console.log(`[Evaluator] Pausing... waiting for ${state.inProgress.size} in-progress nodes to complete`);
+    console.log(`[Evaluator] Pausing... waiting for ${activePromises.size} active promises and ${state.inProgress.size} in-progress nodes to complete`);
     
-    // Wait for all in-progress nodes to finish
+    // Wait for all active promises to complete
+    if (activePromises.size > 0) {
+      await Promise.all(Array.from(activePromises));
+    }
+    
+    // Double-check inProgress set
     while (state.inProgress.size > 0) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }

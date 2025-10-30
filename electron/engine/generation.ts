@@ -365,121 +365,199 @@ export async function createNextGeneration(
   let totalCalls = 0;
   
   // Step 7: Create children per operator plan (one operator per child, no layering)
+  // Process all children in PARALLEL
+  console.log(`[Generation] Creating ${remainingChildren} children in parallel...`);
+  
+  const childCreationPromises = [];
+  
   for (let i = 0; i < remainingChildren; i++) {
     const operator = operatorPlan[i];
     const parent = nextParent();
     const parentFitness = parent.metrics?.fitness || 0;
     
-    let prompt = parent.prompt;
-    let changeLog: ChangeLogLine[] = [];
-    let lineageParents: string[] = [parent.id];
-    let temperature = parent.params.temperature || 0.7;
-    let model = parent.params.model;
-    let operatorType: 'mutation' | 'crossover' | 'meta' | 'param' | 'model' | null = null;
-    
-    try {
-      if (operator === 'mutation') {
-        // MUTATE: apply mutation to prompt
-        const result = await mutateNode(parent.prompt, config);
-        prompt = result.prompt;
-        changeLog = result.changeLog;
-        operatorType = 'mutation';
-        
-        totalPromptTokens += result.cost.promptTokens;
-        totalCompletionTokens += result.cost.completionTokens;
-        totalUsd += result.cost.usd;
-        totalCalls += result.cost.calls;
-        
-        console.log(`[Generation] Child ${i}: MUTATION from parent ${parent.id.slice(0, 8)}`);
-        
-      } else if (operator === 'crossover') {
-        // CROSSOVER: merge two distinct parents
-        const parentB = nextParent();
-        
-        const result = await crossoverNodes(parent, parentB, config);
-        prompt = result.prompt;
-        changeLog = result.changeLog;
-        lineageParents = [parent.id, parentB.id]; // Track BOTH parents
-        operatorType = 'crossover';
-        
-        totalPromptTokens += result.cost.promptTokens;
-        totalCompletionTokens += result.cost.completionTokens;
-        totalUsd += result.cost.usd;
-        totalCalls += result.cost.calls;
-        
-        console.log(`[Generation] Child ${i}: CROSSOVER from ${parent.id.slice(0, 8)} × ${parentB.id.slice(0, 8)}`);
-        
-      } else if (operator === 'meta') {
-        // META: targeted mutation from failure summary
-        const result = await metaPromptNode(parent, config, currentGeneration);
-        prompt = result.prompt;
-        changeLog = result.changeLog;
-        operatorType = 'meta';
-        
-        totalPromptTokens += result.cost.promptTokens;
-        totalCompletionTokens += result.cost.completionTokens;
-        totalUsd += result.cost.usd;
-        totalCalls += result.cost.calls;
-        
-        console.log(`[Generation] Child ${i}: META from parent ${parent.id.slice(0, 8)}`);
-        
-      } else if (operator === 'param') {
-        // PARAM: apply parameter variation using dedicated function
-        const paramVariation = varyParameters(
-          temperature,
-          config,
-          true // Force variation since we're in param slot
-        );
-        
-        temperature = paramVariation.temperature;
-        changeLog = paramVariation.changeLog;
-        operatorType = 'param';
-        
-        console.log(`[Generation] Child ${i}: PARAM from parent ${parent.id.slice(0, 8)} (temp ${temperature.toFixed(2)})`);
-        
-      } else if (operator === 'model') {
-        // MODEL: apply model variation using dedicated function
-        const modelVariation = varyModel(
-          model,
-          config,
-          true, // Force variation since we're in model slot
-          config.enabledModels
-        );
-        
-        if (modelVariation.changeLog.length > 0) {
-          model = modelVariation.model;
-          changeLog = modelVariation.changeLog;
-          operatorType = 'model';
+    // Create a promise for each child creation
+    const childPromise = (async () => {
+      let prompt = parent.prompt;
+      let changeLog: ChangeLogLine[] = [];
+      let lineageParents: string[] = [parent.id];
+      let temperature = parent.params.temperature || 0.7;
+      let model = parent.params.model;
+      let operatorType: 'mutation' | 'crossover' | 'meta' | 'param' | 'model' | null = null;
+      
+      try {
+        if (operator === 'mutation') {
+          // MUTATE: apply mutation to prompt
+          const result = await mutateNode(parent.prompt, config);
+          prompt = result.prompt;
+          changeLog = result.changeLog;
+          operatorType = 'mutation';
           
-          console.log(`[Generation] Child ${i}: MODEL from parent ${parent.id.slice(0, 8)} (${model.provider}/${model.model})`);
-        } else {
-          // Shouldn't happen since we force variation, but safety fallback
-          changeLog = [{ label: 'CARRY', text: 'Model variation skipped (no other models available)' }];
-          console.log(`[Generation] Child ${i}: MODEL skipped (no alternatives)`);
+          console.log(`[Generation] Child ${i}: MUTATION from parent ${parent.id.slice(0, 8)}`);
+          
+          return {
+            prompt,
+            changeLog,
+            lineageParents,
+            temperature,
+            model,
+            operatorType,
+            cost: result.cost,
+          };
+          
+        } else if (operator === 'crossover') {
+          // CROSSOVER: merge two distinct parents
+          const parentB = nextParent();
+          
+          const result = await crossoverNodes(parent, parentB, config);
+          prompt = result.prompt;
+          changeLog = result.changeLog;
+          lineageParents = [parent.id, parentB.id]; // Track BOTH parents
+          operatorType = 'crossover';
+          
+          console.log(`[Generation] Child ${i}: CROSSOVER from ${parent.id.slice(0, 8)} × ${parentB.id.slice(0, 8)}`);
+          
+          return {
+            prompt,
+            changeLog,
+            lineageParents,
+            temperature,
+            model,
+            operatorType,
+            cost: result.cost,
+          };
+          
+        } else if (operator === 'meta') {
+          // META: targeted mutation from failure summary
+          const result = await metaPromptNode(parent, config, currentGeneration);
+          prompt = result.prompt;
+          changeLog = result.changeLog;
+          operatorType = 'meta';
+          
+          console.log(`[Generation] Child ${i}: META from parent ${parent.id.slice(0, 8)}`);
+          
+          return {
+            prompt,
+            changeLog,
+            lineageParents,
+            temperature,
+            model,
+            operatorType,
+            cost: result.cost,
+          };
+          
+        } else if (operator === 'param') {
+          // PARAM: apply parameter variation using dedicated function
+          const paramVariation = varyParameters(
+            temperature,
+            config,
+            true // Force variation since we're in param slot
+          );
+          
+          temperature = paramVariation.temperature;
+          changeLog = paramVariation.changeLog;
+          operatorType = 'param';
+          
+          console.log(`[Generation] Child ${i}: PARAM from parent ${parent.id.slice(0, 8)} (temp ${temperature.toFixed(2)})`);
+          
+          return {
+            prompt,
+            changeLog,
+            lineageParents,
+            temperature,
+            model,
+            operatorType,
+            cost: { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 },
+          };
+          
+        } else if (operator === 'model') {
+          // MODEL: apply model variation using dedicated function
+          const modelVariation = varyModel(
+            model,
+            config,
+            true, // Force variation since we're in model slot
+            config.enabledModels
+          );
+          
+          if (modelVariation.changeLog.length > 0) {
+            model = modelVariation.model;
+            changeLog = modelVariation.changeLog;
+            operatorType = 'model';
+            
+            console.log(`[Generation] Child ${i}: MODEL from parent ${parent.id.slice(0, 8)} (${model.provider}/${model.model})`);
+          } else {
+            // Shouldn't happen since we force variation, but safety fallback
+            changeLog = [{ label: 'CARRY', text: 'Model variation skipped (no other models available)' }];
+            console.log(`[Generation] Child ${i}: MODEL skipped (no alternatives)`);
+          }
+          
+          return {
+            prompt,
+            changeLog,
+            lineageParents,
+            temperature,
+            model,
+            operatorType,
+            cost: { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 },
+          };
         }
+      } catch (error) {
+        console.error(`[Generation] Operator '${operator}' failed for child ${i}:`, error);
+        // Fallback to parent
+        prompt = parent.prompt;
+        changeLog = [{ label: 'ERROR', text: `Operator '${operator}' failed, using parent` }];
+        
+        return {
+          prompt,
+          changeLog,
+          lineageParents,
+          temperature,
+          model,
+          operatorType,
+          cost: { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 },
+        };
       }
-    } catch (error) {
-      console.error(`[Generation] Operator '${operator}' failed for child ${i}:`, error);
-      // Fallback to parent
-      prompt = parent.prompt;
-      changeLog = [{ label: 'ERROR', text: `Operator '${operator}' failed, using parent` }];
-    }
+      
+      // Should never reach here, but TypeScript needs it
+      return {
+        prompt,
+        changeLog,
+        lineageParents,
+        temperature,
+        model,
+        operatorType,
+        cost: { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 },
+      };
+    })().then(result => ({ index: i, parent, parentFitness, result }));
+    
+    childCreationPromises.push(childPromise);
+  }
+  
+  // Wait for all children to be created in parallel
+  const childResults = await Promise.all(childCreationPromises);
+  
+  // Process results in order and create nodes
+  for (const { index, parent, parentFitness, result } of childResults) {
+    // Accumulate costs
+    totalPromptTokens += result.cost.promptTokens;
+    totalCompletionTokens += result.cost.completionTokens;
+    totalUsd += result.cost.usd;
+    totalCalls += result.cost.calls;
     
     const newNode: CandidateNode = {
       id: uuidv4(),
       generation: nextGenerationNumber,
-      lineageParents,
+      lineageParents: result.lineageParents,
       status: 'awaiting',
-      prompt,
-      params: { model, temperature },
-      changeLog,
+      prompt: result.prompt,
+      params: { model: result.model, temperature: result.temperature },
+      changeLog: result.changeLog,
     };
     
     newGenNodes.push(newNode);
     
     // Track operator effectiveness (will update after this node is evaluated)
     // Store parent fitness and operator type for later delta calculation
-    (newNode as any)._operatorType = operatorType;
+    (newNode as any)._operatorType = result.operatorType;
     (newNode as any)._parentFitness = parentFitness;
   }
   
