@@ -124,23 +124,6 @@ export function LeftSidebar({
     },
   });
   
-  const importMutation = useMutation({
-    mutationFn: async () => {
-      // This will trigger file dialog in main process
-      const filePath = prompt('Enter path to JSON file (or we need file picker):');
-      if (!filePath) throw new Error('No file selected');
-      return await window.electronAPI.eval.import(filePath);
-    },
-    onSuccess: (run) => {
-      queryClient.invalidateQueries({ queryKey: ['evaluations'] });
-      onSelectEvaluation(run.id);
-      alert('Import successful!');
-    },
-    onError: (error: any) => {
-      alert(`Import failed: ${error.message}`);
-    },
-  });
-  
   const deleteMutation = useMutation({
     mutationFn: async (runId: string) => {
       return await window.electronAPI.eval.delete(runId);

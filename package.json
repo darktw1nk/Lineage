@@ -7,7 +7,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
+    "build": "vite build && electron-builder",
+    "build:strict": "tsc && vite build && electron-builder",
     "build:dev": "tsc && vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",

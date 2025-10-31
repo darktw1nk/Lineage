@@ -139,12 +139,12 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
         >
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Mutation Factor:</span>
-              <span className="font-mono">{config.operators.mutationFactor}</span>
+              <span className="text-muted-foreground">Mutation Share:</span>
+              <span className="font-mono">{config.operators.mutationShare}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Crossover Factor:</span>
-              <span className="font-mono">{config.operators.crossoverFactor}</span>
+              <span className="text-muted-foreground">Crossover Share:</span>
+              <span className="font-mono">{config.operators.crossoverShare}</span>
             </div>
             {config.operators.metaPrompting?.enabled && (
               <div className="flex justify-between">
@@ -158,12 +158,14 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
                   <span className="text-muted-foreground">Param Variation:</span>
                   <span className="font-mono">Share: {config.operators.paramVariation.share}</span>
                 </div>
-                <div className="flex justify-between pl-4">
-                  <span className="text-muted-foreground">Temp Range:</span>
-                  <span className="font-mono">
-                    {config.operators.paramVariation.temperature.min} - {config.operators.paramVariation.temperature.max}
-                  </span>
-                </div>
+                {config.operators.paramVariation.temperature && (
+                  <div className="flex justify-between pl-4">
+                    <span className="text-muted-foreground">Temp Range:</span>
+                    <span className="font-mono">
+                      {config.operators.paramVariation.temperature.min} - {config.operators.paramVariation.temperature.max}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -177,8 +179,12 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
         >
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Size:</span>
-              <span className="font-mono">{config.population.size}</span>
+              <span className="text-muted-foreground">Initial Size:</span>
+              <span className="font-mono">{config.population.initialSize}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Generation Size:</span>
+              <span className="font-mono">{config.population.generationSize}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Fill:</span>
@@ -333,12 +339,6 @@ export function EvaluationConfigPanel({ evaluationId, onClose }: EvaluationConfi
               <span className="text-muted-foreground">Parallel Limit:</span>
               <span className="font-mono">{config.parallelLimit}</span>
             </div>
-            {config.rawBlobCapture && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Raw Capture:</span>
-                <span className="font-mono">Enabled</span>
-              </div>
-            )}
           </div>
         </CollapsibleSection>
       </div>

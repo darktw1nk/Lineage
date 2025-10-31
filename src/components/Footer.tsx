@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Pause, Play, Square, Loader2, Settings2 } from 'lucide-react';
 import type { UUID } from '../types';

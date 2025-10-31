@@ -10,7 +10,7 @@ import { SystemPromptsModal } from './components/SystemPromptsModal';
 import { NewEvaluationModal } from './components/NewEvaluationModal';
 import { EvaluationConfigPanel } from './components/EvaluationConfigPanel';
 import { LogsPanel } from './components/LogsPanel';
-import type { CandidateNode, UUID, EvaluationConfig } from './types';
+import type { UUID, EvaluationConfig } from './types';
 
 const queryClient = new QueryClient();
 
@@ -30,7 +30,7 @@ function App() {
   useEffect(() => {
     if (!selectedEvaluationId) return;
 
-    const handleUpdate = (_event: any, data: any) => {
+    const handleUpdate = (data: any) => {
       if (!data) return;
       
       // Only handle errors at App level
