@@ -221,6 +221,38 @@ async function mutatePopulationInBackground(
   console.log(`[Evaluator] Starting background mutation...`);
   
   const shellNodes = state.run.generations[0];
+  
+  // Skip mutation for manual mode - prompts are already specified
+  if (state.config.population.fill === 'manual') {
+    console.log(`[Evaluator] Manual mode detected, skipping mutations`);
+    
+    // All nodes are already 'awaiting', just add them to queue
+    state.queue = shellNodes.filter(n => n.status === 'awaiting');
+    console.log(`[Evaluator] Queue initialized with ${state.queue.length} nodes`);
+    
+    // Send population ready event
+    sendUpdate(runId, { type: 'population_ready' });
+    
+    // Handle pause request that occurred during setup
+    if (state.status === 'pausing') {
+      console.log(`[Evaluator] Setup complete, transitioning from 'pausing' to 'paused'`);
+      state.status = 'paused';
+      state.run.status = 'paused';
+      state.run.totalPausedMs = state.totalPausedMs;
+      state.pausedAt = Date.now();
+      state.run.pausedAt = state.pausedAt;
+      sendUpdate(runId, { type: 'status', status: 'paused', totalPausedMs: state.totalPausedMs, pausedAt: state.pausedAt });
+      return;
+    }
+    
+    // Start evaluation loop
+    if (state.status === 'running') {
+      console.log(`[Evaluator] Starting evaluation loop...`);
+      evaluationLoop(runId);
+    }
+    return;
+  }
+  
   const nodesToMutate = shellNodes.filter((_, i) => i > 0); // Skip first (baseline)
   
   console.log(`[Evaluator] Mutating ${nodesToMutate.length} nodes in parallel...`);
