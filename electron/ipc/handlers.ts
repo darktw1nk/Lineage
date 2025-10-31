@@ -428,19 +428,55 @@ async function getSettings(): Promise<AppSettings> {
     `).get() as { value: string } | undefined;
     
     if (row) {
-      return JSON.parse(row.value);
+      const settings = JSON.parse(row.value);
+      
+      // Auto-fix: If service model is empty, select first available model
+      if (!settings.serviceModel.model || settings.serviceModel.model === '') {
+        const firstModel = db.prepare(`
+          SELECT provider, model FROM model_costs LIMIT 1
+        `).get() as { provider: string; model: string } | undefined;
+        
+        if (firstModel) {
+          settings.serviceModel = { 
+            provider: firstModel.provider as any, 
+            model: firstModel.model 
+          };
+          // Save the fixed settings
+          await setSettings(settings);
+          console.log(`[Settings] Auto-selected first available model: ${firstModel.provider}/${firstModel.model}`);
+        }
+      }
+      
+      return settings;
     }
   } catch (error) {
     console.error('Error getting settings from database:', error);
   }
   
-  // Default settings - user must configure service model
-  return {
+  // Default settings - try to select first available model
+  const db = getDatabase();
+  const firstModel = db.prepare(`
+    SELECT provider, model FROM model_costs LIMIT 1
+  `).get() as { provider: string; model: string } | undefined;
+  
+  const defaultSettings: AppSettings = {
     globalParallelLimit: 5,
-    serviceModel: { provider: 'openai', model: '' },
+    serviceModel: firstModel 
+      ? { provider: firstModel.provider as any, model: firstModel.model }
+      : { provider: 'openai', model: 'gpt-4o-mini' }, // Fallback
     serviceModelMaxTokens: 20000, // Default 20k tokens for ALL model calls (service + candidate)
     retries: 3, // Default 3 retries for JSON parsing failures
   };
+  
+  // Save defaults so they persist
+  try {
+    await setSettings(defaultSettings);
+    console.log(`[Settings] Initialized with default model: ${defaultSettings.serviceModel.provider}/${defaultSettings.serviceModel.model}`);
+  } catch (error) {
+    console.error('[Settings] Failed to save default settings:', error);
+  }
+  
+  return defaultSettings;
 }
 
 async function setSettings(settings: AppSettings): Promise<void> {
