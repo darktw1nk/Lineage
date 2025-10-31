@@ -46,9 +46,13 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
     const generationSpacing = 400; // Vertical spacing between generations
     let edgeCounter = 0; // Global counter for unique edge IDs
 
-    // Find top 3 performers across ALL generations for ranking
+    // Find top 3 performers across ALL generations for ranking (excluding elites to avoid duplicates)
     const allFinishedNodes = evaluation.generations.flatMap(gen => 
-      gen.filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
+      gen.filter(n => 
+        n.status === 'finished' && 
+        n.metrics?.fitness !== undefined &&
+        n.changeLog[0]?.label !== 'ELITE' // Exclude elite clones from ranking
+      )
     ).sort((a, b) => (b.metrics?.fitness || 0) - (a.metrics?.fitness || 0));
     
     const topNodeIds = new Set([
