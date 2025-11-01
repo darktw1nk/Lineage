@@ -8,9 +8,13 @@ import { Switch } from './ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
 import { LabelWithTooltip } from './LabelWithTooltip';
-import { HelpCircle } from 'lucide-react';
+import { HelpCircle, ArrowUpDown } from 'lucide-react';
+import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import type { EvaluationConfig, TestCase, ModelRef, ModelCostEntry } from '../types';
+
+type SortColumn = 'provider' | 'model' | 'prompt' | 'completion';
+type SortDirection = 'asc' | 'desc';
 
 interface NewEvaluationModalProps {
   onClose: () => void;
@@ -807,6 +811,9 @@ function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
 
 // Models Tab
 function ModelsTab({ config, setConfig }: TabProps) {
+  const [sortColumn, setSortColumn] = useState<SortColumn>('provider');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
   const { data: costs = [] } = useQuery<ModelCostEntry[]>({
     queryKey: ['costs'],
     queryFn: () => window.electronAPI.costs.getAll(),
@@ -815,11 +822,6 @@ function ModelsTab({ config, setConfig }: TabProps) {
     refetchOnMount: false,
     refetchOnReconnect: false,
   });
-
-  const availableModels: ModelRef[] = costs.map(cost => ({
-    provider: cost.provider,
-    model: cost.model,
-  }));
 
   const toggleModel = (model: ModelRef) => {
     const enabled = config.enabledModels || [];
@@ -842,35 +844,136 @@ function ModelsTab({ config, setConfig }: TabProps) {
     }
   };
 
+  // Sort costs based on column and direction
+  const sortedCosts = [...costs].sort((a, b) => {
+    let aVal: string | number;
+    let bVal: string | number;
+
+    switch (sortColumn) {
+      case 'provider':
+        aVal = a.provider;
+        bVal = b.provider;
+        break;
+      case 'model':
+        aVal = a.model;
+        bVal = b.model;
+        break;
+      case 'prompt':
+        aVal = a.promptUSDper1k;
+        bVal = b.promptUSDper1k;
+        break;
+      case 'completion':
+        aVal = a.completionUSDper1k;
+        bVal = b.completionUSDper1k;
+        break;
+      default:
+        return 0;
+    }
+
+    if (typeof aVal === 'string' && typeof bVal === 'string') {
+      return sortDirection === 'asc'
+        ? aVal.localeCompare(bVal)
+        : bVal.localeCompare(aVal);
+    }
+
+    return sortDirection === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
+  });
+
   return (
     <div className="space-y-4">
       <div className="text-sm text-muted-foreground">
         Select models to use in the evaluation (loaded from Models & Costs settings)
       </div>
 
-      {availableModels.length === 0 && (
+      {costs.length === 0 && (
         <div className="text-sm text-yellow-600 bg-yellow-50 p-3 rounded-md">
           No models configured. Please go to Settings → Models & Costs to add models.
         </div>
       )}
 
-      <div className="space-y-2 max-h-96 overflow-y-auto">
-        {availableModels.map((model, idx) => {
+      {/* Sort Controls */}
+      {costs.length > 0 && (
+        <div className="flex gap-2 items-center text-sm border-b pb-2 flex-wrap">
+          <span className="text-muted-foreground">Sort:</span>
+          <button
+            className={`flex items-center gap-1 px-2 py-1 rounded hover:bg-muted ${sortColumn === 'provider' ? 'bg-muted font-medium' : ''}`}
+            onClick={() => {
+              if (sortColumn === 'provider') {
+                setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+              } else {
+                setSortColumn('provider');
+                setSortDirection('asc');
+              }
+            }}
+          >
+            Provider <ArrowUpDown className="h-3 w-3" />
+          </button>
+          <button
+            className={`flex items-center gap-1 px-2 py-1 rounded hover:bg-muted ${sortColumn === 'model' ? 'bg-muted font-medium' : ''}`}
+            onClick={() => {
+              if (sortColumn === 'model') {
+                setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+              } else {
+                setSortColumn('model');
+                setSortDirection('asc');
+              }
+            }}
+          >
+            Model <ArrowUpDown className="h-3 w-3" />
+          </button>
+          <button
+            className={`flex items-center gap-1 px-2 py-1 rounded hover:bg-muted ${sortColumn === 'prompt' ? 'bg-muted font-medium' : ''}`}
+            onClick={() => {
+              if (sortColumn === 'prompt') {
+                setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+              } else {
+                setSortColumn('prompt');
+                setSortDirection('asc');
+              }
+            }}
+          >
+            Prompt $ <ArrowUpDown className="h-3 w-3" />
+          </button>
+          <button
+            className={`flex items-center gap-1 px-2 py-1 rounded hover:bg-muted ${sortColumn === 'completion' ? 'bg-muted font-medium' : ''}`}
+            onClick={() => {
+              if (sortColumn === 'completion') {
+                setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+              } else {
+                setSortColumn('completion');
+                setSortDirection('asc');
+              }
+            }}
+          >
+            Completion $ <ArrowUpDown className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-1 max-h-96 overflow-y-auto">
+        {sortedCosts.map((cost, idx) => {
           const isEnabled = (config.enabledModels || []).some(
-            (m) => m.provider === model.provider && m.model === model.model
+            (m) => m.provider === cost.provider && m.model === cost.model
           );
 
           return (
-            <div key={idx} className="flex items-center space-x-2">
+            <div key={`${cost.provider}-${cost.model}`} className="flex items-center space-x-2 px-2 py-1.5 rounded hover:bg-muted/50 border">
               <input
                 type="checkbox"
                 id={`model-${idx}`}
                 checked={isEnabled}
-                onChange={() => toggleModel(model)}
-                className="h-4 w-4"
+                onChange={() => toggleModel({ provider: cost.provider, model: cost.model })}
+                className="h-4 w-4 cursor-pointer flex-shrink-0"
               />
-              <Label htmlFor={`model-${idx}`} className="flex-1 cursor-pointer">
-                {model.provider} / {model.model}
+              <Label htmlFor={`model-${idx}`} className="flex-1 cursor-pointer grid grid-cols-12 gap-2 items-center text-sm">
+                <span className="col-span-3 font-medium">{cost.provider}</span>
+                <span className="col-span-4">{cost.model}</span>
+                <span className="col-span-2 text-xs text-muted-foreground text-right">
+                  P: ${(cost.promptUSDper1k * 1000).toFixed(2)}
+                </span>
+                <span className="col-span-3 text-xs text-muted-foreground text-right">
+                  C: ${(cost.completionUSDper1k * 1000).toFixed(2)}
+                </span>
               </Label>
             </div>
           );
