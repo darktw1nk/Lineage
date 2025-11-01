@@ -5,7 +5,11 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Trash2, ArrowUpDown } from 'lucide-react';
 import type { AppSettings, ModelCostEntry } from '../types';
+
+type SortColumn = 'provider' | 'model' | 'prompt' | 'completion';
+type SortDirection = 'asc' | 'desc';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -60,6 +64,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   });
   
   const [localCosts, setLocalCosts] = useState<ModelCostEntry[]>([]);
+  const [sortColumn, setSortColumn] = useState<SortColumn>('provider');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   // Initialize from query data when available
   useEffect(() => {
@@ -248,80 +254,143 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           </TabsContent>
 
           <TabsContent value="costs" className="space-y-4">
-            <div className="text-sm text-muted-foreground mb-4">
+            <div className="text-sm text-muted-foreground mb-2">
               Configure cost per million tokens for each model (USD)
             </div>
 
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {localCosts.map((cost, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-2 items-center p-3 border rounded-lg">
-                  <div className="col-span-3">
-                    <Label className="text-xs">Provider</Label>
-                    <select
-                      className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
-                      value={cost.provider}
-                      onChange={(e) => {
-                        const newCosts = [...localCosts];
-                        newCosts[idx].provider = e.target.value as any;
-                        setLocalCosts(newCosts);
-                      }}
-                    >
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="gemini">Gemini</option>
-                    </select>
+            {/* Table Header */}
+            <div className="grid grid-cols-12 gap-2 items-center px-3 py-2 border-b text-xs font-semibold text-muted-foreground">
+              <button
+                className="col-span-3 flex items-center gap-1 hover:text-foreground"
+                onClick={() => {
+                  if (sortColumn === 'provider') {
+                    setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+                  } else {
+                    setSortColumn('provider');
+                    setSortDirection('asc');
+                  }
+                }}
+              >
+                Provider <ArrowUpDown className="h-3 w-3" />
+              </button>
+              <button
+                className="col-span-3 flex items-center gap-1 hover:text-foreground"
+                onClick={() => {
+                  if (sortColumn === 'model') {
+                    setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+                  } else {
+                    setSortColumn('model');
+                    setSortDirection('asc');
+                  }
+                }}
+              >
+                Model <ArrowUpDown className="h-3 w-3" />
+              </button>
+              <button
+                className="col-span-2 flex items-center gap-1 hover:text-foreground"
+                onClick={() => {
+                  if (sortColumn === 'prompt') {
+                    setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+                  } else {
+                    setSortColumn('prompt');
+                    setSortDirection('asc');
+                  }
+                }}
+              >
+                Prompt $/M <ArrowUpDown className="h-3 w-3" />
+              </button>
+              <button
+                className="col-span-3 flex items-center gap-1 hover:text-foreground"
+                onClick={() => {
+                  if (sortColumn === 'completion') {
+                    setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+                  } else {
+                    setSortColumn('completion');
+                    setSortDirection('asc');
+                  }
+                }}
+              >
+                Completion $/M <ArrowUpDown className="h-3 w-3" />
+              </button>
+              <div className="col-span-1 text-center">Delete</div>
+            </div>
+
+            {/* Table Body */}
+            <div className="max-h-80 overflow-y-auto">
+              {getSortedCosts(localCosts, sortColumn, sortDirection).map((cost, idx) => {
+                const originalIdx = localCosts.findIndex(
+                  c => c.provider === cost.provider && c.model === cost.model
+                );
+                return (
+                  <div key={`${cost.provider}-${cost.model}-${idx}`} className="grid grid-cols-12 gap-2 items-center px-3 py-2 border-b hover:bg-muted/50">
+                    <div className="col-span-3">
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm h-9"
+                        value={cost.provider}
+                        onChange={(e) => {
+                          const newCosts = [...localCosts];
+                          newCosts[originalIdx].provider = e.target.value as any;
+                          setLocalCosts(newCosts);
+                        }}
+                      >
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="gemini">Gemini</option>
+                      </select>
+                    </div>
+                    <div className="col-span-3">
+                      <Input
+                        className="h-9"
+                        value={cost.model}
+                        onChange={(e) => {
+                          const newCosts = [...localCosts];
+                          newCosts[originalIdx].model = e.target.value;
+                          setLocalCosts(newCosts);
+                        }}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Input
+                        className="h-9"
+                        type="number"
+                        step="0.01"
+                        value={(cost.promptUSDper1k * 1000).toFixed(2)}
+                        onChange={(e) => {
+                          const newCosts = [...localCosts];
+                          newCosts[originalIdx].promptUSDper1k = (parseFloat(e.target.value) || 0) / 1000;
+                          setLocalCosts(newCosts);
+                        }}
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <Input
+                        className="h-9"
+                        type="number"
+                        step="0.01"
+                        value={(cost.completionUSDper1k * 1000).toFixed(2)}
+                        onChange={(e) => {
+                          const newCosts = [...localCosts];
+                          newCosts[originalIdx].completionUSDper1k = (parseFloat(e.target.value) || 0) / 1000;
+                          setLocalCosts(newCosts);
+                        }}
+                      />
+                    </div>
+                    <div className="col-span-1 flex justify-center">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => {
+                          const newCosts = localCosts.filter((_, i) => i !== originalIdx);
+                          setLocalCosts(newCosts);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="col-span-3">
-                    <Label className="text-xs">Model</Label>
-                    <Input
-                      value={cost.model}
-                      onChange={(e) => {
-                        const newCosts = [...localCosts];
-                        newCosts[idx].model = e.target.value;
-                        setLocalCosts(newCosts);
-                      }}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Label className="text-xs">Prompt $/M</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={(cost.promptUSDper1k * 1000).toFixed(2)}
-                      onChange={(e) => {
-                        const newCosts = [...localCosts];
-                        newCosts[idx].promptUSDper1k = (parseFloat(e.target.value) || 0) / 1000;
-                        setLocalCosts(newCosts);
-                      }}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Label className="text-xs">Completion $/M</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={(cost.completionUSDper1k * 1000).toFixed(2)}
-                      onChange={(e) => {
-                        const newCosts = [...localCosts];
-                        newCosts[idx].completionUSDper1k = (parseFloat(e.target.value) || 0) / 1000;
-                        setLocalCosts(newCosts);
-                      }}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => {
-                        const newCosts = localCosts.filter((_, i) => i !== idx);
-                        setLocalCosts(newCosts);
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <Button
@@ -354,5 +423,48 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       </DialogContent>
     </Dialog>
   );
+}
+
+// Helper function to sort costs
+function getSortedCosts(
+  costs: ModelCostEntry[],
+  column: SortColumn,
+  direction: SortDirection
+): ModelCostEntry[] {
+  const sorted = [...costs].sort((a, b) => {
+    let aVal: string | number;
+    let bVal: string | number;
+
+    switch (column) {
+      case 'provider':
+        aVal = a.provider;
+        bVal = b.provider;
+        break;
+      case 'model':
+        aVal = a.model;
+        bVal = b.model;
+        break;
+      case 'prompt':
+        aVal = a.promptUSDper1k;
+        bVal = b.promptUSDper1k;
+        break;
+      case 'completion':
+        aVal = a.completionUSDper1k;
+        bVal = b.completionUSDper1k;
+        break;
+      default:
+        return 0;
+    }
+
+    if (typeof aVal === 'string' && typeof bVal === 'string') {
+      return direction === 'asc'
+        ? aVal.localeCompare(bVal)
+        : bVal.localeCompare(aVal);
+    }
+
+    return direction === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
+  });
+
+  return sorted;
 }
 
