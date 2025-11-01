@@ -126,7 +126,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             <TabsTrigger value="costs">Models & Costs</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="general" className="space-y-4">
+          <TabsContent value="general" className="space-y-4 min-h-[500px]">
             <div>
               <Label htmlFor="parallelLimit">Global Parallel Execution Limit</Label>
               <Input
@@ -218,7 +218,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             </div>
           </TabsContent>
 
-          <TabsContent value="apikeys" className="space-y-4">
+          <TabsContent value="apikeys" className="space-y-4 min-h-[500px]">
             <div>
               <Label htmlFor="openai-key">OpenAI API Key</Label>
               <Input
@@ -253,7 +253,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             </div>
           </TabsContent>
 
-          <TabsContent value="costs" className="space-y-4">
+          <TabsContent value="costs" className="space-y-4 min-h-[500px]">
             <div className="text-sm text-muted-foreground mb-2">
               Configure cost per million tokens for each model (USD)
             </div>
