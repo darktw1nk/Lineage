@@ -277,7 +277,7 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
                 <Metric label="Safety" value={node.metrics.safety.toFixed(2)} />
               )}
               {node.metrics.costUSD !== undefined && (
-                <Metric label="Cost" value={`$${node.metrics.costUSD.toFixed(4)}`} />
+                <Metric label="Cost" value={formatCost(node.metrics.costUSD)} />
               )}
               {node.metrics.latencyMs !== undefined && (
                 <Metric label="Latency" value={`${node.metrics.latencyMs}ms`} />
@@ -321,6 +321,14 @@ function Metric({ label, value }: { label: string; value: string }) {
       <span className="font-medium">{value}</span>
     </div>
   );
+}
+
+function formatCost(cost: number): string {
+  if (cost === 0) return '$0.00';
+  if (cost >= 0.01) return `$${cost.toFixed(4)}`; // Regular format for normal costs
+  if (cost >= 0.000001) return `$${cost.toFixed(6)}`; // 6 decimals for very small costs
+  // For extremely tiny costs, use scientific notation
+  return `$${cost.toExponential(2)}`;
 }
 
 function findNode(evaluation: EvaluationRun | null | undefined, nodeId: UUID): CandidateNode | null {

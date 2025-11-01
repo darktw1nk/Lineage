@@ -24,6 +24,15 @@ function formatElapsedTime(ms: number): string {
   }
 }
 
+// Format cost with appropriate precision
+function formatCost(cost: number): string {
+  if (cost === 0) return '$0.00';
+  if (cost >= 0.01) return `$${cost.toFixed(4)}`; // Regular format for normal costs
+  if (cost >= 0.000001) return `$${cost.toFixed(6)}`; // 6 decimals for very small costs
+  // For extremely tiny costs, use scientific notation
+  return `$${cost.toExponential(2)}`;
+}
+
 export function Footer({ evaluationId, onShowConfig }: FooterProps) {
   const [isStopping, setIsStopping] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
@@ -143,7 +152,7 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
         <div>
           <div className="text-xs text-muted-foreground">Spend</div>
           <div className="text-sm font-medium">
-            ${evaluation.totals.usd.toFixed(4)}
+            {formatCost(evaluation.totals.usd)}
           </div>
         </div>
         
