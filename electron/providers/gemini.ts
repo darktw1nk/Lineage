@@ -27,7 +27,6 @@ export class GeminiAdapter extends BaseProviderAdapter {
   }> {
     return withRetry(async () => {
       const startTime = Date.now();
-      console.log("apikey: "+opts.apiKey);
       console.log(`[Gemini] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
       
       const body = {

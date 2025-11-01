@@ -550,7 +550,12 @@ async function testApiKey(provider: string): Promise<boolean> {
         
       case 'gemini':
         const geminiResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`
+          `https://generativelanguage.googleapis.com/v1beta/models`,
+          {
+            headers: {
+              'x-goog-api-key': key,
+            },
+          }
         );
         return geminiResponse.ok;
         
