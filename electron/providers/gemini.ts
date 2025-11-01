@@ -27,7 +27,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
   }> {
     return withRetry(async () => {
       const startTime = Date.now();
-      
+      console.log("apikey: "+opts.apiKey);
       console.log(`[Gemini] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
       
       const body = {
@@ -41,11 +41,12 @@ export class GeminiAdapter extends BaseProviderAdapter {
       console.log(`[Gemini] REQUEST:`, JSON.stringify(body, null, 2));
       
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent?key=${opts.apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'x-goog-api-key': opts.apiKey,
           },
           body: JSON.stringify(body),
         }
