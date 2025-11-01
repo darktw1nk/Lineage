@@ -1,4 +1,4 @@
-import { X, Copy, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, Copy, ChevronDown, ChevronRight, Calculator } from 'lucide-react';
 import { Button } from './ui/button';
 import { useState, useRef, useEffect } from 'react';
 import type { UUID, EvaluationRun, CandidateNode, EvaluationConfig } from '../types';
@@ -14,6 +14,7 @@ interface RightPanelProps {
 export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
   const [expandedTests, setExpandedTests] = useState<Set<UUID>>(new Set());
   const [expandedReasonings, setExpandedReasonings] = useState<Set<UUID>>(new Set());
+  const [showFitnessCalc, setShowFitnessCalc] = useState(false);
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('rightPanelWidth');
     return saved ? parseInt(saved, 10) : 384; // 384px = w-96
@@ -291,6 +292,27 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
             </div>
           </Section>
         )}
+
+        {/* Fitness Calculation Breakdown */}
+        {node.metrics && config && (
+          <div className="border rounded-lg">
+            <button
+              onClick={() => setShowFitnessCalc(!showFitnessCalc)}
+              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Calculator className="h-4 w-4" />
+                <span className="font-semibold text-sm">Fitness Calculation</span>
+              </div>
+              {showFitnessCalc ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </button>
+            {showFitnessCalc && (
+              <div className="p-3 pt-0 space-y-3 text-xs">
+                <FitnessBreakdown node={node} config={config} evaluation={evaluation} />
+              </div>
+            )}
+          </div>
+        )}
       </div>
       </div>
     </div>
@@ -329,6 +351,198 @@ function formatCost(cost: number): string {
   if (cost >= 0.000001) return `$${cost.toFixed(6)}`; // 6 decimals for very small costs
   // For extremely tiny costs, use scientific notation
   return `$${cost.toExponential(2)}`;
+}
+
+function FitnessBreakdown({ node, config, evaluation }: { node: CandidateNode; config: EvaluationConfig; evaluation: EvaluationRun | null }) {
+  // Calculate normalized weights
+  const weights = config.fitness.weights;
+  const sum = (weights.quality || 0) + (weights.safety || 0) + (weights.cost || 0) + (weights.latency || 0) + (weights.stability || 0);
+  const normalizedWeights = sum > 0 ? {
+    quality: weights.quality / sum,
+    safety: weights.safety ? weights.safety / sum : 0,
+    cost: weights.cost ? weights.cost / sum : 0,
+    latency: weights.latency ? weights.latency / sum : 0,
+    stability: weights.stability ? weights.stability / sum : 0,
+  } : { quality: 1, safety: 0, cost: 0, latency: 0, stability: 0 };
+
+  // Calculate dynamic max values for relative mode
+  let maxCost: number | undefined;
+  let maxCostNodeId: string | undefined;
+  let maxLatency: number | undefined;
+  let maxLatencyNodeId: string | undefined;
+  
+  if (evaluation && config.fitness.costNorm?.mode === 'relative' && weights.cost) {
+    const finishedNodes: CandidateNode[] = [];
+    for (const generation of evaluation.generations) {
+      for (const n of generation) {
+        if (n.status === 'finished' && n.metrics?.costUSD !== undefined) {
+          finishedNodes.push(n);
+        }
+      }
+    }
+    if (finishedNodes.length > 0) {
+      const nodeWithMaxCost = finishedNodes.reduce((max, n) => 
+        (n.metrics!.costUSD! > (max.metrics?.costUSD || 0)) ? n : max
+      );
+      maxCost = nodeWithMaxCost.metrics!.costUSD;
+      maxCostNodeId = nodeWithMaxCost.id;
+    }
+  }
+
+  if (evaluation && config.fitness.latencyNorm?.mode === 'relative' && weights.latency) {
+    const finishedNodes: CandidateNode[] = [];
+    for (const generation of evaluation.generations) {
+      for (const n of generation) {
+        if (n.status === 'finished' && n.metrics?.latencyMs !== undefined) {
+          finishedNodes.push(n);
+        }
+      }
+    }
+    if (finishedNodes.length > 0) {
+      const nodeWithMaxLatency = finishedNodes.reduce((max, n) => 
+        (n.metrics!.latencyMs! > (max.metrics?.latencyMs || 0)) ? n : max
+      );
+      maxLatency = nodeWithMaxLatency.metrics!.latencyMs;
+      maxLatencyNodeId = nodeWithMaxLatency.id;
+    }
+  }
+
+  // Calculate components
+  const components: Array<{ label: string; value: number; weight: number; contribution: number; details?: string }> = [];
+
+  // Quality
+  if (node.metrics.quality !== undefined) {
+    components.push({
+      label: 'Quality',
+      value: node.metrics.quality,
+      weight: normalizedWeights.quality,
+      contribution: normalizedWeights.quality * node.metrics.quality,
+    });
+  }
+
+  // Safety
+  if (node.metrics.safety !== undefined && normalizedWeights.safety > 0) {
+    components.push({
+      label: 'Safety',
+      value: node.metrics.safety,
+      weight: normalizedWeights.safety,
+      contribution: normalizedWeights.safety * node.metrics.safety,
+    });
+  }
+
+  // Cost
+  if (node.metrics.costUSD !== undefined && normalizedWeights.cost > 0 && config.fitness.costNorm) {
+    const maxCostValue = config.fitness.costNorm.mode === 'relative' && maxCost !== undefined
+      ? maxCost
+      : config.fitness.costNorm.maxUSDPerCall || 0.1;
+    const costNorm = Math.min(1, node.metrics.costUSD / maxCostValue);
+    const costScore = (1 - costNorm) * 10;
+    
+    let details = `Formula: score = (1 - (cost / maxCost)) × 10\n`;
+    details += `• This cost: ${formatCost(node.metrics.costUSD)}\n`;
+    details += `• Max cost: ${formatCost(maxCostValue)}`;
+    if (config.fitness.costNorm.mode === 'relative' && maxCostNodeId) {
+      details += ` (from node ${maxCostNodeId.slice(0, 8)})`;
+    } else {
+      details += ` (${config.fitness.costNorm.mode} mode)`;
+    }
+    details += `\n• Normalized: ${node.metrics.costUSD.toFixed(6)} / ${maxCostValue.toFixed(6)} = ${costNorm.toFixed(3)}`;
+    details += `\n• Score: (1 - ${costNorm.toFixed(3)}) × 10 = ${costScore.toFixed(2)}`;
+    details += `\n• Lower cost = higher score`;
+    
+    components.push({
+      label: 'Cost',
+      value: costScore,
+      weight: normalizedWeights.cost,
+      contribution: normalizedWeights.cost * costScore,
+      details,
+    });
+  }
+
+  // Latency
+  if (node.metrics.latencyMs !== undefined && normalizedWeights.latency > 0 && config.fitness.latencyNorm) {
+    const maxLatencyValue = config.fitness.latencyNorm.mode === 'relative' && maxLatency !== undefined
+      ? maxLatency
+      : config.fitness.latencyNorm.maxMs || 30000;
+    const latencyNorm = Math.min(1, node.metrics.latencyMs / maxLatencyValue);
+    const latencyScore = (1 - latencyNorm) * 10;
+    
+    let details = `Formula: score = (1 - (latency / maxLatency)) × 10\n`;
+    details += `• This latency: ${node.metrics.latencyMs.toFixed(0)}ms\n`;
+    details += `• Max latency: ${maxLatencyValue.toFixed(0)}ms`;
+    if (config.fitness.latencyNorm.mode === 'relative' && maxLatencyNodeId) {
+      details += ` (from node ${maxLatencyNodeId.slice(0, 8)})`;
+    } else {
+      details += ` (${config.fitness.latencyNorm.mode} mode)`;
+    }
+    details += `\n• Normalized: ${node.metrics.latencyMs.toFixed(1)} / ${maxLatencyValue.toFixed(1)} = ${latencyNorm.toFixed(3)}`;
+    details += `\n• Score: (1 - ${latencyNorm.toFixed(3)}) × 10 = ${latencyScore.toFixed(2)}`;
+    details += `\n• Lower latency = higher score`;
+    
+    components.push({
+      label: 'Latency',
+      value: latencyScore,
+      weight: normalizedWeights.latency,
+      contribution: normalizedWeights.latency * latencyScore,
+      details,
+    });
+  }
+
+  // Stability
+  if (node.metrics.stability !== undefined && normalizedWeights.stability > 0) {
+    components.push({
+      label: 'Stability',
+      value: node.metrics.stability,
+      weight: normalizedWeights.stability,
+      contribution: normalizedWeights.stability * node.metrics.stability,
+    });
+  }
+
+  const totalFitness = components.reduce((sum, c) => sum + c.contribution, 0);
+
+  return (
+    <div className="space-y-3">
+      {/* Formula */}
+      <div className="font-mono text-xs bg-muted p-2 rounded">
+        <div className="font-semibold mb-1 text-foreground">Formula:</div>
+        <div className="text-muted-foreground">
+          fitness = {components.map((c, i) => (
+            <span key={i}>
+              {i > 0 && ' + '}
+              <span className="text-foreground">{c.weight.toFixed(3)}</span> × {c.label.toLowerCase()}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Components */}
+      <div className="space-y-2">
+        <div className="font-semibold text-foreground">Components:</div>
+        {components.map((c, i) => (
+          <div key={i} className="bg-muted/50 p-2 rounded space-y-1">
+            <div className="flex justify-between items-start">
+              <span className="font-medium text-foreground">{c.label}:</span>
+              <span className="font-mono text-primary">{c.contribution.toFixed(3)}</span>
+            </div>
+            <div className="text-muted-foreground pl-2">
+              <div>{c.weight.toFixed(3)} (weight) × {c.value.toFixed(2)} (score)</div>
+              {c.details && (
+                <div className="text-[10px] mt-2 font-mono whitespace-pre-line opacity-90 bg-background p-2 rounded border">
+                  {c.details}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Total */}
+      <div className="border-t pt-2 flex justify-between items-center font-semibold">
+        <span className="text-foreground">Total Fitness:</span>
+        <span className="font-mono text-lg text-primary">{totalFitness.toFixed(3)}</span>
+      </div>
+    </div>
+  );
 }
 
 function findNode(evaluation: EvaluationRun | null | undefined, nodeId: UUID): CandidateNode | null {
