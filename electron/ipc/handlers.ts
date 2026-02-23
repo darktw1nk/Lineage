@@ -4,6 +4,7 @@ import { getDatabase } from '../database/init.js';
 import { v4 as uuidv4 } from 'uuid';
 import { store } from '../store.js';
 import { getLogBuffer } from '../logger.js';
+import { OpenRouterAdapter } from '../providers/openrouter.js';
 
 export function registerIPCHandlers(ipcMain: IpcMain): void {
   // Logger handler
@@ -92,6 +93,15 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
   
   ipcMain.handle('costs:getAll', async () => {
     return getAllModelCosts();
+  });
+
+  // OpenRouter model discovery handlers
+  ipcMain.handle('models:fetch-openrouter', async () => {
+    return fetchOpenRouterModels();
+  });
+
+  ipcMain.handle('models:sync-openrouter', async () => {
+    return syncOpenRouterModels();
   });
 
   // System Prompts handlers
@@ -558,7 +568,13 @@ async function testApiKey(provider: string): Promise<boolean> {
           }
         );
         return geminiResponse.ok;
-        
+
+      case 'openrouter':
+        const openrouterResponse = await fetch('https://openrouter.ai/api/v1/models', {
+          headers: { 'Authorization': `Bearer ${key}` },
+        });
+        return openrouterResponse.ok;
+
       default:
         return false;
     }
@@ -626,5 +642,35 @@ async function setSystemPrompts(prompts: any): Promise<void> {
     console.error('Error saving system prompts:', error);
     throw error;
   }
+}
+
+async function fetchOpenRouterModels(): Promise<Array<{
+  id: string;
+  name: string;
+  promptUSDper1k: number;
+  completionUSDper1k: number;
+}>> {
+  const apiKey = store.get('apiKey.openrouter', null) as string | null;
+  return OpenRouterAdapter.fetchModels(apiKey ?? undefined);
+}
+
+async function syncOpenRouterModels(): Promise<{ count: number }> {
+  const models = await fetchOpenRouterModels();
+  const db = getDatabase();
+
+  const upsert = db.prepare(`
+    INSERT OR REPLACE INTO model_costs (provider, model, prompt_usd_per_1k, completion_usd_per_1k)
+    VALUES ('openrouter', ?, ?, ?)
+  `);
+
+  const insertMany = db.transaction((items: typeof models) => {
+    for (const m of items) {
+      upsert.run(m.id, m.promptUSDper1k, m.completionUSDper1k);
+    }
+  });
+
+  insertMany(models);
+  console.log(`[OpenRouter] Synced ${models.length} models to database`);
+  return { count: models.length };
 }
 

@@ -813,6 +813,7 @@ function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
 function ModelsTab({ config, setConfig }: TabProps) {
   const [sortColumn, setSortColumn] = useState<SortColumn>('provider');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [modelFilter, setModelFilter] = useState('');
 
   const { data: costs = [] } = useQuery<ModelCostEntry[]>({
     queryKey: ['costs'],
@@ -844,8 +845,15 @@ function ModelsTab({ config, setConfig }: TabProps) {
     }
   };
 
-  // Sort costs based on column and direction
-  const sortedCosts = [...costs].sort((a, b) => {
+  // Filter and sort costs
+  const filteredCosts = modelFilter
+    ? costs.filter((c) => {
+        const q = modelFilter.toLowerCase();
+        return c.provider.toLowerCase().includes(q) || c.model.toLowerCase().includes(q);
+      })
+    : costs;
+
+  const sortedCosts = [...filteredCosts].sort((a, b) => {
     let aVal: string | number;
     let bVal: string | number;
 
@@ -889,6 +897,15 @@ function ModelsTab({ config, setConfig }: TabProps) {
         <div className="text-sm text-yellow-600 bg-yellow-50 p-3 rounded-md">
           No models configured. Please go to Settings → Models & Costs to add models.
         </div>
+      )}
+
+      {costs.length > 0 && (
+        <Input
+          placeholder="Filter models..."
+          value={modelFilter}
+          onChange={(e) => setModelFilter(e.target.value)}
+          className="h-8 text-sm"
+        />
       )}
 
       {/* Sort Controls */}

@@ -44,6 +44,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     set: (entry) => ipcRenderer.invoke('costs:set', entry),
     getAll: () => ipcRenderer.invoke('costs:getAll'),
   },
+
+  // OpenRouter model discovery
+  models: {
+    fetchOpenRouter: () => ipcRenderer.invoke('models:fetch-openrouter'),
+    syncOpenRouter: () => ipcRenderer.invoke('models:sync-openrouter'),
+  },
   
   // Logger methods
   logs: {

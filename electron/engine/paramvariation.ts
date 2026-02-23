@@ -40,8 +40,8 @@ export function varyParameters(
   // Temperature variation
   if (config.operators.paramVariation.temperature?.enabled) {
     const tempConfig = config.operators.paramVariation.temperature;
-    const min = tempConfig.min || 0.3;
-    const max = tempConfig.max || 1.5;
+    const min = tempConfig.min ?? 0.3;
+    const max = tempConfig.max ?? 1.5;
     result.temperature = min + Math.random() * (max - min);
     result.changeLog.push({
       label: 'PARAM',
@@ -59,8 +59,8 @@ export function varyParameters(
 export function getDefaultTemperature(config: EvaluationConfig): number {
   if (config.operators.paramVariation?.enabled) {
     const tempConfig = config.operators.paramVariation.temperature;
-    const min = tempConfig.min || 0.3;
-    const max = tempConfig.max || 1.5;
+    const min = tempConfig.min ?? 0.3;
+    const max = tempConfig.max ?? 1.5;
     // Return middle of range as default
     return (min + max) / 2;
   }

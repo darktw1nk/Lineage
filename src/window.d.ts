@@ -48,6 +48,10 @@ export interface ElectronAPI {
     set: (entry: ModelCostEntry) => Promise<void>;
     getAll: () => Promise<ModelCostEntry[]>;
   };
+  models: {
+    fetchOpenRouter: () => Promise<Array<{ id: string; name: string; promptUSDper1k: number; completionUSDper1k: number }>>;
+    syncOpenRouter: () => Promise<{ count: number }>;
+  };
   logs: {
     getBuffer: () => Promise<LogEntry[]>;
     subscribe: (callback: (entry: LogEntry) => void) => () => void;

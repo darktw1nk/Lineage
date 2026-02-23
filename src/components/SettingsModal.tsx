@@ -5,7 +5,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Trash2, ArrowUpDown } from 'lucide-react';
+import { Trash2, ArrowUpDown, RefreshCw } from 'lucide-react';
 import type { AppSettings, ModelCostEntry } from '../types';
 
 type SortColumn = 'provider' | 'model' | 'prompt' | 'completion';
@@ -32,22 +32,28 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     openai: '',
     anthropic: '',
     gemini: '',
+    openrouter: '',
   });
+
+  const [syncingModels, setSyncingModels] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
 
   // Load API keys when modal opens
   useEffect(() => {
     const loadKeys = async () => {
       try {
-        const [openaiKey, anthropicKey, geminiKey] = await Promise.all([
+        const [openaiKey, anthropicKey, geminiKey, openrouterKey] = await Promise.all([
           window.electronAPI.keys.get('openai'),
           window.electronAPI.keys.get('anthropic'),
           window.electronAPI.keys.get('gemini'),
+          window.electronAPI.keys.get('openrouter'),
         ]);
-        
+
         setApiKeys({
           openai: openaiKey || '',
           anthropic: anthropicKey || '',
           gemini: geminiKey || '',
+          openrouter: openrouterKey || '',
         });
       } catch (error) {
         console.error('Failed to load API keys:', error);
@@ -146,26 +152,16 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
             <div>
               <Label htmlFor="serviceModel">Service Model (for mutations/crossover/grading)</Label>
-              <select
-                id="serviceModel"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-2"
-                value={`${localSettings.serviceModel.provider}:${localSettings.serviceModel.model}`}
-                onChange={(e) => {
-                  const [provider, model] = e.target.value.split(':');
+              <FilterableModelSelect
+                models={localCosts}
+                value={localSettings.serviceModel}
+                onChange={(model) =>
                   setLocalSettings({
                     ...localSettings,
-                    serviceModel: { provider: provider as any, model },
-                  });
-                }}
-              >
-                <optgroup label="Available Models">
-                  {localCosts.map((cost, idx) => (
-                    <option key={idx} value={`${cost.provider}:${cost.model}`}>
-                      {cost.provider}/{cost.model}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
+                    serviceModel: model,
+                  })
+                }
+              />
               <div className="text-xs text-muted-foreground mt-1">
                 Models are loaded from the Models & Costs tab
               </div>
@@ -250,6 +246,51 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 value={apiKeys.gemini}
                 onChange={(e) => setApiKeys({ ...apiKeys, gemini: e.target.value })}
               />
+            </div>
+
+            <div className="border-t pt-4 mt-4">
+              <Label htmlFor="openrouter-key">OpenRouter API Key</Label>
+              <div className="text-xs text-muted-foreground mb-2">
+                Single key for 200+ models from all providers via openrouter.ai
+              </div>
+              <Input
+                id="openrouter-key"
+                type="password"
+                placeholder="sk-or-..."
+                value={apiKeys.openrouter}
+                onChange={(e) => setApiKeys({ ...apiKeys, openrouter: e.target.value })}
+              />
+              <div className="flex items-center gap-2 mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={syncingModels}
+                  onClick={async () => {
+                    setSyncingModels(true);
+                    setSyncResult(null);
+                    try {
+                      // Save the key first so the sync can use it
+                      await window.electronAPI.keys.save('openrouter', apiKeys.openrouter);
+                      const result = await window.electronAPI.models.syncOpenRouter();
+                      setSyncResult(`${result.count} models synced`);
+                      // Refresh costs table
+                      queryClient.invalidateQueries({ queryKey: ['costs'] });
+                    } catch (error: any) {
+                      setSyncResult(`Error: ${error.message || error}`);
+                    } finally {
+                      setSyncingModels(false);
+                    }
+                  }}
+                >
+                  <RefreshCw className={`h-3 w-3 mr-1 ${syncingModels ? 'animate-spin' : ''}`} />
+                  Sync Models
+                </Button>
+                {syncResult && (
+                  <span className={`text-xs ${syncResult.startsWith('Error') ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    {syncResult}
+                  </span>
+                )}
+              </div>
             </div>
           </TabsContent>
 
@@ -336,6 +377,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         <option value="openai">OpenAI</option>
                         <option value="anthropic">Anthropic</option>
                         <option value="gemini">Gemini</option>
+                        <option value="openrouter">OpenRouter</option>
                       </select>
                     </div>
                     <div className="col-span-3">
@@ -422,6 +464,68 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Filterable model select with search
+function FilterableModelSelect({
+  models,
+  value,
+  onChange,
+}: {
+  models: ModelCostEntry[];
+  value: { provider: string; model: string };
+  onChange: (model: { provider: any; model: string }) => void;
+}) {
+  const [filter, setFilter] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const filtered = models.filter((c) => {
+    const q = filter.toLowerCase();
+    return c.provider.toLowerCase().includes(q) || c.model.toLowerCase().includes(q);
+  });
+
+  const selectedLabel = `${value.provider}/${value.model}`;
+
+  return (
+    <div className="relative mt-2">
+      <Input
+        placeholder="Search models..."
+        value={open ? filter : selectedLabel}
+        onFocus={() => {
+          setOpen(true);
+          setFilter('');
+        }}
+        onChange={(e) => setFilter(e.target.value)}
+      />
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute z-50 w-full mt-1 max-h-60 overflow-y-auto rounded-md border bg-popover shadow-md">
+            {filtered.length === 0 && (
+              <div className="px-3 py-2 text-sm text-muted-foreground">No models found</div>
+            )}
+            {filtered.map((cost, idx) => (
+              <button
+                key={`${cost.provider}-${cost.model}-${idx}`}
+                className={`w-full text-left px-3 py-1.5 text-sm hover:bg-muted flex justify-between ${
+                  cost.provider === value.provider && cost.model === value.model ? 'bg-muted font-medium' : ''
+                }`}
+                onClick={() => {
+                  onChange({ provider: cost.provider as any, model: cost.model });
+                  setOpen(false);
+                }}
+              >
+                <span>{cost.provider}/{cost.model}</span>
+                <span className="text-xs text-muted-foreground">
+                  ${(cost.promptUSDper1k * 1000).toFixed(2)}/M
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

@@ -36,7 +36,8 @@ export function isRetryableError(error: any): boolean {
     504, // Gateway Timeout
   ];
   
-  if (error.status && retryableStatusCodes.includes(error.status)) {
+  const statusCode = error.status ?? error.statusCode;
+  if (statusCode && retryableStatusCodes.includes(statusCode)) {
     return true;
   }
   
@@ -71,18 +72,18 @@ export async function withRetry<T>(
   const opts = { ...DEFAULT_RETRY_OPTIONS, ...options };
   let lastError: Error;
   
-  for (let attempt = 0; attempt < opts.maxRetries; attempt++) {
+  for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error: any) {
       lastError = error;
-      
+
       if (!isRetryableError(error)) {
         // Non-retryable error, throw immediately
         throw error;
       }
-      
-      if (attempt < opts.maxRetries - 1) {
+
+      if (attempt < opts.maxRetries) {
         const delay = calculateDelay(attempt, opts);
         console.log(`Retry attempt ${attempt + 1}/${opts.maxRetries} after ${delay}ms...`);
         await sleep(delay);

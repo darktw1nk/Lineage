@@ -1,7 +1,7 @@
 // Core Types for Prompt Evolution Application
 
 export type UUID = string;
-export type Provider = 'openai' | 'anthropic' | 'gemini';
+export type Provider = 'openai' | 'anthropic' | 'gemini' | 'openrouter';
 
 export interface ModelRef {
   provider: Provider;
@@ -137,6 +137,7 @@ export interface AppSettings {
     openai?: { rpm?: number; tpm?: number };
     anthropic?: { rpm?: number; tpm?: number };
     gemini?: { rpm?: number; tpm?: number };
+    openrouter?: { rpm?: number; tpm?: number };
   };
   serviceModel: ModelRef;
   serviceModelMaxTokens: number; // Max tokens for service model calls (mutations, grading, safety)
