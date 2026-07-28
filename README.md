@@ -1,91 +1,144 @@
 # PromptEngine.AI
 
-**Evolve LLM prompts with a genetic algorithm — measurable quality instead of vibes.**
+**Stop hand-tuning prompts. Breed them.**
 
-You give it a seed prompt and a test set. It breeds a population of prompt variants across generations — mutating, crossing over, meta-prompting from test failures — evaluates every candidate against your tests across multiple LLM providers, and selects for fitness: a weighted blend of quality, safety, cost, latency, and stability.
+PromptEngine treats a prompt like a genome: it spawns a population of variants, scores every one of them against *your* test set on real models, kills the weak, breeds the strong, and repeats — until it finds a prompt that is measurably better than anything you'd write by hand. Not "feels better" — better on a fitness function you define.
 
 ![Evolution run](docs/assets/evolution-run.gif)
 
-*A real run: 30 candidates across 3 generations, 6 models competing, 47 seconds, $0.013. The seed prompt scored 5.30; the evolved winner scored 9.73 — found by crossover, running on a model 25× cheaper than the flagship.*
+*A real 47-second run: 30 candidates, 3 generations, 6 models competing, $0.013 total. The hand-written seed scored 5.30. The evolved champion scored 9.73 — created by crossover of two strong parents, running on a model 25× cheaper than the flagship in the same population.*
 
-## Two ways to use it
+## Why this beats prompt engineering by hand
+
+**Prompting is empirical, but nobody treats it that way.** You tweak a word, eyeball three outputs, and ship. PromptEngine replaces that loop with selection pressure: every candidate is scored on every test, every generation, and only measured improvement survives. The lineage graph shows you exactly which edit earned its place.
+
+**It optimizes trade-offs, not just quality.** Fitness is a weighted blend of five dimensions — so you can ask questions like *"what's the best prompt that stays under 1 cent per call?"* or *"maximize accuracy, but punish anything over 2 seconds"* and the population converges toward that trade-off, not just toward eloquence.
+
+**It discovers model arbitrage.** With several models in the gene pool, the model-variation operator keeps re-dealing prompts to different models. Evolution routinely finds that a tuned prompt on a cheap model beats a mediocre prompt on an expensive one — in the demo run above, `gemini-2.5-flash-lite` outscored `gpt-5-mini` candidates at a fraction of the cost.
+
+**It learns from its own failures.** The meta-prompting operator reads the judge's actual feedback on failing tests ("added a preamble", "wrong date format") and performs surgical fixes — not blind rewrites. It's the closest thing to a prompt engineer in the loop, except it reads every test result, every time.
+
+**Your test set becomes an executable spec.** When a provider ships a new model version, rerun the evolution: you'll know in minutes whether your prompt regressed and what to replace it with.
+
+## The genetics
+
+Each generation, the engine:
+
+1. **Evaluates** every candidate against the full test set, in parallel, with per-call cost tracking.
+2. **Selects** parents — **Top-K** (take the best K) or **Top-P** (sample by cumulative fitness probability, keeps more diversity), with **elitism** (`eliteShare`): champions survive unchanged, so fitness never regresses.
+3. **Distributes offspring** fitness-proportionally: stronger parents get more children.
+4. **Breeds** the next generation with five operators, mixed by configurable shares:
+
+| Operator | What it does | Why it's interesting |
+|---|---|---|
+| **Mutation** | Rewrites guided by a strategy catalog: restructuring, compression, tightening constraints, adding anti-patterns, injecting thinking scaffolds — and *removal* of harmful lines | Strategies are sampled per mutation, so the search explores different editing philosophies, not one style |
+| **Crossover** | LLM-merges two strong parents into one prompt without redundancy | The demo's champion was a crossover — traits from two lineages combined |
+| **Meta-prompting** | Reads the worst-scoring tests (inputs, outputs, judge justifications) and proposes targeted edits | The only *failure-aware* operator — this is directed evolution, not random walk |
+| **Param variation** | Same prompt, different temperature/seed within a configured range | Sometimes the prompt is fine and the sampling is wrong |
+| **Model variation** | Same prompt, different model from your enabled set | Turns model choice into a searchable dimension |
+
+Every node carries a **changelog** of what created it (`[MUTATION] Removed vague instruction…`, `[CROSSOVER] Merged a1b2 + c3d4`), and the engine tracks **per-operator effectiveness** (average fitness delta) as the run progresses.
+
+## Fitness: five dimensions, your weights
+
+```json
+"fitness": {
+  "weights": { "quality": 1.0, "safety": 0.5, "cost": 0.3, "latency": 0.1, "stability": 0.3 },
+  "guardrails": ["Must never invent order numbers", "Must not use profanity"],
+  "costNorm":    { "mode": "relative", "maxUSDPerCall": 0.05 },
+  "latencyNorm": { "mode": "absolute", "maxMs": 3000 }
+}
+```
+
+| Dimension | Measured as | The interesting part |
+|---|---|---|
+| **Quality** | 0–10 average across your tests | Exact-match with partial credit, or LLM-judged against your reference answers |
+| **Safety** | 0–10 across **guardrails** — natural-language rules checked by an LLM per output | Write policies in plain English; violations drag fitness down |
+| **Cost** | Real USD per candidate, from a maintained per-model price catalog | `relative` mode normalizes against the current population's worst — the bar rises as evolution gets cheaper |
+| **Latency** | Measured ms per call | `absolute` (hard ceiling) or `relative` (beat your siblings) |
+| **Stability** | Same prompt re-run across different seeds; consistency scored 0–10 | Selects against prompts that only win by luck |
+
+Weights are normalized automatically — only the ratios matter. Set a weight to 0 and that dimension is ignored; crank cost to 1.0 and watch the population race to the bottom of the price list without giving up your quality floor.
+
+## Tests are the spec
+
+Two grading modes, mixable in one test set:
+
+```json
+"testSet": [
+  { "name": "IP extraction", "mode": "exact_match",
+    "prompt": "the server is at one ninety two dot one sixty eight...",
+    "expected": "192.168.1.100",
+    "grading": { "distanceMetric": "levenshtein", "strictZeroOnDeviation": false } },
+
+  { "name": "Refund summary", "mode": "llm_grade",
+    "prompt": "<a realistic customer email>",
+    "expected": "Refund request: order #4821, cracked jar, wants replacement." },
+
+  { "name": "Chart reading", "mode": "llm_grade",
+    "prompt": "What was Q3 revenue?", "image": "charts/q3.png" }
+]
+```
+
+- **`exact_match`** scores with distance metrics — `levenshtein` (text), `json_diff` (structure-aware for JSON outputs), `numeric_abs` (numbers) — as partial credit on 0–10, or `strictZeroOnDeviation` for all-or-nothing.
+- **`llm_grade`** uses a judge model with a rubric (task completion, format compliance, hallucination avoidance, brevity) plus your `expected` as a reference answer — content *and* format consistency are graded. The judge's one-sentence justification is stored per test, per node, so you can read *why* a candidate lost points.
+- **`image`** attaches a file for vision-enabled tests — evolve prompts for chart reading, document extraction, UI screenshots.
+- Every meta-level prompt is overridable via `systemPrompts` — the judge's rubric, the mutation strategy catalog, the crossover and meta-prompting instructions. **The evolution itself is promptable.**
+
+## Dials worth knowing
+
+| Knob | What it changes |
+|---|---|
+| `selection.policy: "topp"` + `topP: 0.8` | Probabilistic parent sampling instead of hard Top-K — more diversity, less greed |
+| `eliteShare` | How much of each generation is guaranteed survivors |
+| `operators.*.share` | The breeding mix — crank `metaPrompting` when you have failing tests to learn from, `modelVariation` when hunting cheaper models |
+| `paramVariation.temperature.{min,max}` | The temperature range evolution may explore |
+| `targets` | Four independent stop conditions: `maxGenerations`, `budgetUSD` (hard spend cap), `targetFitness` (stop early on success), `timeLimitMs` |
+| `serviceModel` | The model that powers mutation/crossover/judging — cheap models work remarkably well here |
+| `providerOptions` | Passed through to candidate calls (e.g. `reasoning_effort`) |
+| `parallelLimit` | Global concurrency across all API calls |
+
+Everything is tracked: token counts, per-node cost, cache hits (identical prompt+params are never evaluated twice), and a full cost ledger.
+
+## Two ways to run it
 
 | | For | Interface |
 |---|---|---|
-| **Desktop app** | Humans | Electron app with a live React Flow lineage graph |
-| **`promptengine` CLI** | Agents, CI, scripts | JSON config in → JSON results out, exit codes, budget caps |
+| **Desktop app** | Humans | Live React Flow lineage graph — watch selection happen |
+| **`promptengine` CLI** | AI agents, CI, scripts | JSON in → JSON out, exit codes, budget caps |
 
-Both share the same engine (`@promptengine/core`). An AI agent gets a better prompt with three commands; a human watches the population evolve in real time.
+Both drive the same engine (`@promptengine/core`).
 
-## Quick start — CLI (agents, CI)
+### CLI (agents, CI)
 
 ```bash
-git clone <this repo> && cd evolution2 && npm install
-
-# 1. Discover catalogued models + pricing
-npm run cli -- --list-models --db ./run.db
-
-# 2. Write a config
-cat > evolve.json << 'EOF'
-{
-  "name": "Ticket triage",
-  "seedPrompt": "Summarize the support ticket.",
-  "models": ["gemini/gemini-2.5-flash-lite"],
-  "serviceModel": "gemini/gemini-2.5-flash-lite",
-  "populationSize": 4, "generationSize": 4, "maxGenerations": 2,
-  "budget": 0.02,
-  "testSet": [
-    { "name": "refund", "mode": "llm_grade",
-      "prompt": "<realistic ticket text>", "expected": "<reference answer>" }
-  ]
-}
-EOF
-
-# 3. Evolve (keys via env: GEMINI_API_KEY, OPENAI_API_KEY, ...)
+npm install
+npm run cli -- --list-models --db ./run.db     # catalogued models + live pricing
 npm run cli -- --config evolve.json --db ./run.db --output results.json
 ```
 
-`results.json` contains the best prompt, per-node test scores with judge reasoning, full lineage, and cost totals. Exit code 0 means a usable best prompt exists. Typical cost for a small run: **under a cent**. Full config reference: [docs/cli.md](docs/cli.md).
+Keys come from env vars (`GEMINI_API_KEY`, `OPENAI_API_KEY`, …). `results.json` has the best prompt, full lineage with per-test judge reasoning, and cost totals; exit code 0 ⇔ a usable best prompt exists. A small run costs **under a cent**. Full reference: [docs/cli.md](docs/cli.md). Using Claude Code? The repo ships an [`evolving-prompts` skill](.claude/skills/evolving-prompts/SKILL.md) that teaches agents the whole workflow.
 
-Installable packages (`@promptengine/core` + `@promptengine/cli`, `npx promptengine`) build from `packages/` — not yet published to npm.
-
-**Using Claude Code?** The repo ships an [`evolving-prompts` skill](.claude/skills/evolving-prompts/SKILL.md) that teaches agents the whole workflow — it was validated by A/B testing agents with and without it.
-
-## Quick start — Desktop (humans)
+### Desktop (humans)
 
 ```bash
 npm run electron:dev      # dev mode
-npm run build             # NSIS installer + portable .exe (Windows)
+npm run build             # NSIS installer + portable .exe
 ```
 
-Configure everything in the UI — models are loaded from a maintained catalog with live pricing:
+Configure in the UI — models load from the catalog with live pricing:
 
 ![New evaluation](docs/assets/new-evaluation.png)
 
-Watch generations appear with full lineage, then inspect any node — its evolved prompt, changelog (which operator created it and why), per-test scores with judge reasoning, and exact cost:
+Watch generations appear with full lineage, then click any node: its evolved prompt, the changelog of what created it, per-test scores with the judge's reasoning, and exact cost:
 
 ![Evolution graph](docs/assets/evolution-graph.png)
 
 ![Node details](docs/assets/node-details.png)
 
-## How the evolution works
+## Providers & repository layout
 
-Each generation:
-
-1. **Evaluate** — every candidate prompt runs the full test set (`exact_match` with distance metrics, or `llm_grade` with an LLM judge that sees your `expected` reference). Runs are parallel with a global concurrency cap and per-call cost tracking.
-2. **Score** — fitness = weighted blend of quality, safety, cost, latency, stability.
-3. **Select** — Top-K or Top-P, with elitism (the champion survives unchanged).
-4. **Breed** — operators create the next generation:
-   - **Mutation** — strategy-guided rewrites (structure, compression, constraints, removal…)
-   - **Crossover** — merges two strong parents
-   - **Meta-prompting** — reads actual test failures and makes surgical fixes (the only failure-aware operator)
-   - **Param variation** — temperature/seed changes
-   - **Model variation** — same prompt, different model; evolution can discover that switching models beats rewording
-5. **Stop** — on max generations, budget cap, target fitness, or time limit.
-
-**Providers**: OpenAI, Anthropic, Google Gemini, Groq directly, or any model via OpenRouter (one key, synced catalog with pricing).
-
-## Repository layout
+**Providers**: OpenAI, Anthropic, Google Gemini, Groq directly — or any model via OpenRouter (one key, synced catalog with pricing).
 
 ```
 packages/core     @promptengine/core — engine, operators, providers, sql.js persistence
@@ -94,7 +147,7 @@ apps/desktop      Electron app (React + React Flow)
 docs/cli.md       Full CLI + config reference
 ```
 
-Architecture details in [CLAUDE.md](CLAUDE.md). Tests: `npm test` (298 tests across all packages).
+Architecture details in [CLAUDE.md](CLAUDE.md). Tests: `npm test` (298 across all packages).
 
 ## License
 
