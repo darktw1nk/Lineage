@@ -13,6 +13,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { CandidateNode, EvaluationConfig } from '../types.js';
+import { rngFor } from './rng.js';
 export { mutateNode } from './mutations.js';
 export { crossoverNodes } from './crossover.js';
 export { metaPromptNode } from './metaprompting.js';
@@ -82,6 +83,9 @@ function createAutoShellNodes(config: EvaluationConfig): CandidateNode[] {
       params: {
         model,
         temperature: 0,
+        ...(config.seed !== undefined
+          ? { seed: Math.floor(rngFor(config.seed, 'node-seed', 0, i)() * 2 ** 31) }
+          : {}),
       },
       changeLog: i === 0
         ? [{ label: 'MUTATION' as const, text: 'Seed prompt (baseline)' }]

@@ -27,6 +27,7 @@ import { createShellPopulation, mutateNode } from './operators_v2.js';
 import { selectTopPerformers, createNextGeneration } from './generation.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { initGlobalSemaphore } from './semaphore.js';
+import { rngFor } from './rng.js';
 import { calculateFitness } from './fitness.js';
 import { getDatabase } from '../database/init.js';
 
@@ -157,7 +158,8 @@ export async function startEvaluation(
     console.warn(`[Evaluator] samplesPerTest clamped from ${rawSamples} to ${samplesPerTest}`);
   }
   const { partitionTestSet } = await import('./holdout.js');
-  const { fitnessTests, holdoutTests } = partitionTestSet(config.testSet, config.holdoutShare ?? 0, config.holdoutSeed ?? 42);
+  // Holdout split precedence: explicit holdoutSeed > run seed > 42
+  const { fitnessTests, holdoutTests } = partitionTestSet(config.testSet, config.holdoutShare ?? 0, config.holdoutSeed ?? config.seed ?? 42);
   if (fitnessTests.length === 0) {
     throw new Error('Holdout configuration leaves no fitness tests');
   }
@@ -271,11 +273,12 @@ async function mutatePopulationInBackground(
   
   console.log(`[Evaluator] Mutating ${nodesToMutate.length} nodes in parallel...`);
   
-  const mutationPromises = nodesToMutate.map(async (node) => {
+  const mutationPromises = nodesToMutate.map(async (node, k) => {
     try {
       console.log(`[Evaluator] Mutating node ${node.id.slice(0, 8)}...`);
-      
-      const result = await mutateNode(shellNodes[0].prompt, state.config);
+
+      // k+1 = the node's index in generation 0 (baseline is index 0) — stable label
+      const result = await mutateNode(shellNodes[0].prompt, state.config, rngFor(state.config.seed, 'fill', k + 1));
       
       // Update node
       node.prompt = result.prompt;

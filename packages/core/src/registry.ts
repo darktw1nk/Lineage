@@ -25,8 +25,8 @@ function builtinOperators(): OperatorPlugin[] {
     {
       name: 'mutation', label: 'Mutation', parents: 1,
       description: 'Strategy-guided LLM rewrite of the prompt',
-      async apply({ parent, config }) {
-        const r = await mutateNode(parent.prompt, config);
+      async apply({ parent, config, rng }) {
+        const r = await mutateNode(parent.prompt, config, rng ?? Math.random);
         return { prompt: r.prompt, changeLog: r.changeLog, cost: r.cost };
       },
     },
@@ -49,16 +49,16 @@ function builtinOperators(): OperatorPlugin[] {
     {
       name: 'param', label: 'Param variation', parents: 1,
       description: 'Temperature/seed variation, prompt unchanged',
-      async apply({ parent, config }) {
-        const v = varyParameters(parent.params.temperature ?? 0.7, config, true);
+      async apply({ parent, config, rng }) {
+        const v = varyParameters(parent.params.temperature ?? 0.7, config, true, rng ?? Math.random);
         return { prompt: parent.prompt, params: { temperature: v.temperature }, changeLog: v.changeLog, cost: ZERO_COST };
       },
     },
     {
       name: 'model', label: 'Model variation', parents: 1,
       description: 'Same prompt on a different enabled model',
-      async apply({ parent, config }) {
-        const v = varyModel(parent.params.model, config, true, config.enabledModels);
+      async apply({ parent, config, rng }) {
+        const v = varyModel(parent.params.model, config, true, config.enabledModels, rng ?? Math.random);
         if (v.changeLog.length === 0) {
           return {
             prompt: parent.prompt,

@@ -26,7 +26,8 @@ export interface ParamVariationResult {
 export function varyParameters(
   baseTemperature: number,
   config: EvaluationConfig,
-  shouldVary: boolean
+  shouldVary: boolean,
+  rng: () => number = Math.random
 ): ParamVariationResult {
   const result: ParamVariationResult = {
     temperature: baseTemperature,
@@ -42,7 +43,7 @@ export function varyParameters(
     const tempConfig = config.operators.paramVariation.temperature;
     const min = tempConfig?.min ?? 0.3;
     const max = tempConfig?.max ?? 1.5;
-    result.temperature = min + Math.random() * (max - min);
+    result.temperature = min + rng() * (max - min);
     result.changeLog.push({
       label: 'PARAM',
       text: `Temperature varied to ${result.temperature.toFixed(2)}`,

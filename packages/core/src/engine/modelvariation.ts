@@ -23,7 +23,8 @@ export function varyModel(
   baseModel: ModelRef,
   config: EvaluationConfig,
   shouldVary: boolean,
-  enabledModels: ModelRef[]
+  enabledModels: ModelRef[],
+  rng: () => number = Math.random
 ): ModelVariationResult {
   const result: ModelVariationResult = {
     model: baseModel,
@@ -45,7 +46,7 @@ export function varyModel(
   }
   
   // Select random model from OTHER models (guaranteed to be different)
-  const randomModel = otherModels[Math.floor(Math.random() * otherModels.length)];
+  const randomModel = otherModels[Math.floor(rng() * otherModels.length)];
   
   result.model = randomModel;
   result.changeLog.push({

@@ -122,7 +122,7 @@ function getApplyPromptTemplate(): string {
  * Randomly select N mutation strategies from the catalog
  * Returns strategies with category prefix: "[Category] Strategy description"
  */
-function selectRandomStrategies(count: number = 2): string[] {
+function selectRandomStrategies(count: number = 2, rng: () => number = Math.random): string[] {
   const MUTATION_STRATEGIES = getMutationStrategies();
   const allStrategies: Array<{ category: string; strategy: string }> = [];
   
@@ -137,8 +137,12 @@ function selectRandomStrategies(count: number = 2): string[] {
     }
   }
   
-  // Shuffle and select N strategies
-  const shuffled = allStrategies.sort(() => Math.random() - 0.5);
+  // Fisher-Yates shuffle (the old sort(() => Math.random()-0.5) was biased), then select N
+  const shuffled = [...allStrategies];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
   const selected = shuffled.slice(0, Math.min(count, allStrategies.length));
   
   // Format with category prefix
@@ -155,7 +159,8 @@ function selectRandomStrategies(count: number = 2): string[] {
  */
 export async function mutateNode(
   basePrompt: string,
-  config: EvaluationConfig
+  config: EvaluationConfig,
+  rng: () => number = Math.random
 ): Promise<{ prompt: string; changeLog: ChangeLogLine[]; cost: { promptTokens: number; completionTokens: number; usd: number; calls: number } }> {
   const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
@@ -167,8 +172,8 @@ export async function mutateNode(
   let totalCalls = 0;
   
   // Select 1-3 random mutation strategies (once, reused across retries)
-  const numStrategies = Math.floor(Math.random() * 3) + 1;
-  const selectedStrategies = selectRandomStrategies(numStrategies);
+  const numStrategies = Math.floor(rng() * 3) + 1;
+  const selectedStrategies = selectRandomStrategies(numStrategies, rng);
   console.log(`[Mutation] Selected ${numStrategies} strategies:`, selectedStrategies);
   
   const strategiesList = selectedStrategies.map((s, i) => `${i + 1}. ${s}`).join('\n');
