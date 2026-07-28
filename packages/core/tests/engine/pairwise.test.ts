@@ -95,6 +95,45 @@ describe('runPairwisePlayoff', () => {
     expect(junk!.points['n2']).toBe(0.5);
   });
 
+  it('recovers verdicts from prose and embedded JSON (real flash-lite failure modes)', async () => {
+    // Observed live: judges sometimes answer "OUTPUT A is better because..." despite
+    // the JSON-only instruction, or wrap the JSON in prose. These must not become ties.
+    const outputs = [
+      'Output A is better because it more effectively removes the negative sentiment.',
+      'OUTPUT A is better because it provides more varied options.',
+    ];
+    let call = 0;
+    registerProvider({ adapter: { name: 'fakejudge', estimateTokens: () => ({ prompt: 1 }),
+      call: async () => ({ output: outputs[call++ % outputs.length], promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 }) } as any });
+    const nodes = [contender('n1', 9, 'x'), contender('n2', 8, 'y')];
+    // Both orders say "A is better" -> first-presented wins each call -> disagreement -> 0.5/0.5
+    const prose = await runPairwisePlayoff({ contenders: nodes, tests: [test1], config, accrue });
+    expect(prose!.points['n1']).toBe(0.5); // parsed as 'A'/'A' (position-biased), NOT tie-by-parse-failure
+
+    resetRegistry();
+    registerProvider({ adapter: { name: 'fakejudge', estimateTokens: () => ({ prompt: 1 }),
+      call: async () => ({ output: 'Sure! Here is my verdict: {"winner": "B", "reason": "clearer"} Hope that helps.', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 }) } as any });
+    const embedded = await runPairwisePlayoff({ contenders: nodes, tests: [test1], config, accrue });
+    // 'B' in both orders -> disagreement (maps to different nodes) -> 0.5/0.5; the point
+    // is it parsed as a verdict. Verify via a judge that names the winner consistently:
+    expect(embedded!.points['n1']).toBe(0.5);
+    expect(embedded!.points['n2']).toBe(0.5);
+
+    resetRegistry();
+    let embCall = 0;
+    registerProvider({ adapter: { name: 'fakejudge', estimateTokens: () => ({ prompt: 1 }),
+      call: async (opts: any) => {
+        const a = opts.prompt.match(/OUTPUT A: <<<\n([\s\S]*?)\n>>>/)?.[1] ?? '';
+        const winner = a.includes('GOOD') ? 'A' : 'B';
+        embCall++;
+        return { output: `Verdict follows. {"winner": "${winner}", "reason": "r"}`, promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 };
+      } } as any });
+    const good = [contender('g1', 9, 'GOOD'), contender('g2', 8, 'meh')];
+    const consistent = await runPairwisePlayoff({ contenders: good, tests: [test1], config, accrue });
+    expect(embCall).toBe(2);
+    expect(consistent!.points['g1']).toBe(1); // embedded JSON parsed in both orders -> full point
+  });
+
   it('skips pair-tests where a contender lacks outputText', async () => {
     registerJudge();
     verdictFn = () => 'A';

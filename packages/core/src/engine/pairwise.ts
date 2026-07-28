@@ -47,19 +47,33 @@ function getPairwiseTemplate(): string {
 }
 
 function parseVerdict(raw: string): 'A' | 'B' | 'tie' {
-  try {
-    let text = raw.trim();
-    if (text.startsWith('```')) {
-      text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
-    }
-    const parsed = JSON.parse(text);
-    const winner = String(parsed.winner ?? '').toLowerCase();
-    if (winner === 'a') return 'A';
-    if (winner === 'b') return 'B';
-    if (winner === 'tie') return 'tie';
-  } catch {
-    // fall through to warn
+  let text = raw.trim();
+  if (text.startsWith('```')) {
+    text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
   }
+
+  // 1) Direct JSON, or a JSON object embedded in surrounding prose
+  const jsonCandidates = [text];
+  const embedded = text.match(/\{[\s\S]*?\}/);
+  if (embedded) jsonCandidates.push(embedded[0]);
+  for (const candidate of jsonCandidates) {
+    try {
+      const winner = String(JSON.parse(candidate).winner ?? '').toLowerCase();
+      if (winner === 'a') return 'A';
+      if (winner === 'b') return 'B';
+      if (winner === 'tie') return 'tie';
+    } catch {
+      // try next candidate
+    }
+  }
+
+  // 2) Prose fallback — judges sometimes answer in plain text despite the
+  //    JSON-only instruction (observed live with gemini flash-lite)
+  const prose =
+    text.match(/output\s*([ab])\s+is\s+(?:better|superior|preferred|stronger)/i) ??
+    text.match(/winner\s*(?:is|:)?\s*"?(?:output\s*)?([ab])\b/i);
+  if (prose) return prose[1].toUpperCase() as 'A' | 'B';
+
   console.warn('[Playoff] Unparseable verdict, counting as tie:', raw.slice(0, 120));
   return 'tie';
 }
