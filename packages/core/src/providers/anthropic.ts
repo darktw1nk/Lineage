@@ -75,7 +75,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
       const latencyMs = Date.now() - startTime;
       
       const blocks = data.content ?? [];
-      const output = blocks.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+      const output = blocks.filter((b: any) => typeof b.text === 'string').map((b: any) => b.text).join('');
       const uses = blocks.filter((b: any) => b.type === 'tool_use');
       const toolCalls = uses.length > 0
         ? uses.map((b: any) => ({ name: b.name, arguments: b.input ?? {} }))
