@@ -65,6 +65,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     get: () => ipcRenderer.invoke('systemPrompts:get'),
     set: (prompts) => ipcRenderer.invoke('systemPrompts:set', prompts),
   },
+
+  // Plugin methods
+  plugins: {
+    list: () => ipcRenderer.invoke('plugins:list'),
+    setEnabled: (name, enabled) => ipcRenderer.invoke('plugins:setEnabled', name, enabled),
+    openFolder: () => ipcRenderer.invoke('plugins:openFolder'),
+  },
   
   // Dev Tools (only available in development)
   dev: {

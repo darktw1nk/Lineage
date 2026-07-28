@@ -2,8 +2,9 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
-import { initializeDatabase, closeDatabase, setStore, setSendUpdate, type StoreInterface } from '@promptengine/core';
+import { initializeDatabase, closeDatabase, setStore, setSendUpdate, loadPlugins, type StoreInterface } from '@promptengine/core';
 import { registerIPCHandlers } from './ipc/handlers.js';
+import { registerPluginHandlers, setPluginState } from './ipc/plugins.js';
 import { initLogger, getLogBuffer } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -42,7 +43,8 @@ const createWindow = () => {
 
 app.whenReady().then(async () => {
   // Inject platform services into the engine (host-provided: store, update sender, db path)
-  setStore(new Store({ encryptionKey: 'prompt-evolution-secure-key' }) as unknown as StoreInterface);
+  const electronStore = new Store({ encryptionKey: 'prompt-evolution-secure-key' }) as unknown as StoreInterface;
+  setStore(electronStore);
 
   setSendUpdate((runId, data) => {
     const windows = BrowserWindow.getAllWindows();
@@ -51,10 +53,18 @@ app.whenReady().then(async () => {
     }
   });
 
+  // Load plugins BEFORE the database opens so plugin provider model entries
+  // flush into the catalog. Disabled plugins are skipped (Settings → Plugins).
+  const pluginsDir = path.join(app.getPath('userData'), 'plugins');
+  const disabledPlugins = (electronStore.get('disabledPlugins', []) as string[]) ?? [];
+  const pluginManifests = await loadPlugins({ dirs: [pluginsDir], disabled: disabledPlugins });
+  setPluginState({ manifests: pluginManifests, pluginsDir });
+
   await initializeDatabase(path.join(app.getPath('userData'), 'evolution.db'));
 
   // Register IPC handlers
   registerIPCHandlers(ipcMain);
+  registerPluginHandlers(ipcMain);
 
   createWindow();
 

@@ -56,6 +56,11 @@ export interface ElectronAPI {
     getBuffer: () => Promise<LogEntry[]>;
     subscribe: (callback: (entry: LogEntry) => void) => () => void;
   };
+  plugins: {
+    list: () => Promise<{ manifests: Array<{ name: string; version?: string; source: string; operators: string[]; providers: string[]; error?: string }>; disabled: string[] }>;
+    setEnabled: (name: string, enabled: boolean) => Promise<string[]>;
+    openFolder: () => Promise<boolean>;
+  };
   systemPrompts: {
     get: () => Promise<SystemPrompts | null>;
     set: (prompts: SystemPrompts) => Promise<void>;
