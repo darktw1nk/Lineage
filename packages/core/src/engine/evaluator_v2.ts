@@ -18,7 +18,10 @@ import type {
   EvaluationConfig,
   EvaluationRun,
   CandidateNode,
+  CandidateParams,
+  TestCase,
   TestResult,
+  ProviderAdapter,
 } from '../types.js';
 import { createShellPopulation, mutateNode } from './operators_v2.js';
 import { selectTopPerformers, createNextGeneration } from './generation.js';
@@ -37,6 +40,10 @@ interface EvaluationState {
   cache: Map<string, TestResult[]>;
   lineageHistory: Map<UUID, { bestFitness: number; stagnantGenerations: number }>;
   operatorEffectiveness: Record<string, { totalDelta: number; count: number }>;
+  fitnessTests: TestCase[];   // tests visible to evolution
+  holdoutTests: TestCase[];   // reserved for the final generalization report
+  samplesPerTest: number;     // resolved + clamped from config
+  promptMode: 'system' | 'inline'; // resolved from config (default 'system')
   pausedAt?: number; // Timestamp when paused (if currently paused)
   totalPausedMs: number; // Total time spent paused
   gradingTotal: number; // Total grading calls completed
@@ -140,7 +147,22 @@ export async function startEvaluation(
   const globalLimit = config.parallelLimit || 5;
   initGlobalSemaphore(globalLimit);
   console.log(`[Evaluator] Global API limit: ${globalLimit}`);
-  
+
+  // Resolve the evaluation harness settings
+  const rawSamples = config.samplesPerTest ?? 1;
+  const samplesPerTest = Math.min(Math.max(Math.floor(rawSamples), 1), 10);
+  if (samplesPerTest !== rawSamples) {
+    console.warn(`[Evaluator] samplesPerTest clamped from ${rawSamples} to ${samplesPerTest}`);
+  }
+  const { partitionTestSet } = await import('./holdout.js');
+  const { fitnessTests, holdoutTests } = partitionTestSet(config.testSet, config.holdoutShare ?? 0, config.holdoutSeed ?? 42);
+  if (fitnessTests.length === 0) {
+    throw new Error('Holdout configuration leaves no fitness tests');
+  }
+  if (holdoutTests.length > 0) {
+    console.log(`[Evaluator] Holdout: ${holdoutTests.length} test(s) reserved (${holdoutTests.map(t => t.name).join(', ')})`);
+  }
+
   // Initialize state
   const state: EvaluationState = {
     run: {
@@ -156,6 +178,10 @@ export async function startEvaluation(
     cache: new Map(),
     lineageHistory: new Map(),
     operatorEffectiveness: {},
+    fitnessTests,
+    holdoutTests,
+    samplesPerTest,
+    promptMode: config.promptMode ?? 'system',
     totalPausedMs: 0,
     gradingTotal: 0,
     gradingFailures: 0,
@@ -636,14 +662,11 @@ async function runTests(
   node: CandidateNode,
   state: EvaluationState
 ): Promise<TestResult[]> {
-  const adapter = getProviderAdapter(node.params.model.provider);
-  const maxTokens = (state.config as any).serviceModelMaxTokens || 20000;
-  
-  // Generate cache key: hash(prompt, model, temperature, testSet signature)
+  // Generate cache key: hash(prompt, model, temperature, harness, fitness-test signature)
   const crypto = await import('crypto');
-  const testSetSig = state.config.testSet.map(t => t.id).join(',');
+  const testSetSig = state.fitnessTests.map(t => t.id).join(',');
   const cacheKey = crypto.createHash('sha256')
-    .update(`${node.prompt}|${node.params.model.provider}/${node.params.model.model}|${node.params.temperature}|${testSetSig}`)
+    .update(`${node.prompt}|${node.params.model.provider}/${node.params.model.model}|${node.params.temperature}|${state.promptMode}|${state.samplesPerTest}|${testSetSig}`)
     .digest('hex');
 
   // Check cache
@@ -653,10 +676,74 @@ async function runTests(
     sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
     return state.cache.get(cacheKey)!;
   }
-  
-  // Run all tests in parallel
-  const testPromises = state.config.testSet.map(async (test) => {
-    const combinedPrompt = `${node.prompt}\n\n${test.prompt}`;
+
+  const results = await evaluatePromptOnTests(node.prompt, node.params, state.fitnessTests, state, runId);
+
+  // Store in cache
+  state.cache.set(cacheKey, results);
+  console.log(`[Evaluator] Cached results for node ${node.id.slice(0, 8)}`);
+  return results;
+}
+
+/**
+ * Evaluate an arbitrary prompt against a set of tests using the run's
+ * harness settings (promptMode, samplesPerTest). Used for normal candidate
+ * evaluation (fitness tests) and for the final holdout evaluation.
+ * Costs accrue to state.run.totals and emit `totals` events.
+ */
+export async function evaluatePromptOnTests(
+  candidatePrompt: string,
+  params: CandidateParams,
+  tests: TestCase[],
+  state: EvaluationState,
+  runId: UUID,
+): Promise<TestResult[]> {
+  const adapter = getProviderAdapter(params.model.provider);
+  const maxTokens = (state.config as any).serviceModelMaxTokens || 20000;
+
+  return Promise.all(tests.map(async (test) => {
+    const samples = await Promise.all(
+      Array.from({ length: state.samplesPerTest }, (_v, i) =>
+        runSingleSample(test, candidatePrompt, params, i, state, runId, adapter, maxTokens)),
+    );
+
+    const mean = samples.reduce((a, s) => a + s.score, 0) / samples.length;
+    let passed: boolean;
+    if (test.mode === 'exact_match' && test.grading?.strictZeroOnDeviation) {
+      passed = samples.filter(s => s.exact).length * 2 > samples.length; // strict majority
+    } else {
+      passed = mean >= 7;
+    }
+
+    const testResult: TestResult = {
+      testId: test.id,
+      passed,
+      score: mean,
+      promptTokens: samples.reduce((a, s) => a + s.promptTokens, 0),
+      completionTokens: samples.reduce((a, s) => a + s.completionTokens, 0),
+      latencyMs: samples.reduce((a, s) => a + s.latencyMs, 0) / samples.length,
+      outputText: samples[0].output,
+      llmGradeReasoning: samples[0].reasoning,
+      ...(state.samplesPerTest > 1 ? { samples: samples.map(s => s.score) } : {}),
+    };
+    return testResult;
+  }));
+}
+
+async function runSingleSample(
+  test: TestCase,
+  candidatePrompt: string,
+  params: CandidateParams,
+  sampleIndex: number,
+  state: EvaluationState,
+  runId: UUID,
+  adapter: ProviderAdapter,
+  maxTokens: number,
+): Promise<{ score: number; exact: boolean; passed: boolean; output: string; reasoning?: string;
+             promptTokens: number; completionTokens: number; latencyMs: number }> {
+    const system = state.promptMode === 'system' ? candidatePrompt : undefined;
+    const samplePrompt = state.promptMode === 'system' ? test.prompt : `${candidatePrompt}\n\n${test.prompt}`;
+    const sampleSeed = params.seed !== undefined ? params.seed + sampleIndex : undefined;
 
     // Load image if test has one
     let images: Array<{ base64: string; mimeType: string }> | undefined;
@@ -674,10 +761,11 @@ async function runTests(
     }
 
     const result = await adapter.call({
-      model: node.params.model.model,
-      prompt: combinedPrompt,
-      temperature: node.params.temperature,
-      seed: node.params.seed,
+      model: params.model.model,
+      prompt: samplePrompt,
+      system,
+      temperature: params.temperature,
+      seed: sampleSeed,
       maxTokens,
       providerOptions: state.config.providerOptions,
       images,
@@ -706,7 +794,7 @@ async function runTests(
       
       const gradingResult = await evaluateTestResultLLM(
         test,
-        node.prompt,
+        candidatePrompt,
         test.prompt,
         result.output,
         state.config.serviceModel,
@@ -780,27 +868,18 @@ async function runTests(
       }
     }
     
-    const testResult: TestResult = {
-      testId: test.id,
-      passed,
+    const exact = test.mode === 'exact_match' && !!test.expected && result.output.trim() === test.expected.trim();
+
+    return {
       score,
+      exact,
+      passed,
+      output: result.output,
+      reasoning: llmGradeReasoning,
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
       latencyMs: result.latencyMs,
-      outputText: result.output,
-      llmGradeReasoning,
     };
-    
-    return testResult;
-  });
-  
-  const results = await Promise.all(testPromises);
-  
-  // Store in cache
-  state.cache.set(cacheKey, results);
-  console.log(`[Evaluator] Cached results for node ${node.id.slice(0, 8)}`);
-  
-  return results;
 }
 
 /**
