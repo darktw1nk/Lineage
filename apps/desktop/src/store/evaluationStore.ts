@@ -25,6 +25,7 @@ interface EvaluationStore {
   addNodeToEvaluation: (evalId: UUID, node: CandidateNode) => void;
   addGenerationToEvaluation: (evalId: UUID, generation: number, nodes: CandidateNode[]) => void;
   updateTotals: (evalId: UUID, totals: any, cacheHits: number) => void;
+  setHoldout: (evalId: UUID, holdout: EvaluationRun['holdout']) => void;
   updateStatus: (evalId: UUID, status: string, totalPausedMs?: number, pausedAt?: number) => void;
   setLoading: (evalId: UUID, isLoading: boolean) => void;
   
@@ -137,10 +138,22 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
     set((state) => {
       const evaluation = state.evaluations.get(evalId);
       if (!evaluation) return state;
-      
+
       const newEvaluations = new Map(state.evaluations);
       newEvaluations.set(evalId, { ...evaluation, totals, cacheHits });
-      
+
+      return { evaluations: newEvaluations };
+    });
+  },
+
+  setHoldout: (evalId, holdout) => {
+    set((state) => {
+      const evaluation = state.evaluations.get(evalId);
+      if (!evaluation) return state;
+
+      const newEvaluations = new Map(state.evaluations);
+      newEvaluations.set(evalId, { ...evaluation, holdout });
+
       return { evaluations: newEvaluations };
     });
   },
@@ -215,6 +228,10 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
           
         case 'totals':
           store.updateTotals(evalId, data.totals, data.cacheHits);
+          break;
+
+        case 'holdout_result':
+          store.setHoldout(evalId, data.holdout);
           break;
           
         default:

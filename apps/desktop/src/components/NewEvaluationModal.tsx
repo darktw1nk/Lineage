@@ -1148,6 +1148,19 @@ function TestSetTab({ config, setConfig, isSimpleMode }: TabProps) {
                 </div>
               </>
             )}
+
+            <div className="flex items-center space-x-2 pt-2">
+              <Switch
+                id={`holdout-${test.id}`}
+                checked={test.holdout || false}
+                onCheckedChange={(checked) =>
+                  updateTest(test.id, { holdout: checked || undefined })
+                }
+              />
+              <Label htmlFor={`holdout-${test.id}`} className="text-sm">
+                Holdout (excluded from evolution; scored at the end for the generalization report)
+              </Label>
+            </div>
           </div>
         ))}
       </div>
@@ -2146,6 +2159,60 @@ function AdvancedTab({ config, setConfig }: TabProps) {
         </select>
         <div className="text-xs text-muted-foreground">
           Models are loaded from Settings → Models & Costs
+        </div>
+      </div>
+
+      <div className="border-t pt-4 space-y-4">
+        <div className="text-sm font-semibold">Evaluation harness</div>
+
+        <div>
+          <LabelWithTooltip
+            htmlFor="promptMode"
+            label="Prompt Mode"
+            tooltip="How the candidate prompt is sent to models: as a real system message (recommended — matches production deployment) or concatenated inline with the test input."
+          />
+          <select
+            id="promptMode"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={config.promptMode ?? 'system'}
+            onChange={(e) => setConfig({ ...config, promptMode: e.target.value as 'system' | 'inline' })}
+          >
+            <option value="system">System message (recommended)</option>
+            <option value="inline">Inline concatenation</option>
+          </select>
+        </div>
+
+        <div>
+          <LabelWithTooltip
+            htmlFor="samplesPerTest"
+            label="Samples per Test"
+            tooltip="Run each test N times per candidate and average the scores — damps judge/sampling noise, multiplies evaluation cost."
+          />
+          <Input
+            id="samplesPerTest"
+            type="number"
+            min="1"
+            max="10"
+            value={config.samplesPerTest ?? 1}
+            onChange={(e) => setConfig({ ...config, samplesPerTest: parseInt(e.target.value) || 1 })}
+          />
+        </div>
+
+        <div>
+          <LabelWithTooltip
+            htmlFor="holdoutShare"
+            label="Holdout Share (0-1)"
+            tooltip="Fraction of tests reserved for the final generalization report (in addition to tests marked Holdout in the Test Set tab). Held-out tests are invisible to evolution; seed and champion are scored on them at the end."
+          />
+          <Input
+            id="holdoutShare"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
+            value={config.holdoutShare ?? 0}
+            onChange={(e) => setConfig({ ...config, holdoutShare: parseFloat(e.target.value) || 0 })}
+          />
         </div>
       </div>
     </div>

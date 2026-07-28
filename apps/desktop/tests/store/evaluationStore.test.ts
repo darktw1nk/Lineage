@@ -182,6 +182,16 @@ describe('evaluationStore subscriptions', () => {
     expect(subscribeSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('holdout_result updates the run', () => {
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().subscribe('run-1');
+    capturedCallbacks.get('run-1')!({}, {
+      type: 'holdout_result',
+      holdout: { testIds: ['t9'], samplesPerTest: 1, seed: { score: 5, perTest: [] }, champion: { score: 9, perTest: [] } },
+    });
+    expect((store().evaluations.get('run-1') as any).holdout.champion.score).toBe(9);
+  });
+
   it('cleanup unsubscribes everything', () => {
     store().subscribe('run-1');
     store().subscribe('run-2');

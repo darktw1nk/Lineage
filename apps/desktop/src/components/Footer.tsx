@@ -160,6 +160,15 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
           <div className="text-xs text-muted-foreground">Cache Hits</div>
           <div className="text-sm font-medium">{evaluation.cacheHits}</div>
         </div>
+
+        {evaluation.holdout?.seed && evaluation.holdout?.champion && (
+          <div>
+            <div className="text-xs text-muted-foreground">Holdout</div>
+            <div className="text-sm font-medium">
+              {evaluation.holdout.seed.score.toFixed(2)} → {evaluation.holdout.champion.score.toFixed(2)}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Controls */}
