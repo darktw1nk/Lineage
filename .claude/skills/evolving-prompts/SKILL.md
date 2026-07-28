@@ -13,7 +13,7 @@ This repo's genetic-algorithm engine evolves a seed prompt against a test set. Y
 npm run cli -- --config cfg.json --db ./run.db --output results.json
 ```
 
-Progress/logs → stderr. `--output` (and stdout) → pure JSON. Exit 0 = usable best prompt; exit 1 = none. A markdown report lands in `testoutputs/` beside the output file.
+Progress/logs → stderr. `--output` (and stdout) → pure JSON. Exit 0 = usable best prompt; exit 1 = none. A markdown report lands in `testoutputs/` beside the output file (`--report none` to skip it when only results.json matters; `--report <path>` to choose the destination).
 
 ## Before the first run
 

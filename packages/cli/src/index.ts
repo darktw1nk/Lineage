@@ -87,6 +87,7 @@ OPTIONS:
   --plugins <dir>              Load plugins from a directory (repeatable)
   --seed <n>                   Reproducibility seed (overrides config "seed")
   --resume <runId>             Resume an interrupted run from its checkpoint
+  --report <path|none>         Markdown report destination, or 'none' to skip
   --sync-models                Sync available models from OpenRouter
   --list-models                List all models in the database with pricing
   --set-key <provider> <key>   Save an API key (shared with desktop app)
@@ -136,6 +137,7 @@ function parseArgs(argv: string[]): {
   pluginDirs: string[];
   seed?: number;
   resume?: string;
+  report?: string;
 } {
   const args = argv.slice(2);
   const result = {
@@ -149,6 +151,7 @@ function parseArgs(argv: string[]): {
     pluginDirs: [] as string[],
     seed: undefined as number | undefined,
     resume: undefined as string | undefined,
+    report: undefined as string | undefined,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -169,6 +172,13 @@ function parseArgs(argv: string[]): {
         result.resume = args[++i];
         if (!result.resume) {
           console.error('--resume requires a run id');
+          process.exit(1);
+        }
+        break;
+      case '--report':
+        result.report = args[++i];
+        if (!result.report) {
+          console.error("--report requires a path or 'none'");
           process.exit(1);
         }
         break;
@@ -302,7 +312,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
   closeDatabase();
 }
 
-async function handleRunEvolution(configPath: string, outputPath?: string, dbPath?: string, pluginDirs: string[] = [], seedOverride?: number): Promise<void> {
+async function handleRunEvolution(configPath: string, outputPath?: string, dbPath?: string, pluginDirs: string[] = [], seedOverride?: number, reportArg?: string): Promise<void> {
   // Load and validate config
   const cliConfig = loadCliConfig(configPath);
   const configKeys = extractConfigKeys(cliConfig);
@@ -349,7 +359,7 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
   });
   activeRunId = null;
 
-  await emitOutputs(result, evalConfig, cliConfig, outputPath);
+  await emitOutputs(result, evalConfig, cliConfig, outputPath, reportArg);
 }
 
 /** Shared post-run tail: results file, markdown report, DB close, exit code. */
@@ -358,6 +368,7 @@ async function emitOutputs(
   evalConfig: EvaluationConfig,
   cliConfig: CliConfig | undefined,
   outputPath?: string,
+  reportArg?: string,
 ): Promise<void> {
   // Optionally write to output file
   if (outputPath) {
@@ -366,19 +377,31 @@ async function emitOutputs(
     process.stderr.write(`\nResults written to ${outputPath}\n`);
   }
 
-  // Generate markdown report — next to the --output file when given,
-  // otherwise under the current working directory.
-  const { generateReport, slugify } = await import('./report.js');
-  const fs = await import('fs');
-  const path = await import('path');
-  const reportDir = outputPath
-    ? path.join(path.dirname(path.resolve(outputPath)), 'testoutputs')
-    : path.resolve('testoutputs');
-  fs.mkdirSync(reportDir, { recursive: true });
-  const slug = slugify(cliConfig?.name || evalConfig.name || 'evolution');
-  const reportPath = path.join(reportDir, `output-${slug}.md`);
-  fs.writeFileSync(reportPath, generateReport(result, evalConfig, cliConfig ?? ({} as CliConfig)));
-  process.stderr.write(`\nReport written to ${reportPath}\n`);
+  // Markdown report: --report none skips it; --report <path> writes exactly there;
+  // default derives testoutputs/output-<slug>.md next to --output (or under cwd).
+  if (reportArg?.toLowerCase() !== 'none') {
+    const { generateReport, slugify } = await import('./report.js');
+    const fs = await import('fs');
+    const path = await import('path');
+    let reportPath: string;
+    if (reportArg) {
+      reportPath = path.resolve(reportArg);
+    } else {
+      const reportDir = outputPath
+        ? path.join(path.dirname(path.resolve(outputPath)), 'testoutputs')
+        : path.resolve('testoutputs');
+      const slug = slugify(cliConfig?.name || evalConfig.name || 'evolution');
+      reportPath = path.join(reportDir, `output-${slug}.md`);
+    }
+    try {
+      fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+      fs.writeFileSync(reportPath, generateReport(result, evalConfig, cliConfig ?? ({} as CliConfig)));
+      process.stderr.write(`\nReport written to ${reportPath}\n`);
+    } catch (error: any) {
+      // The report is auxiliary — a failed write must not change the run's exit code
+      process.stderr.write(`\nReport write failed: ${error.message}\n`);
+    }
+  }
 
   const { closeDatabase } = await import('@promptengine/core');
   closeDatabase();
@@ -390,7 +413,7 @@ async function emitOutputs(
   }
 }
 
-async function handleResumeRun(runId: string, configPath?: string, outputPath?: string, dbPath?: string, pluginDirs: string[] = []): Promise<void> {
+async function handleResumeRun(runId: string, configPath?: string, outputPath?: string, dbPath?: string, pluginDirs: string[] = [], reportArg?: string): Promise<void> {
   // Optional --config re-supplies file-based extras: keys, systemPrompts, plugins
   const cliConfig = configPath ? loadCliConfig(configPath) : undefined;
   const configKeys = cliConfig ? extractConfigKeys(cliConfig) : {};
@@ -445,7 +468,7 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
   });
   activeRunId = null;
 
-  await emitOutputs(result, evalConfig, cliConfig, outputPath);
+  await emitOutputs(result, evalConfig, cliConfig, outputPath, reportArg);
 }
 
 // ---------------------------------------------------------------------------
@@ -478,12 +501,12 @@ async function main(): Promise<void> {
   }
 
   if (args.resume) {
-    await handleResumeRun(args.resume, args.config, args.output, args.db, args.pluginDirs);
+    await handleResumeRun(args.resume, args.config, args.output, args.db, args.pluginDirs, args.report);
     return;
   }
 
   if (args.config) {
-    await handleRunEvolution(args.config, args.output, args.db, args.pluginDirs, args.seed);
+    await handleRunEvolution(args.config, args.output, args.db, args.pluginDirs, args.seed, args.report);
     return;
   }
 

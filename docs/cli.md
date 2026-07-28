@@ -13,13 +13,14 @@ npm run cli -- --output <path>              # Write JSON results to file (defaul
 npm run cli -- --db <path>                  # Use a specific database file
 npm run cli -- --seed <n>                   # Reproducibility seed (overrides config "seed")
 npm run cli -- --resume <runId>             # Resume an interrupted run from its checkpoint
+npm run cli -- --report <path|none>         # Markdown report destination, or 'none' to skip
 npm run cli -- --sync-models                # Sync models from OpenRouter
 npm run cli -- --list-models                # List all models with pricing
 npm run cli -- --set-key <provider> <key>   # Save API key (shared with desktop app)
 npm run cli -- --help                       # Show help
 ```
 
-Progress and all engine logs go to stderr; stdout carries exactly the JSON result. Pipe with `2>/dev/null` for clean JSON, or use `--output <path>` to write it to a file.
+Progress and all engine logs go to stderr; stdout carries exactly the JSON result. Pipe with `2>/dev/null` for clean JSON, or use `--output <path>` to write it to a file. A markdown run report lands in `testoutputs/` beside the output file by default — `--report <path>` puts it exactly where you want it, `--report none` skips it.
 
 **Model IDs**: run `--list-models` first — only catalogued models get correct cost accounting (budget enforcement depends on it). Catalog pricing refreshed 2026-07; providers retire models over time, so if a run fails with a 404 "model no longer available", pick a newer model from `--list-models` or sync via OpenRouter.
 
