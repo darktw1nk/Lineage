@@ -837,9 +837,16 @@ async function runSingleSample(
       seed: sampleSeed,
       maxTokens,
       timeoutMs: state.config.callTimeoutMs,
+      ...(test.mode === 'tool_call' && test.tools?.length ? { tools: test.tools } : {}),
       providerOptions: state.config.providerOptions,
       images,
     });
+
+    // Tool responses serialize into the output channel so samples, cache,
+    // playoff, reports, and the UI all compose without special cases.
+    const effectiveOutput = result.toolCalls
+      ? JSON.stringify({ toolCalls: result.toolCalls }, null, 2)
+      : result.output;
     
     // Update totals immediately for candidate model call
     state.run.totals.tokensPrompt += result.promptTokens;
@@ -937,15 +944,23 @@ async function runSingleSample(
           passed = false;
         }
       }
+    } else if (test.mode === 'json_schema') {
+      const { scoreJsonSchema } = await import('./structured.js');
+      const r = scoreJsonSchema(effectiveOutput, test.schema, test.id);
+      score = r.score; passed = r.passed; llmGradeReasoning = r.detail;
+    } else if (test.mode === 'tool_call') {
+      const { scoreToolCall } = await import('./structured.js');
+      const r = scoreToolCall(result.toolCalls, test.expectedTool);
+      score = r.score; passed = r.passed; llmGradeReasoning = r.detail;
     }
-    
+
     const exact = test.mode === 'exact_match' && !!test.expected && result.output.trim() === test.expected.trim();
 
     return {
       score,
       exact,
       passed,
-      output: result.output,
+      output: effectiveOutput,
       reasoning: llmGradeReasoning,
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
