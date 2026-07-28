@@ -1,5 +1,10 @@
 # PromptEngine.AI — CLI Reference
 
+## Install
+
+- **From this repo**: `npm run cli -- <options>` (runs from source via tsx).
+- **As a package** (not yet published to npm): install `@promptengine/core` + `@promptengine/cli` tarballs (`npm pack` in each package), then use `npx promptengine <options>`.
+
 ## Usage
 
 ```bash
