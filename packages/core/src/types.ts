@@ -1,7 +1,7 @@
 // Core Types for Prompt Evolution Application
 
 export type UUID = string;
-export type Provider = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'groq';
+export type Provider = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'groq' | (string & {});
 
 export interface ModelRef {
   provider: Provider;
@@ -41,7 +41,7 @@ export interface CandidateParams {
   seed?: number;       // for stability runs
 }
 
-export type ChangeLabel = 'MUTATION' | 'CROSSOVER' | 'META' | 'PARAM' | 'MODEL' | 'ELITE' | 'CARRY' | 'ERROR';
+export type ChangeLabel = 'MUTATION' | 'CROSSOVER' | 'META' | 'PARAM' | 'MODEL' | 'ELITE' | 'CARRY' | 'ERROR' | (string & {});
 
 export interface ChangeLogLine {
   label: ChangeLabel;
@@ -83,11 +83,12 @@ export interface EvaluationConfig {
     crossoverShare: number; // 0..1, renamed from crossoverFactor
     metaPrompting?: { enabled: boolean; share: number }; // default 0.2
     modelVariation?: { enabled: boolean; share: number }; // random model selection
-    paramVariation?: { 
-      enabled: boolean; 
+    paramVariation?: {
+      enabled: boolean;
       share: number; // param variation share (temperature, etc.)
       temperature?: { enabled: boolean; min: number; max: number };
     };
+    custom?: Record<string, { enabled?: boolean; share: number }>; // plugin operator shares, keyed by operator name
   };
   population: {
     initialSize: number; // size of generation 0 (default 10)
@@ -131,6 +132,46 @@ export interface ModelCostEntry {
   model: string;
   promptUSDper1k: number;
   completionUSDper1k: number;
+}
+
+// ---------------------------------------------------------------------------
+// Plugin system
+// ---------------------------------------------------------------------------
+
+export interface OperatorContext {
+  parent: CandidateNode;
+  parentB?: CandidateNode;          // present when the operator declares parents: 2
+  config: EvaluationConfig;
+  generation: CandidateNode[];      // current generation snapshot
+}
+
+export interface OperatorResult {
+  prompt: string;
+  params?: Partial<CandidateParams>;  // optional patch (temperature, seed, model)
+  changeLog: ChangeLogLine[];
+  cost: { promptTokens: number; completionTokens: number; usd: number; calls: number };
+}
+
+export interface OperatorPlugin {
+  name: string;                     // unique id: config share key, changelog source, effectiveness key
+  label?: string;                   // display name (UI)
+  description?: string;
+  parents: 1 | 2;                   // unary (mutation-like) or binary (crossover-like)
+  apply(ctx: OperatorContext): Promise<OperatorResult>;
+}
+
+export interface ProviderPlugin {
+  adapter: ProviderAdapter;         // adapter.name is the provider id
+  models?: ModelCostEntry[];        // upserted into model_costs at registration (per-1k pricing)
+}
+
+export interface PluginManifest {
+  name: string;
+  version?: string;
+  source: string;                   // absolute path of the loaded module
+  operators: string[];              // operator names contributed
+  providers: string[];              // provider ids contributed
+  error?: string;                   // set when the module failed to load/validate
 }
 
 export interface AppSettings {

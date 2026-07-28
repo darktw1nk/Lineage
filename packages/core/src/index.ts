@@ -27,3 +27,11 @@ export { getModelCost } from './providers/costs.js';
 export { withRetry, isRetryableError, RetryableError } from './providers/retry.js';
 export type { RetryOptions } from './providers/retry.js';
 export { levenshteinScore0to10, jsonDiffScore0to10, numericAbsScore0to10 } from './utils/distance.js';
+export {
+  registerOperator, registerProvider, getOperator, listOperators, listProviders,
+  resetRegistry, flushPendingPluginModels, BUILTIN_OPERATOR_NAMES,
+} from './registry.js';
+export { BaseProviderAdapter } from './providers/base.js';
+export type {
+  OperatorContext, OperatorResult, OperatorPlugin, ProviderPlugin, PluginManifest,
+} from './types.js';

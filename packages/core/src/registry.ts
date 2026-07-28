@@ -1,0 +1,148 @@
+/**
+ * Operator & provider registries. Built-in operators are pre-registered here
+ * as thin wrappers around the existing operator modules; plugins add entries
+ * via registerOperator/registerProvider (usually through the plugin loader).
+ *
+ * Import-cycle note: this module imports operator functions whose modules
+ * import providers/index.js, which imports this module back. That is safe
+ * because every cross-module reference happens at call time, never during
+ * module initialization.
+ */
+import type { OperatorPlugin, ProviderPlugin, ProviderAdapter, ModelCostEntry } from './types.js';
+import type { SqlJsWrapper } from './database/init.js';
+import { mutateNode } from './engine/mutations.js';
+import { crossoverNodes } from './engine/crossover.js';
+import { metaPromptNode } from './engine/metaprompting.js';
+import { varyParameters } from './engine/paramvariation.js';
+import { varyModel } from './engine/modelvariation.js';
+
+const ZERO_COST = { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 };
+const BUILTIN_PROVIDER_IDS = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq'];
+export const BUILTIN_OPERATOR_NAMES = ['mutation', 'crossover', 'meta', 'param', 'model'] as const;
+
+const operators = new Map<string, OperatorPlugin>();
+const providers = new Map<string, ProviderAdapter>();
+let pendingModels: ModelCostEntry[] = [];
+
+function builtinOperators(): OperatorPlugin[] {
+  return [
+    {
+      name: 'mutation', label: 'Mutation', parents: 1,
+      description: 'Strategy-guided LLM rewrite of the prompt',
+      async apply({ parent, config }) {
+        const r = await mutateNode(parent.prompt, config);
+        return { prompt: r.prompt, changeLog: r.changeLog, cost: r.cost };
+      },
+    },
+    {
+      name: 'crossover', label: 'Crossover', parents: 2,
+      description: 'LLM merge of two parent prompts',
+      async apply({ parent, parentB, config }) {
+        const r = await crossoverNodes(parent, parentB!, config);
+        return { prompt: r.prompt, changeLog: r.changeLog, cost: r.cost };
+      },
+    },
+    {
+      name: 'meta', label: 'Meta-prompting', parents: 1,
+      description: 'Failure-aware surgical edits from test results',
+      async apply({ parent, config, generation }) {
+        const r = await metaPromptNode(parent, config, generation);
+        return { prompt: r.prompt, changeLog: r.changeLog, cost: r.cost };
+      },
+    },
+    {
+      name: 'param', label: 'Param variation', parents: 1,
+      description: 'Temperature/seed variation, prompt unchanged',
+      async apply({ parent, config }) {
+        const v = varyParameters(parent.params.temperature ?? 0.7, config, true);
+        return { prompt: parent.prompt, params: { temperature: v.temperature }, changeLog: v.changeLog, cost: ZERO_COST };
+      },
+    },
+    {
+      name: 'model', label: 'Model variation', parents: 1,
+      description: 'Same prompt on a different enabled model',
+      async apply({ parent, config }) {
+        const v = varyModel(parent.params.model, config, true, config.enabledModels);
+        if (v.changeLog.length === 0) {
+          return {
+            prompt: parent.prompt,
+            changeLog: [{ label: 'CARRY', text: 'Model variation skipped (no other models available)' }],
+            cost: ZERO_COST,
+          };
+        }
+        return { prompt: parent.prompt, params: { model: v.model }, changeLog: v.changeLog, cost: ZERO_COST };
+      },
+    },
+  ];
+}
+
+function registerBuiltins(): void {
+  for (const op of builtinOperators()) operators.set(op.name, op);
+}
+registerBuiltins();
+
+export function registerOperator(op: OperatorPlugin): void {
+  if (operators.has(op.name)) {
+    throw new Error(`Operator '${op.name}' is already registered`);
+  }
+  operators.set(op.name, op);
+}
+
+export function getOperator(name: string): OperatorPlugin | undefined {
+  return operators.get(name);
+}
+
+export function listOperators(): OperatorPlugin[] {
+  return [...operators.values()];
+}
+
+export function registerProvider(plugin: ProviderPlugin): void {
+  const id = plugin.adapter.name;
+  if (BUILTIN_PROVIDER_IDS.includes(id) || providers.has(id)) {
+    throw new Error(`Provider '${id}' is already registered`);
+  }
+  providers.set(id, plugin.adapter);
+  if (plugin.models?.length) {
+    pendingModels.push(...plugin.models);
+    tryFlushModels();
+  }
+}
+
+export function getRegisteredProviderAdapter(id: string): ProviderAdapter | undefined {
+  return providers.get(id);
+}
+
+export function listProviders(): string[] {
+  return [...BUILTIN_PROVIDER_IDS, ...providers.keys()];
+}
+
+/** Upsert queued plugin model costs; safe to call when the db is unavailable. */
+export function flushPendingPluginModels(db: SqlJsWrapper): void {
+  if (pendingModels.length === 0) return;
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO model_costs (provider, model, prompt_usd_per_1k, completion_usd_per_1k)
+    VALUES (?, ?, ?, ?)
+  `);
+  for (const m of pendingModels) {
+    // Plugin entries are authored per-1k already (unlike the seeded defaults,
+    // which are per-million and divided at insert) — pass through unchanged.
+    insert.run(m.provider, m.model, m.promptUSDper1k, m.completionUSDper1k);
+  }
+  pendingModels = [];
+}
+
+function tryFlushModels(): void {
+  // getDatabase throws before initializeDatabase — swallow and let
+  // initializeDatabase flush the queue later.
+  import('./database/init.js').then(({ getDatabase }) => {
+    try { flushPendingPluginModels(getDatabase()); } catch { /* not initialized yet */ }
+  }).catch(() => { /* ignore */ });
+}
+
+/** Test helper: clears plugin registrations, keeps built-ins. */
+export function resetRegistry(): void {
+  operators.clear();
+  providers.clear();
+  pendingModels = [];
+  registerBuiltins();
+}

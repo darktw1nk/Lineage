@@ -193,6 +193,12 @@ export async function initializeDatabase(dbPath: string): Promise<void> {
 
   // Run migrations if needed
   runMigrations(db);
+
+  // Plugin providers registered before the database opened queued their
+  // model catalog entries — flush them now. (Dynamic import avoids a static
+  // registry ↔ database cycle.)
+  const { flushPendingPluginModels } = await import('../registry.js');
+  flushPendingPluginModels(db);
 }
 
 export function closeDatabase(): void {

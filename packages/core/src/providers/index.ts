@@ -5,7 +5,9 @@ import { OpenRouterAdapter } from './openrouter.js';
 import { GroqAdapter } from './groq.js';
 import type { Provider, ProviderAdapter } from '../types.js';
 
-const adapters: Record<Provider, ProviderAdapter> = {
+import { getRegisteredProviderAdapter } from '../registry.js';
+
+const adapters: Record<string, ProviderAdapter> = {
   openai: new OpenAIAdapter(),
   anthropic: new AnthropicAdapter(),
   gemini: new GeminiAdapter(),
@@ -14,6 +16,10 @@ const adapters: Record<Provider, ProviderAdapter> = {
 };
 
 export function getProviderAdapter(provider: Provider): ProviderAdapter {
-  return adapters[provider];
+  const builtin = adapters[provider];
+  if (builtin) return builtin;
+  const plugin = getRegisteredProviderAdapter(provider);
+  if (plugin) return plugin;
+  throw new Error(`Unknown provider: ${provider}`);
 }
 
