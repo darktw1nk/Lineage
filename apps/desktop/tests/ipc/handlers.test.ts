@@ -108,6 +108,17 @@ describe('evaluation CRUD round-trip', () => {
     const list = await invoke('eval:list');
     expect(list.some((r: any) => r.id === run.id)).toBe(true);
     expect(list.find((r: any) => r.id === run.id).configName).toBe('IPC test config');
+    // Never-started run (no status, not active in this process) => resumable
+    expect(list.find((r: any) => r.id === run.id).interrupted).toBe(true);
+
+    // Finished runs are NOT interrupted
+    const { getDatabase } = await import('@promptengine/core');
+    const db = getDatabase();
+    const row = db.prepare('SELECT run_json FROM evaluation_runs WHERE id = ?').get(run.id) as any;
+    const finishedRun = { ...JSON.parse(row.run_json), status: 'finished' };
+    db.prepare('UPDATE evaluation_runs SET run_json = ? WHERE id = ?').run(JSON.stringify(finishedRun), run.id);
+    const list2 = await invoke('eval:list');
+    expect(list2.find((r: any) => r.id === run.id).interrupted).toBe(false);
 
     const config = await invoke('eval:getConfig', run.id);
     expect(config.name).toBe('IPC test config');

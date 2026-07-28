@@ -1,6 +1,6 @@
 import { IpcMain } from 'electron';
 import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from '@promptengine/core';
-import { getDatabase, store, OpenRouterAdapter } from '@promptengine/core';
+import { getDatabase, store, OpenRouterAdapter, isEvaluationActive } from '@promptengine/core';
 import { v4 as uuidv4 } from 'uuid';
 import { getLogBuffer } from '../logger.js';
 
@@ -248,6 +248,8 @@ async function listEvaluations(): Promise<EvaluationRun[]> {
     const run = JSON.parse(row.run_json);
     // Add the config name to the run object for display
     (run as any).configName = row.config_name;
+    // Checkpointed but not finished and not live in this process => resumable
+    (run as any).interrupted = run.status !== 'finished' && !isEvaluationActive(run.id);
     return run;
   });
 }

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, useRef } from 'react';
 import { Button } from './ui/button';
-import { Plus, Settings, Download, Upload, Trash2, FileText, Code2 } from 'lucide-react';
+import { Plus, Settings, Download, Upload, Trash2, FileText, Code2, Play } from 'lucide-react';
 import type { UUID, EvaluationRun, EvaluationConfig } from '../types';
 import { useEvaluationStore } from '../store/evaluationStore';
 import { toast } from 'sonner';
@@ -124,6 +124,20 @@ export function LeftSidebar({
     },
   });
   
+  const resumeMutation = useMutation({
+    mutationFn: async (runId: string) => {
+      await window.electronAPI.eval.start(runId);
+    },
+    onSuccess: (_, runId) => {
+      useEvaluationStore.getState().subscribe(runId as UUID);
+      onSelectEvaluation(runId as UUID);
+      queryClient.invalidateQueries({ queryKey: ['evaluations'] });
+    },
+    onError: (error: any) => {
+      alert(`Resume failed: ${error.message}`);
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (runId: string) => {
       return await window.electronAPI.eval.delete(runId);
@@ -340,14 +354,40 @@ export function LeftSidebar({
                   >
                     <Trash2 className="h-3 w-3" />
                   </span>
-                  <span className={`text-xs ${getStatusColor(status)}`}>
-                    {status}
-                  </span>
+                  {(evaluation as any).interrupted ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
+                      interrupted
+                    </span>
+                  ) : (
+                    <span className={`text-xs ${getStatusColor(status)}`}>
+                      {status}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="mt-1 flex items-center justify-between text-xs opacity-70">
                 {bestScore !== null && (
                   <span>Best: {bestScore.toFixed(2)}</span>
+                )}
+                {(evaluation as any).interrupted && (
+                  <span
+                    className="inline-flex items-center gap-1 text-amber-600 hover:text-amber-500 cursor-pointer"
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      resumeMutation.mutate(evaluation.id);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.stopPropagation();
+                        resumeMutation.mutate(evaluation.id);
+                      }
+                    }}
+                  >
+                    <Play className="h-3 w-3" />
+                    Resume
+                  </span>
                 )}
                 <span className="ml-auto">{elapsedTime}</span>
               </div>
