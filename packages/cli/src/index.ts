@@ -132,6 +132,7 @@ function parseArgs(argv: string[]): {
   setKey?: { provider: Provider; key: string };
   help: boolean;
   pluginDirs: string[];
+  seed?: number;
 } {
   const args = argv.slice(2);
   const result = {
