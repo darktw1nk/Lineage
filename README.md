@@ -144,7 +144,7 @@ apps/desktop      Electron app (React + React Flow)
 docs/cli.md       Full CLI + config reference
 ```
 
-Architecture details in [CLAUDE.md](CLAUDE.md). Tests: `npm test` (298 across all packages).
+Architecture details in [CLAUDE.md](CLAUDE.md). Tests: `npm test` (320 across all packages).
 
 ## License
 

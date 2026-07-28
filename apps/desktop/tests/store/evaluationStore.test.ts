@@ -1,0 +1,194 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { useEvaluationStore } from '../../src/store/evaluationStore';
+import type { EvaluationRun, CandidateNode } from '../../src/types';
+
+// ---------------------------------------------------------------------------
+// window.electronAPI stub (only eval.subscribe is used by the store)
+// ---------------------------------------------------------------------------
+
+let capturedCallbacks: Map<string, (event: any, data: any) => void>;
+let unsubscribeSpies: Map<string, ReturnType<typeof vi.fn>>;
+const subscribeSpy = vi.fn((runId: string, cb: (event: any, data: any) => void) => {
+  capturedCallbacks.set(runId, cb);
+  const unsub = vi.fn();
+  unsubscribeSpies.set(runId, unsub);
+  return unsub;
+});
+
+vi.stubGlobal('window', { electronAPI: { eval: { subscribe: subscribeSpy } } });
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeRun(id: string): EvaluationRun {
+  return {
+    id,
+    configId: 'cfg-1',
+    startedAt: 1000,
+    totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 0, calls: 0 },
+    generations: [[]],
+    cacheHits: 0,
+    version: '1.0',
+  } as EvaluationRun;
+}
+
+function makeNode(id: string, generation = 0, overrides: Partial<CandidateNode> = {}): CandidateNode {
+  return {
+    id,
+    generation,
+    lineageParents: [],
+    status: 'pending',
+    prompt: 'p',
+    params: { model: { provider: 'gemini', model: 'gemini-2.5-flash-lite' }, temperature: 0.7 },
+    changeLog: [],
+    ...overrides,
+  } as CandidateNode;
+}
+
+function reset(): void {
+  useEvaluationStore.setState({
+    evaluations: new Map(),
+    subscriptions: new Map(),
+    loading: new Set(),
+  });
+  capturedCallbacks = new Map();
+  unsubscribeSpies = new Map();
+  subscribeSpy.mockClear();
+}
+
+const store = () => useEvaluationStore.getState();
+
+// ---------------------------------------------------------------------------
+// Mutations
+// ---------------------------------------------------------------------------
+
+describe('evaluationStore mutations', () => {
+  beforeEach(reset);
+
+  it('setEvaluation stores a run retrievable by id', () => {
+    store().setEvaluation('run-1', makeRun('run-1'));
+    expect(store().evaluations.get('run-1')?.id).toBe('run-1');
+  });
+
+  it('updateNodeInEvaluation replaces an existing node immutably', () => {
+    store().setEvaluation('run-1', { ...makeRun('run-1'), generations: [[makeNode('n1')]] });
+    const before = store().evaluations.get('run-1')!;
+
+    store().updateNodeInEvaluation('run-1', makeNode('n1', 0, { status: 'finished' }));
+
+    const after = store().evaluations.get('run-1')!;
+    expect(after.generations[0][0].status).toBe('finished');
+    expect(after).not.toBe(before); // new object identity for React
+    expect(before.generations[0][0].status).toBe('pending'); // old state untouched
+  });
+
+  it('updateNodeInEvaluation adds unknown nodes, padding missing generations', () => {
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().updateNodeInEvaluation('run-1', makeNode('n9', 2));
+
+    const gens = store().evaluations.get('run-1')!.generations;
+    expect(gens).toHaveLength(3);
+    expect(gens[1]).toEqual([]);
+    expect(gens[2][0].id).toBe('n9');
+  });
+
+  it('updateNodeInEvaluation is a no-op for unknown evaluations', () => {
+    store().updateNodeInEvaluation('missing', makeNode('n1'));
+    expect(store().evaluations.size).toBe(0);
+  });
+
+  it('addGenerationToEvaluation sets the generation nodes wholesale', () => {
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().addGenerationToEvaluation('run-1', 1, [makeNode('a', 1), makeNode('b', 1)]);
+
+    const gens = store().evaluations.get('run-1')!.generations;
+    expect(gens[1].map(n => n.id)).toEqual(['a', 'b']);
+  });
+
+  it('updateTotals sets totals and cacheHits', () => {
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().updateTotals('run-1', { tokensPrompt: 5, tokensCompletion: 6, usd: 0.01, calls: 2 }, 3);
+
+    const run = store().evaluations.get('run-1')!;
+    expect(run.totals.usd).toBe(0.01);
+    expect(run.cacheHits).toBe(3);
+  });
+
+  it('updateStatus sets status and optional pause bookkeeping', () => {
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().updateStatus('run-1', 'paused', 1234, 999);
+
+    const run = store().evaluations.get('run-1')! as any;
+    expect(run.status).toBe('paused');
+    expect(run.totalPausedMs).toBe(1234);
+    expect(run.pausedAt).toBe(999);
+  });
+
+  it('setLoading tracks and clears loading state', () => {
+    store().setLoading('run-1', true);
+    expect(store().loading.has('run-1')).toBe(true);
+    store().setLoading('run-1', false);
+    expect(store().loading.has('run-1')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subscription lifecycle
+// ---------------------------------------------------------------------------
+
+describe('evaluationStore subscriptions', () => {
+  beforeEach(reset);
+
+  it('subscribe registers exactly one IPC subscription per evaluation', () => {
+    store().subscribe('run-1');
+    store().subscribe('run-1'); // duplicate — must be deduplicated
+
+    expect(subscribeSpy).toHaveBeenCalledTimes(1);
+    expect(store().subscriptions.size).toBe(1);
+  });
+
+  it('IPC updates flow through the captured callback into state', () => {
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().subscribe('run-1');
+
+    const cb = capturedCallbacks.get('run-1')!;
+    cb({}, { type: 'generation_created', generation: 1, nodes: [makeNode('g1n1', 1)] });
+    cb({}, { type: 'totals', totals: { tokensPrompt: 1, tokensCompletion: 2, usd: 0.5, calls: 9 }, cacheHits: 4 });
+
+    const run = store().evaluations.get('run-1')!;
+    expect(run.generations[1][0].id).toBe('g1n1');
+    expect(run.totals.calls).toBe(9);
+    expect(run.cacheHits).toBe(4);
+  });
+
+  it('malformed updates without a type are ignored', () => {
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().subscribe('run-1');
+
+    expect(() => capturedCallbacks.get('run-1')!({}, null)).not.toThrow();
+    expect(() => capturedCallbacks.get('run-1')!({}, {})).not.toThrow();
+  });
+
+  it('unsubscribe calls the cleanup function and forgets the subscription', () => {
+    store().subscribe('run-1');
+    store().unsubscribe('run-1');
+
+    expect(unsubscribeSpies.get('run-1')).toHaveBeenCalledTimes(1);
+    expect(store().subscriptions.size).toBe(0);
+
+    // Re-subscribing after unsubscribe works (not stuck deduplicated)
+    store().subscribe('run-1');
+    expect(subscribeSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('cleanup unsubscribes everything', () => {
+    store().subscribe('run-1');
+    store().subscribe('run-2');
+    store().cleanup();
+
+    expect(unsubscribeSpies.get('run-1')).toHaveBeenCalledTimes(1);
+    expect(unsubscribeSpies.get('run-2')).toHaveBeenCalledTimes(1);
+    expect(store().subscriptions.size).toBe(0);
+  });
+});
