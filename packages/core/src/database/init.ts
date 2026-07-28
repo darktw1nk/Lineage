@@ -359,13 +359,21 @@ function runMigrations(db: SqlJsWrapper): void {
 
   let version = currentVersion;
 
+  // Legacy DBs accumulated one schema_version row per migration ([1],[2]);
+  // a plain UPDATE would set them all to the same value and trip the UNIQUE
+  // constraint. Always collapse to a single canonical row instead.
+  const setVersion = (v: number): void => {
+    db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(v);
+  };
+
   // Migration 2: Update existing users from old model list to new one
   if (version === 1) {
     console.log('Running migration 2: Updating model costs to new models...');
     // Clear old models and insert new ones
     db.prepare('DELETE FROM model_costs').run();
     insertDefaultModelCosts(db);
-    db.prepare('UPDATE schema_version SET version = 2').run();
+    setVersion(2);
     console.log('Migration 2 completed - new models loaded');
     version = 2;
   }
@@ -377,7 +385,7 @@ function runMigrations(db: SqlJsWrapper): void {
     console.log('Running migration 3: Refreshing default model catalog...');
     db.prepare("DELETE FROM model_costs WHERE provider IN ('openai', 'anthropic', 'gemini')").run();
     insertDefaultModelCosts(db);
-    db.prepare('UPDATE schema_version SET version = 3').run();
+    setVersion(3);
     console.log('Migration 3 completed - model catalog refreshed');
     version = 3;
   }

@@ -53,4 +53,22 @@ describe('model catalog seeding', () => {
     expect((db.prepare("SELECT COUNT(*) as n FROM model_costs WHERE provider = 'openrouter'").get() as any).n).toBe(1);
     expect((db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get() as any).version).toBe(3);
   });
+
+  it('migration 3 survives legacy multi-row schema_version tables ([1],[2] like real desktop DBs)', async () => {
+    await initializeDatabase(tmpDb);
+    let db = getDatabase();
+
+    // Recreate the legacy state: two version rows, stale catalog
+    db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (1)').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (2)').run();
+    closeDatabase();
+
+    // Reopen — must not hit "UNIQUE constraint failed: schema_version.version"
+    await initializeDatabase(tmpDb);
+    db = getDatabase();
+
+    const rows = db.prepare('SELECT version FROM schema_version ORDER BY version').all() as any[];
+    expect(rows).toEqual([{ version: 3 }]);
+  });
 });
