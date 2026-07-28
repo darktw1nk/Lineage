@@ -16,6 +16,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
     apiKey: string;
     model: string;
     prompt: string;
+    system?: string;
     temperature: number;
     seed?: number;
     maxTokens?: number;
@@ -30,12 +31,15 @@ export class AnthropicAdapter extends BaseProviderAdapter {
       
       console.log(`[Anthropic] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
       
-      const body = {
+      const body: any = {
         model: opts.model,
         messages: [{ role: 'user', content: opts.prompt }],
         temperature: opts.temperature,
         max_tokens: opts.maxTokens ?? 4096,
       };
+      if (opts.system) {
+        body.system = opts.system;
+      }
       
       console.log(`[Anthropic] REQUEST:`, JSON.stringify(body, null, 2));
       

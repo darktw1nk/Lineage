@@ -17,6 +17,7 @@ export interface TestCase {
   prompt: string;
   expected?: string; // for exact_match; may be number/JSON as string
   image?: string; // absolute path to image file for vision-enabled tests
+  holdout?: boolean; // excluded from fitness; used for the final generalization report
   grading?: {
     strictZeroOnDeviation?: boolean; // if true, non-equal => 0 else distance-graded
     distanceMetric?: 'levenshtein' | 'json_diff' | 'numeric_abs';
@@ -33,6 +34,7 @@ export interface TestResult {
   rawResponsePath?: string; // persisted blob if raw capture enabled
   outputText?: string;
   llmGradeReasoning?: string; // raw LLM judge response for llm-graded tests
+  samples?: number[]; // individual sample scores when samplesPerTest > 1
 }
 
 export interface CandidateParams {
@@ -110,6 +112,10 @@ export interface EvaluationConfig {
   serviceModelMaxTokens: number; // Max tokens for ALL model calls (service + candidate)
   retries: number; // Number of retry attempts for JSON parsing failures (copied from global settings)
   providerOptions?: Record<string, any>; // Extra options passed to candidate model calls (e.g. reasoning_effort)
+  promptMode?: 'system' | 'inline'; // default 'system': candidate prompt as system message
+  samplesPerTest?: number;          // default 1 (clamped 1..10): samples averaged per test
+  holdoutShare?: number;            // default 0: seeded share of non-flagged tests held out
+  holdoutSeed?: number;             // default 42: PRNG seed for the share split
 }
 
 export interface EvaluationRun {
@@ -122,6 +128,13 @@ export interface EvaluationRun {
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
   generations: CandidateNode[][]; // 2D grid
   cacheHits: number;
+  holdout?: {
+    testIds: UUID[];
+    samplesPerTest: number;
+    seed?: { score: number; perTest: Array<{ testId: UUID; score: number }> };
+    champion?: { score: number; perTest: Array<{ testId: UUID; score: number }> };
+    skipped?: 'budget' | 'no-champion';
+  };
   version: string; // schema version
   totalPausedMs?: number; // Total time spent paused (for accurate elapsed time display)
   pausedAt?: number; // Timestamp when currently paused (if status is 'paused')
@@ -188,6 +201,7 @@ export interface ProviderAdapter {
   call(opts: {
     model: string;
     prompt: string;
+    system?: string; // sent via the provider's native system mechanism when present
     temperature: number;
     seed?: number;
     maxTokens?: number;

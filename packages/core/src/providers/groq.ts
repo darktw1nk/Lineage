@@ -15,6 +15,7 @@ export class GroqAdapter extends BaseProviderAdapter {
     apiKey: string;
     model: string;
     prompt: string;
+    system?: string;
     temperature: number;
     seed?: number;
     maxTokens?: number;
@@ -30,7 +31,10 @@ export class GroqAdapter extends BaseProviderAdapter {
 
       const body: any = {
         model: opts.model,
-        messages: [{ role: 'user', content: opts.prompt }],
+        messages: [
+          ...(opts.system ? [{ role: 'system', content: opts.system }] : []),
+          { role: 'user', content: opts.prompt },
+        ],
         temperature: opts.temperature,
         max_tokens: opts.maxTokens ?? 4096,
         ...(opts.providerOptions || {}),

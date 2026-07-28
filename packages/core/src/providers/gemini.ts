@@ -16,6 +16,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
     apiKey: string;
     model: string;
     prompt: string;
+    system?: string;
     temperature: number;
     seed?: number;
     maxTokens?: number;
@@ -29,13 +30,16 @@ export class GeminiAdapter extends BaseProviderAdapter {
       const startTime = Date.now();
       console.log(`[Gemini] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
       
-      const body = {
+      const body: any = {
         contents: [{ parts: [{ text: opts.prompt }] }],
         generationConfig: {
           temperature: opts.temperature,
           maxOutputTokens: opts.maxTokens ?? 4096,
         },
       };
+      if (opts.system) {
+        body.systemInstruction = { parts: [{ text: opts.system }] };
+      }
       
       console.log(`[Gemini] REQUEST:`, JSON.stringify(body, null, 2));
       

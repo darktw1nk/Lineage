@@ -16,6 +16,7 @@ export class OpenAIAdapter extends BaseProviderAdapter {
     apiKey: string;
     model: string;
     prompt: string;
+    system?: string;
     temperature: number;
     seed?: number;
     maxTokens?: number;
@@ -58,7 +59,10 @@ export class OpenAIAdapter extends BaseProviderAdapter {
 
       const body: any = {
         model: opts.model,
-        messages: [{ role: 'user', content: messageContent }],
+        messages: [
+          ...(opts.system ? [{ role: 'system', content: opts.system }] : []),
+          { role: 'user', content: messageContent },
+        ],
       };
       
       // Handle temperature/seed based on model capabilities

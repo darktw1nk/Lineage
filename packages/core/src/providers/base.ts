@@ -11,6 +11,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     apiKey: string;
     model: string;
     prompt: string;
+    system?: string;
     temperature: number;
     seed?: number;
     maxTokens?: number;
