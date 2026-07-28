@@ -1,6 +1,6 @@
 import { BaseProviderAdapter } from './base.js';
 import type { Provider } from '../types.js';
-import { withRetry, RetryableError } from './retry.js';
+import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
 export class GeminiAdapter extends BaseProviderAdapter {
@@ -20,12 +20,14 @@ export class GeminiAdapter extends BaseProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    timeoutMs?: number;
   }): Promise<{
     output: string;
     promptTokens: number;
     completionTokens: number;
     latencyMs: number;
   }> {
+    const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_CALL_TIMEOUT_MS;
     return withRetry(async () => {
       const startTime = Date.now();
       console.log(`[Gemini] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
@@ -44,7 +46,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
       
       console.log(`[Gemini] REQUEST:`, JSON.stringify(body, null, 2));
       
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent`,
         {
           method: 'POST',
@@ -53,7 +55,8 @@ export class GeminiAdapter extends BaseProviderAdapter {
             'x-goog-api-key': opts.apiKey,
           },
           body: JSON.stringify(body),
-        }
+        },
+        timeoutMs
       );
       
       console.log(`[Gemini] Response status: ${response.status} ${response.statusText}`);

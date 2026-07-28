@@ -210,6 +210,7 @@ export interface ProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    timeoutMs?: number; // per-attempt abort timeout; absent/<=0 => 120s default
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string }>;
   }): Promise<{

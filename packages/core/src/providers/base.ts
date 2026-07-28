@@ -15,6 +15,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    timeoutMs?: number;
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
@@ -30,6 +31,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    timeoutMs?: number;
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{

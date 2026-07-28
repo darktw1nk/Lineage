@@ -1,6 +1,6 @@
 import { BaseProviderAdapter } from './base.js';
 import type { Provider } from '../types.js';
-import { withRetry, RetryableError } from './retry.js';
+import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
 export class OpenAIAdapter extends BaseProviderAdapter {
@@ -20,6 +20,7 @@ export class OpenAIAdapter extends BaseProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    timeoutMs?: number;
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
@@ -28,6 +29,7 @@ export class OpenAIAdapter extends BaseProviderAdapter {
     completionTokens: number;
     latencyMs: number;
   }> {
+    const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_CALL_TIMEOUT_MS;
     return withRetry(async () => {
       const startTime = Date.now();
       
@@ -87,14 +89,14 @@ export class OpenAIAdapter extends BaseProviderAdapter {
       
       let response;
       try {
-        response = await fetch('https://api.openai.com/v1/chat/completions', {
+        response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${opts.apiKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(body),
-        });
+        }, timeoutMs);
       } catch (fetchError: any) {
         console.error(`[OpenAI] Fetch failed:`, fetchError);
         console.error(`[OpenAI] Error details:`, {

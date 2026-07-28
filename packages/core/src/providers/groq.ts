@@ -1,6 +1,6 @@
 import { BaseProviderAdapter } from './base.js';
 import type { Provider } from '../types.js';
-import { withRetry, RetryableError } from './retry.js';
+import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
 export class GroqAdapter extends BaseProviderAdapter {
@@ -19,6 +19,7 @@ export class GroqAdapter extends BaseProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    timeoutMs?: number;
     providerOptions?: Record<string, any>;
   }): Promise<{
     output: string;
@@ -26,6 +27,7 @@ export class GroqAdapter extends BaseProviderAdapter {
     completionTokens: number;
     latencyMs: number;
   }> {
+    const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_CALL_TIMEOUT_MS;
     return withRetry(async () => {
       const startTime = Date.now();
 
@@ -48,14 +50,14 @@ export class GroqAdapter extends BaseProviderAdapter {
 
       let response;
       try {
-        response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${opts.apiKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(body),
-        });
+        }, timeoutMs);
       } catch (fetchError: any) {
         console.error(`[Groq] Fetch failed:`, fetchError.message);
         throw new Error(`Groq fetch failed: ${fetchError.message}`);

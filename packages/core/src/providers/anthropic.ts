@@ -1,6 +1,6 @@
 import { BaseProviderAdapter } from './base.js';
 import type { Provider } from '../types.js';
-import { withRetry, RetryableError } from './retry.js';
+import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
 export class AnthropicAdapter extends BaseProviderAdapter {
@@ -20,12 +20,14 @@ export class AnthropicAdapter extends BaseProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    timeoutMs?: number;
   }): Promise<{
     output: string;
     promptTokens: number;
     completionTokens: number;
     latencyMs: number;
   }> {
+    const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_CALL_TIMEOUT_MS;
     return withRetry(async () => {
       const startTime = Date.now();
       
@@ -43,7 +45,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
       
       console.log(`[Anthropic] REQUEST:`, JSON.stringify(body, null, 2));
       
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'x-api-key': opts.apiKey,
@@ -51,7 +53,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
-      });
+      }, timeoutMs);
       
       console.log(`[Anthropic] Response status: ${response.status} ${response.statusText}`);
       
