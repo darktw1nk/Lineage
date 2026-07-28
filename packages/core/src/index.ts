@@ -33,6 +33,7 @@ export {
 } from './registry.js';
 export { BaseProviderAdapter } from './providers/base.js';
 export { loadPlugins } from './pluginLoader.js';
+export { partitionTestSet } from './engine/holdout.js';
 export type { LoadPluginsOptions } from './pluginLoader.js';
 export type {
   OperatorContext, OperatorResult, OperatorPlugin, ProviderPlugin, PluginManifest,
