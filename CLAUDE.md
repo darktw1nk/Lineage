@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **PromptEngine.AI** — An Electron desktop app that evolves LLM prompts using genetic algorithms. Users configure a test set with fitness metrics (quality, safety, cost, latency, stability), and the app evaluates candidate prompts in parallel across multiple LLM providers (OpenAI, Anthropic, Google Gemini), visualizing the evolution as a generation lineage graph.
 
 **Stack**: Electron 28 + React 18 + TypeScript 5 + Vite 5 + Zustand + TanStack React Query + Tailwind CSS + React Flow + shadcn/ui
-**Backend**: Node.js with SQLite (better-sqlite3), keytar for OS-level credential storage
+**Backend**: Node.js with SQLite (sql.js — WebAssembly, no native modules), electron-store for settings
 
 ## Commands
 
@@ -33,7 +33,7 @@ Tests use Vitest and live in `tests/unit/`. Run a single test file with `npx vit
 Renderer (React)  <--IPC-->  Main Process (Node.js)
    Zustand store               GA Engine + Providers + SQLite
    React Flow graph             Rate limiter + Semaphore
-   shadcn/ui components         keytar (API key storage)
+   shadcn/ui components         electron-store (settings)
 ```
 
 - **Renderer → Main**: `window.electronAPI.*` calls via context bridge (`electron/preload.ts`)
@@ -67,7 +67,7 @@ Abstract adapter pattern: `base.ts` defines the interface; `openai.ts`, `anthrop
 
 ### Persistence (`electron/database/`)
 
-SQLite via better-sqlite3. Tables: `evaluation_configs`, `evaluation_runs`, `candidate_nodes`, `model_costs`, `app_settings`, `cost_ledger`. Schema + migrations in `init.ts`.
+SQLite via sql.js (WebAssembly). `SqlJsWrapper` in `init.ts` provides a better-sqlite3-compatible API (`exec`, `prepare`, `transaction`). Tables: `evaluation_configs`, `evaluation_runs`, `candidate_nodes`, `model_costs`, `app_settings`, `cost_ledger`. Schema + migrations in `init.ts`.
 
 ### IPC Handlers (`electron/ipc/handlers.ts`)
 
@@ -79,5 +79,5 @@ All IPC endpoints: `eval:create`, `eval:start`, `eval:pause`, `eval:resume`, `ev
 - React components: PascalCase files. Utilities/hooks: camelCase files.
 - UI primitives from shadcn/ui live in `src/components/ui/`
 - CSS: Tailwind utility classes + HSL CSS variables defined in `src/index.css`
-- API keys are stored via keytar (OS keychain), never in plain config
+- API keys are stored via electron-store
 - Every LLM API call is tracked for cost in the evaluation's totals and cost ledger

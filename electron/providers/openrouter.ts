@@ -27,6 +27,8 @@ export class OpenRouterAdapter extends BaseProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    providerOptions?: Record<string, any>;
+    images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
     output: string;
     promptTokens: number;
@@ -36,9 +38,25 @@ export class OpenRouterAdapter extends BaseProviderAdapter {
     return withRetry(async () => {
       const startTime = Date.now();
 
+      // Build message content — text-only or multimodal with images
+      let messageContent: any;
+      if (opts.images && opts.images.length > 0) {
+        const parts: any[] = opts.images.map(img => ({
+          type: 'image_url',
+          image_url: {
+            url: `data:${img.mimeType};base64,${img.base64}`,
+            detail: img.detail ?? 'auto',
+          },
+        }));
+        parts.push({ type: 'text', text: opts.prompt });
+        messageContent = parts;
+      } else {
+        messageContent = opts.prompt;
+      }
+
       const body: any = {
         model: opts.model,
-        messages: [{ role: 'user', content: opts.prompt }],
+        messages: [{ role: 'user', content: messageContent }],
         temperature: opts.temperature,
         max_tokens: opts.maxTokens ?? 4096,
       };
@@ -47,7 +65,16 @@ export class OpenRouterAdapter extends BaseProviderAdapter {
         body.seed = opts.seed;
       }
 
-      console.log(`[OpenRouter] Calling model: ${opts.model}, temperature: ${body.temperature}`);
+      // Translate providerOptions for OpenRouter's API format
+      if (opts.providerOptions) {
+        const { reasoning_effort, ...rest } = opts.providerOptions;
+        if (reasoning_effort) {
+          body.reasoning = { effort: reasoning_effort };
+        }
+        Object.assign(body, rest);
+      }
+
+      console.log(`[OpenRouter] Calling model: ${opts.model}, temperature: ${body.temperature}${body.reasoning ? `, reasoning: ${JSON.stringify(body.reasoning)}` : ''}`);
 
       let response;
       try {

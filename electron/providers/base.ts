@@ -14,19 +14,23 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    providerOptions?: Record<string, any>;
+    images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
     output: string;
     promptTokens: number;
     completionTokens: number;
     latencyMs: number;
   }>;
-  
+
   async call(opts: {
     model: string;
     prompt: string;
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    providerOptions?: Record<string, any>;
+    images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
     output: string;
     promptTokens: number;

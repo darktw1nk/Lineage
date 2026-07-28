@@ -1,7 +1,7 @@
 // Core Types for Prompt Evolution Application
 
 export type UUID = string;
-export type Provider = 'openai' | 'anthropic' | 'gemini' | 'openrouter';
+export type Provider = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'groq';
 
 export interface ModelRef {
   provider: Provider;
@@ -16,6 +16,7 @@ export interface TestCase {
   mode: 'llm_grade' | 'exact_match';
   prompt: string;
   expected?: string; // for exact_match; may be number/JSON as string
+  image?: string; // absolute path to image file for vision-enabled tests
   grading?: {
     strictZeroOnDeviation?: boolean; // if true, non-equal => 0 else distance-graded
     distanceMetric?: 'levenshtein' | 'json_diff' | 'numeric_abs';
@@ -107,6 +108,7 @@ export interface EvaluationConfig {
   parallelLimit: number;  // global N
   serviceModelMaxTokens: number; // Max tokens for ALL model calls (service + candidate)
   retries: number; // Number of retry attempts for JSON parsing failures (copied from global settings)
+  providerOptions?: Record<string, any>; // Extra options passed to candidate model calls (e.g. reasoning_effort)
 }
 
 export interface EvaluationRun {
@@ -133,12 +135,6 @@ export interface ModelCostEntry {
 
 export interface AppSettings {
   globalParallelLimit: number;
-  perProviderLimits?: {
-    openai?: { rpm?: number; tpm?: number };
-    anthropic?: { rpm?: number; tpm?: number };
-    gemini?: { rpm?: number; tpm?: number };
-    openrouter?: { rpm?: number; tpm?: number };
-  };
   serviceModel: ModelRef;
   serviceModelMaxTokens: number; // Max tokens for service model calls (mutations, grading, safety)
   retries: number; // Global retry limit for JSON parsing and other non-network failures (default: 3)
@@ -154,6 +150,7 @@ export interface ProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    providerOptions?: Record<string, any>;
   }): Promise<{
     output: string;
     promptTokens: number;

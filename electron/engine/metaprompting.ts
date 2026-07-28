@@ -9,24 +9,27 @@ import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../../src/t
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
 
-const DEFAULT_METAPROMPT_WITH_FAILURES = `SYSTEM: You are a prompt surgeon. Suggest surgical changes to improve the prompt based on failures.
+const DEFAULT_METAPROMPT_WITH_FAILURES = `SYSTEM: You are a prompt surgeon. You analyze concrete test failures to suggest targeted fixes. You can ADD, REMOVE, or REWRITE any part of the prompt — including removing instructions that conflict with what the tests require.
 USER: Parent Prompt: <<<
 \${parentPrompt}
 >>>
-Top failures: \${failureSummary}
 
-Analyze these failures and suggest 1-3 targeted edits to address them.
+FAILED/LOW-SCORING TESTS (worst first):
+\${failureSummary}
+
+Analyze the specific failure reasons above. Identify which parts of the prompt cause these failures — sometimes the prompt actively instructs something the tests penalize.
+Suggest 1-3 targeted edits. Be bold: if a line in the prompt conflicts with what grading rewards, REMOVE or REPLACE it.
 Return JSON edits: [{"label":"META","edit":"..."}]`;
 
-const DEFAULT_METAPROMPT_WITHOUT_FAILURES = `SYSTEM: You are a prompt surgeon. Suggest surgical improvements to make the prompt even better.
+const DEFAULT_METAPROMPT_WITHOUT_FAILURES = `SYSTEM: You are a prompt surgeon. Even when all tests pass, you find the weakest areas and improve them. You can ADD, REMOVE, or REWRITE any part of the prompt.
 USER: Parent Prompt: <<<
 \${parentPrompt}
 >>>
-This prompt is performing well with no test failures. Suggest 1-3 refinements to further improve:
-- Clarity and precision
-- Edge case handling
-- Output quality
 
+LOWEST-SCORING TESTS (room for improvement):
+\${failureSummary}
+
+These tests pass but score below perfect. Analyze the grading feedback and suggest 1-3 targeted edits to push scores higher.
 Return JSON edits: [{"label":"META","edit":"..."}]`;
 
 const DEFAULT_METAPROMPT_APPLY = `SYSTEM: You apply edit instructions to a prompt faithfully.
@@ -35,6 +38,73 @@ USER: Original: <<<
 >>>
 Edits: \${edits}
 Produce the NEW prompt ONLY.`;
+
+/**
+ * Build a rich failure summary from the parent's own test results.
+ * Sorts tests by score ascending, takes the worst N, and includes
+ * test name, score, input (truncated), output (truncated), and grading justification.
+ */
+function buildFailureSummary(parent: CandidateNode, config: EvaluationConfig, maxTests: number = 5): string {
+  if (!parent.tests || parent.tests.length === 0) {
+    return '(No test results available)';
+  }
+
+  // Build a testId → TestCase lookup from config
+  const testLookup = new Map<string, { name: string; prompt: string; expected?: string }>();
+  if (config.testSet) {
+    for (const tc of config.testSet) {
+      testLookup.set(tc.id, { name: tc.name, prompt: tc.prompt, expected: tc.expected });
+    }
+  }
+
+  // Sort by score ascending (worst first), take bottom N
+  const sorted = [...parent.tests].sort((a, b) => a.score - b.score).slice(0, maxTests);
+
+  const lines: string[] = [];
+  for (const test of sorted) {
+    const tc = testLookup.get(test.testId);
+    const name = tc?.name || 'Unknown test';
+    const input = truncate(tc?.prompt || '', 200);
+    const output = truncate(test.outputText || '', 300);
+    const expected = tc?.expected ? truncate(tc.expected, 200) : null;
+    const justification = extractJustification(test.llmGradeReasoning || '');
+
+    lines.push(`--- Test: "${name}" — Score: ${test.score}/10 ${test.passed ? '(PASS)' : '(FAIL)'}`);
+    lines.push(`Input: ${input}`);
+    if (expected) {
+      lines.push(`Expected: ${expected}`);
+    }
+    lines.push(`Actual output: ${output}`);
+    if (justification) {
+      lines.push(`Grading feedback: ${justification}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+function truncate(text: string, maxLen: number): string {
+  const oneLine = text.replace(/\n/g, ' ').trim();
+  if (oneLine.length <= maxLen) return oneLine;
+  return oneLine.slice(0, maxLen) + '...';
+}
+
+function extractJustification(reasoning: string): string {
+  if (!reasoning) return '';
+  try {
+    // Strip markdown code blocks if present
+    let jsonText = reasoning.trim();
+    if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+    }
+    const parsed = JSON.parse(jsonText);
+    return parsed.justification || '';
+  } catch {
+    // If not JSON, return as-is (truncated)
+    return truncate(reasoning, 200);
+  }
+}
 
 /**
  * Load metaprompt templates from storage or use defaults
@@ -87,19 +157,12 @@ export async function metaPromptNode(
   let totalUsd = 0;
   let totalCalls = 0;
   
-  // Extract top 3 failures from generation
-  const failed = generation
-    .filter(n => n.tests && n.tests.some(t => !t.passed))
-    .slice(0, 3)
-    .map(n => {
-      const failedTests = n.tests!.filter(t => !t.passed);
-      return `${failedTests.length} tests failed with avg score ${(failedTests.reduce((s, t) => s + t.score, 0) / failedTests.length).toFixed(1)}`;
-    });
-  
-  const hasFailures = failed.length > 0;
-  const failureSummary = failed.join(', ');
-  
-  console.log(`[MetaPrompt] ${hasFailures ? `Failures found: ${failureSummary}` : 'No failures found, suggesting general improvements'}`);
+  // Build rich failure details from the PARENT's own test results
+  const failureDetails = buildFailureSummary(parent, config);
+  const hasFailures = parent.tests ? parent.tests.some(t => !t.passed) : false;
+
+  console.log(`[MetaPrompt] ${hasFailures ? 'Parent has failing tests' : 'All tests passing, showing lowest scores'}`);
+  console.log(`[MetaPrompt] Failure summary length: ${failureDetails.length} chars`);
   
   // Load prompt templates
   const templates = getMetapromptTemplates();
@@ -109,10 +172,11 @@ export async function metaPromptNode(
   if (hasFailures) {
     metaPrompt = templates.withFailures
       .replace(/\$\{parentPrompt\}/g, parent.prompt)
-      .replace(/\$\{failureSummary\}/g, failureSummary);
+      .replace(/\$\{failureSummary\}/g, failureDetails);
   } else {
     metaPrompt = templates.withoutFailures
-      .replace(/\$\{parentPrompt\}/g, parent.prompt);
+      .replace(/\$\{parentPrompt\}/g, parent.prompt)
+      .replace(/\$\{failureSummary\}/g, failureDetails);
   }
   
   const proposalResult = await serviceAdapter.call({

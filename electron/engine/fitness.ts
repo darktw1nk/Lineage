@@ -371,7 +371,8 @@ export async function evaluateTestResultLLM(
   const evaluationPrompt = promptTemplate
     .replace(/\$\{candidatePrompt\}/g, candidatePrompt)
     .replace(/\$\{testPrompt\}/g, testPrompt)
-    .replace(/\$\{modelOutput\}/g, modelOutput);
+    .replace(/\$\{modelOutput\}/g, modelOutput)
+    .replace(/\$\{expectedOutput\}/g, testCase.expected || '(none)');
 
   let result;
   try {
@@ -411,7 +412,7 @@ export async function evaluateTestResultLLM(
     // Parse JSON response
     const parsed = JSON.parse(jsonText);
     const score = Math.max(0, Math.min(10, parsed.score || 0));
-    
+
     return {
       passed: score >= 7,
       score,
@@ -423,15 +424,34 @@ export async function evaluateTestResultLLM(
   } catch (error) {
     console.error('LLM grading failed:', error);
     console.error('[LLM Grading] Failed on output:', result?.output);
-    // Fallback to neutral score
-    return { 
-      passed: false, 
+
+    // Regex fallback: try to extract score from malformed/truncated JSON
+    const rawText = result?.output || '';
+    const scoreMatch = rawText.match(/"score"\s*:\s*(\d+(?:\.\d+)?)/);
+    if (scoreMatch) {
+      const extractedScore = Math.max(0, Math.min(10, parseFloat(scoreMatch[1])));
+      console.log(`[LLM Grading] Regex fallback extracted score: ${extractedScore}`);
+      return {
+        passed: extractedScore >= 7,
+        score: extractedScore,
+        usd: result?.usd || 0,
+        promptTokens: result?.promptTokens || 0,
+        completionTokens: result?.completionTokens || 0,
+        reasoning: `${rawText}\n\n(score extracted via regex fallback)`,
+        _parseError: true,
+      } as any;
+    }
+
+    // Complete failure — no score recoverable
+    return {
+      passed: false,
       score: 5,
       usd: result?.usd || 0,
       promptTokens: result?.promptTokens || 0,
       completionTokens: result?.completionTokens || 0,
-      reasoning: `Error parsing LLM response: ${error instanceof Error ? error.message : String(error)}\n\nRaw output: ${result?.output || 'N/A'}`,
-    };
+      reasoning: `Error parsing LLM response: ${error instanceof Error ? error.message : String(error)}\n\nRaw output: ${rawText}`,
+      _parseError: true,
+    } as any;
   }
 }
 

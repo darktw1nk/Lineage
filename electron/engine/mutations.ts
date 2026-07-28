@@ -38,21 +38,29 @@ const DEFAULT_MUTATION_STRATEGIES = {
     'Add length constraints (tokens/words)',
     'Force field-by-field validation hints (e.g., JSON schema embedded)',
   ],
+  removal: [
+    'Identify and REMOVE instructions that may be counterproductive or conflict with the intended task',
+    'Delete vague/ambiguous lines that could be misinterpreted by the model',
+    'Remove overly cautious constraints that prevent the model from making necessary changes',
+  ],
+  rewrite: [
+    'Rewrite the role/identity statement to better align with the actual task requirements',
+    'Replace a passive/vague instruction with a specific, actionable one',
+  ],
 };
 
-const DEFAULT_PROPOSAL_PROMPT = `SYSTEM: You will get a prompt from a user, 
-  propose SMALL, PRECISE mutations to improve a prompt based on strategies below.
+const DEFAULT_PROPOSAL_PROMPT = `SYSTEM: You propose mutations to improve a prompt. The prompt you receive may be partially effective, ineffective, or even counterproductive — do NOT assume it is good. You can ADD, REMOVE, REWRITE, or RESTRUCTURE any part of it.
 
 Apply these specific mutation strategies:
 \${strategiesList}
-  
-For each strategy above, propose a concrete edit. 
+
+For each strategy above, propose a concrete edit. Edits can include REMOVING lines that hurt performance, not just adding new ones.
 
 Return JSON list with the category prefix preserved:
 [{"label":"MUTATION","edit":"[Category] Specific change description"}]
-Always answer in JSON format, not simple text, json. 
-IMPORTANT: Keep the [Category] prefix from each strategy in your edit descriptions. 
-  
+Always answer in JSON format, not simple text, json.
+IMPORTANT: Keep the [Category] prefix from each strategy in your edit descriptions.
+
 USER: Candidate prompt: <<<
 \${basePrompt}
 >>>`;

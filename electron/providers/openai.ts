@@ -19,6 +19,8 @@ export class OpenAIAdapter extends BaseProviderAdapter {
     temperature: number;
     seed?: number;
     maxTokens?: number;
+    providerOptions?: Record<string, any>;
+    images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
     output: string;
     promptTokens: number;
@@ -36,9 +38,27 @@ export class OpenAIAdapter extends BaseProviderAdapter {
       // o1 and gpt-5 models have strict temperature requirements
       const hasTemperatureRestrictions = opts.model.includes('o1') || opts.model.includes('gpt-5');
       
+      // Build message content — text-only or multimodal with images
+      let messageContent: any;
+      if (opts.images && opts.images.length > 0) {
+        const parts: any[] = [{ type: 'text', text: opts.prompt }];
+        for (const img of opts.images) {
+          parts.push({
+            type: 'image_url',
+            image_url: {
+              url: `data:${img.mimeType};base64,${img.base64}`,
+              detail: img.detail ?? 'auto',
+            },
+          });
+        }
+        messageContent = parts;
+      } else {
+        messageContent = opts.prompt;
+      }
+
       const body: any = {
         model: opts.model,
-        messages: [{ role: 'user', content: opts.prompt }],
+        messages: [{ role: 'user', content: messageContent }],
       };
       
       // Handle temperature/seed based on model capabilities

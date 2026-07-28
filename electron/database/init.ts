@@ -1,42 +1,221 @@
-import Database from 'better-sqlite3';
+import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import path from 'path';
-import { app } from 'electron';
 import fs from 'fs';
 
-let db: Database.Database | null = null;
+// ---------------------------------------------------------------------------
+// SqlJsWrapper — drop-in replacement for better-sqlite3's API surface
+// ---------------------------------------------------------------------------
 
-export function getDatabase(): Database.Database {
+class WrappedStatement {
+  constructor(
+    private _wrapper: SqlJsWrapper,
+    private _sql: string,
+  ) {}
+
+  run(...params: unknown[]): { changes: number } {
+    const flat = flattenParams(params);
+    try {
+      this._wrapper._db.run(this._sql, flat);
+    } catch (err) {
+      throwCompatError(err);
+    }
+    const changes = this._wrapper._db.getRowsModified();
+    this._wrapper._scheduleSave();
+    return { changes };
+  }
+
+  get(...params: unknown[]): unknown {
+    const flat = flattenParams(params);
+    let stmt;
+    try {
+      stmt = this._wrapper._db.prepare(this._sql);
+      if (flat.length > 0) stmt.bind(flat);
+      if (stmt.step()) {
+        return stmt.getAsObject();
+      }
+      return undefined;
+    } catch (err) {
+      throwCompatError(err);
+    } finally {
+      stmt?.free();
+    }
+  }
+
+  all(...params: unknown[]): unknown[] {
+    const flat = flattenParams(params);
+    let stmt;
+    try {
+      stmt = this._wrapper._db.prepare(this._sql);
+      if (flat.length > 0) stmt.bind(flat);
+      const rows: unknown[] = [];
+      while (stmt.step()) {
+        rows.push(stmt.getAsObject());
+      }
+      return rows;
+    } catch (err) {
+      throwCompatError(err);
+    } finally {
+      stmt?.free();
+    }
+    return []; // unreachable, satisfies TS
+  }
+}
+
+/** Flatten the variadic args callers pass, e.g. `.run(a, b, c)` → `[a, b, c]` */
+function flattenParams(params: unknown[]): (string | number | Uint8Array | null)[] {
+  if (params.length === 0) return [];
+  // If first arg is already an array, use it directly
+  if (Array.isArray(params[0])) return params[0];
+  return params as (string | number | Uint8Array | null)[];
+}
+
+/** Convert sql.js errors to better-sqlite3–compatible error objects */
+function throwCompatError(err: unknown): never {
+  if (err instanceof Error) {
+    if (err.message.includes('UNIQUE constraint')) {
+      (err as Error & { code: string }).code = 'SQLITE_CONSTRAINT';
+    }
+  }
+  throw err;
+}
+
+export class SqlJsWrapper {
+  _db: SqlJsDatabase;
+  private _dbPath: string;
+  private _saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(db: SqlJsDatabase, dbPath: string) {
+    this._db = db;
+    this._dbPath = dbPath;
+  }
+
+  exec(sql: string): void {
+    this._db.run(sql);
+    this._scheduleSave();
+  }
+
+  pragma(str: string): unknown {
+    const results = this._db.exec(`PRAGMA ${str}`);
+    if (results.length > 0 && results[0].values.length > 0) {
+      return results[0].values[0][0];
+    }
+    return undefined;
+  }
+
+  prepare(sql: string): WrappedStatement {
+    return new WrappedStatement(this, sql);
+  }
+
+  transaction<T extends (...args: any[]) => any>(fn: T): T {
+    const wrapper = this;
+    const wrapped = ((...args: unknown[]) => {
+      wrapper._db.run('BEGIN');
+      try {
+        const result = fn(...args);
+        wrapper._db.run('COMMIT');
+        wrapper._flushSave();
+        return result;
+      } catch (err) {
+        wrapper._db.run('ROLLBACK');
+        throw err;
+      }
+    }) as unknown as T;
+    return wrapped;
+  }
+
+  /** Schedule a debounced save (50ms) */
+  _scheduleSave(): void {
+    if (this._saveTimer) return;
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = null;
+      this._saveToDisk();
+    }, 50);
+  }
+
+  /** Flush any pending save immediately */
+  _flushSave(): void {
+    if (this._saveTimer) {
+      clearTimeout(this._saveTimer);
+      this._saveTimer = null;
+    }
+    this._saveToDisk();
+  }
+
+  private _saveToDisk(): void {
+    const data = this._db.export();
+    fs.writeFileSync(this._dbPath, Buffer.from(data));
+  }
+
+  close(): void {
+    this._flushSave();
+    this._db.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Module-level singleton
+// ---------------------------------------------------------------------------
+
+let db: SqlJsWrapper | null = null;
+
+export function getDatabase(): SqlJsWrapper {
   if (!db) {
     throw new Error('Database not initialized');
   }
   return db;
 }
 
-export async function initializeDatabase(): Promise<void> {
-  const userDataPath = app.getPath('userData');
-  const dbPath = path.join(userDataPath, 'evolution.db');
-  
+export async function initializeDatabase(customDbPath?: string): Promise<void> {
+  let dbPath: string;
+  if (customDbPath) {
+    dbPath = customDbPath;
+  } else {
+    // Dynamic import so CLI can skip Electron dependency when providing customDbPath
+    const { app } = await import('electron');
+    const userDataPath = app.getPath('userData');
+    dbPath = path.join(userDataPath, 'evolution.db');
+  }
+
   // Ensure directory exists
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  
-  db = new Database(dbPath);
+
+  // Initialize sql.js WASM engine
+  const SQL = await initSqlJs();
+
+  // Load existing database file if present, otherwise create new
+  let sqlDb: SqlJsDatabase;
+  if (fs.existsSync(dbPath)) {
+    const fileBuffer = fs.readFileSync(dbPath);
+    sqlDb = new SQL.Database(fileBuffer);
+  } else {
+    sqlDb = new SQL.Database();
+  }
+
+  db = new SqlJsWrapper(sqlDb, dbPath);
   db.pragma('journal_mode = WAL');
-  
+
   // Create tables
   createTables(db);
-  
+
   // Run migrations if needed
   runMigrations(db);
 }
 
-function createTables(db: Database.Database): void {
+export function closeDatabase(): void {
+  if (db) {
+    db.close();
+    db = null;
+  }
+}
+
+function createTables(db: SqlJsWrapper): void {
   // Schema version
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY
     );
   `);
-  
+
   // Model costs table
   db.exec(`
     CREATE TABLE IF NOT EXISTS model_costs (
@@ -47,7 +226,7 @@ function createTables(db: Database.Database): void {
       PRIMARY KEY (provider, model)
     );
   `);
-  
+
   // App settings
   db.exec(`
     CREATE TABLE IF NOT EXISTS app_settings (
@@ -55,7 +234,7 @@ function createTables(db: Database.Database): void {
       value TEXT NOT NULL
     );
   `);
-  
+
   // Evaluation configs
   db.exec(`
     CREATE TABLE IF NOT EXISTS evaluation_configs (
@@ -65,7 +244,7 @@ function createTables(db: Database.Database): void {
       created_at INTEGER NOT NULL
     );
   `);
-  
+
   // Evaluation runs
   db.exec(`
     CREATE TABLE IF NOT EXISTS evaluation_runs (
@@ -79,7 +258,7 @@ function createTables(db: Database.Database): void {
       FOREIGN KEY (config_id) REFERENCES evaluation_configs(id)
     );
   `);
-  
+
   // Candidate nodes (for querying)
   db.exec(`
     CREATE TABLE IF NOT EXISTS candidate_nodes (
@@ -92,7 +271,7 @@ function createTables(db: Database.Database): void {
       FOREIGN KEY (run_id) REFERENCES evaluation_runs(id)
     );
   `);
-  
+
   // Cost ledger
   db.exec(`
     CREATE TABLE IF NOT EXISTS cost_ledger (
@@ -108,7 +287,7 @@ function createTables(db: Database.Database): void {
       FOREIGN KEY (run_id) REFERENCES evaluation_runs(id)
     );
   `);
-  
+
   // Raw response blobs
   db.exec(`
     CREATE TABLE IF NOT EXISTS raw_blobs (
@@ -121,13 +300,13 @@ function createTables(db: Database.Database): void {
       FOREIGN KEY (run_id) REFERENCES evaluation_runs(id)
     );
   `);
-  
+
   // Insert default model costs if table is empty
   // Check and run migrations first - this will handle model costs
   runMigrations(db);
 }
 
-function insertDefaultModelCosts(db: Database.Database): void {
+function insertDefaultModelCosts(db: SqlJsWrapper): void {
   const defaults = [
     // OpenAI (prices per million tokens)
     { provider: 'openai', model: 'gpt-5', promptUSD: 1.25, completionUSD: 10.00 },
@@ -149,12 +328,12 @@ function insertDefaultModelCosts(db: Database.Database): void {
     { provider: 'gemini', model: 'gemini-2.0-flash', promptUSD: 0.10, completionUSD: 0.40 },
     { provider: 'gemini', model: 'gemini-2.0-flash-lite', promptUSD: 0.075, completionUSD: 0.30 },
   ];
-  
+
   const insert = db.prepare(`
     INSERT INTO model_costs (provider, model, prompt_usd_per_1k, completion_usd_per_1k)
     VALUES (?, ?, ?, ?)
   `);
-  
+
   // Database column is per_1k, defaults are per MILLION
   // To convert million → 1k: divide by 1000
   // Example: $0.05 per million = $0.00005 per 1k
@@ -163,11 +342,11 @@ function insertDefaultModelCosts(db: Database.Database): void {
   }
 }
 
-function runMigrations(db: Database.Database): void {
+function runMigrations(db: SqlJsWrapper): void {
   // Check current schema version
   const versionRow = db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get() as { version: number } | undefined;
   const currentVersion = versionRow?.version ?? 0;
-  
+
   if (currentVersion === 0) {
     // Fresh install - set up with latest schema (version 2) and models
     insertDefaultModelCosts(db);
@@ -175,7 +354,7 @@ function runMigrations(db: Database.Database): void {
     console.log('Fresh install: Initialized with models (schema v2)');
     return; // No need to run migrations for fresh install
   }
-  
+
   // Migration 2: Update existing users from old model list to new one
   if (currentVersion === 1) {
     console.log('Running migration 2: Updating model costs to new models...');
@@ -185,8 +364,7 @@ function runMigrations(db: Database.Database): void {
     db.prepare('UPDATE schema_version SET version = 2').run();
     console.log('Migration 2 completed - new models loaded');
   }
-  
+
   // Future migrations go here
   // if (currentVersion === 3) { ... }
 }
-

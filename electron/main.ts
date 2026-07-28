@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { initializeDatabase } from './database/init.js';
+import { initializeDatabase, closeDatabase } from './database/init.js';
 import { registerIPCHandlers } from './ipc/handlers.js';
 import { initLogger, getLogBuffer } from './logger.js';
 
@@ -53,6 +53,10 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
+});
+
+app.on('before-quit', () => {
+  closeDatabase();
 });
 
 app.on('window-all-closed', () => {

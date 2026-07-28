@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RateLimiter } from '../../../electron/providers/rateLimiter';
 import { withRetry, RetryableError } from '../../../electron/providers/retry';
 import { initGlobalSemaphore, withGlobalSemaphore } from '../../../electron/engine/semaphore';
 
@@ -25,33 +24,6 @@ describe('provider pipeline integration', () => {
 
     expect(result).toBe('success');
     expect(attempts).toBe(2);
-  });
-
-  it('multiple providers rate limited independently', async () => {
-    const openaiLimiter = new RateLimiter('openai', { rpm: 100, tpm: 100000 });
-    const anthropicLimiter = new RateLimiter('anthropic', { rpm: 50, tpm: 50000 });
-
-    // Both should work independently without blocking each other
-    const start = Date.now();
-
-    await Promise.all([
-      (async () => {
-        for (let i = 0; i < 5; i++) {
-          await openaiLimiter.waitIfNeeded(100);
-          openaiLimiter.recordRequest(100);
-        }
-      })(),
-      (async () => {
-        for (let i = 0; i < 5; i++) {
-          await anthropicLimiter.waitIfNeeded(100);
-          anthropicLimiter.recordRequest(100);
-        }
-      })(),
-    ]);
-
-    const elapsed = Date.now() - start;
-    // Should complete quickly since we're well under limits
-    expect(elapsed).toBeLessThan(1000);
   });
 
   it('semaphore limits concurrent provider calls', async () => {

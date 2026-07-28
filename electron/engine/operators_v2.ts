@@ -52,7 +52,7 @@ function createManualPopulation(config: EvaluationConfig): CandidateNode[] {
       prompt: item.prompt,
       params: {
         model: item.model,
-        temperature: 0.7,
+        temperature: 0,
       },
       changeLog: [{
         label: 'MUTATION' as const,
@@ -81,7 +81,7 @@ function createAutoShellNodes(config: EvaluationConfig): CandidateNode[] {
       prompt: seedPrompt,
       params: {
         model,
-        temperature: 0.7,
+        temperature: 0,
       },
       changeLog: i === 0
         ? [{ label: 'MUTATION' as const, text: 'Seed prompt (baseline)' }]

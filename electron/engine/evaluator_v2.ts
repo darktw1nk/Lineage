@@ -26,7 +26,6 @@ import type {
 import { createShellPopulation, mutateNode } from './operators_v2.js';
 import { selectTopPerformers, createNextGeneration } from './generation.js';
 import { getProviderAdapter } from '../providers/index.js';
-import { BrowserWindow } from 'electron';
 import { initGlobalSemaphore } from './semaphore.js';
 import { calculateFitness } from './fitness.js';
 import { getDatabase } from '../database/init.js';
@@ -50,19 +49,35 @@ interface EvaluationState {
   };
   pausedAt?: number; // Timestamp when paused (if currently paused)
   totalPausedMs: number; // Total time spent paused
+  gradingTotal: number; // Total grading calls completed
+  gradingFailures: number; // Grading calls that failed to parse JSON
 }
 
 // Active evaluations map
 const activeEvaluations = new Map<UUID, EvaluationState>();
 
 /**
- * Send IPC update to renderer
+ * Pluggable update sender. Default uses Electron BrowserWindow IPC.
+ * CLI overrides this via setSendUpdate() before starting evaluations.
  */
-function sendUpdate(runId: UUID, data: any): void {
-  const windows = BrowserWindow.getAllWindows();
-  if (windows.length > 0) {
-    windows[0].webContents.send(`eval:updates:${runId}`, data);
+let _sendUpdate: (runId: UUID, data: any) => void = (runId, data) => {
+  try {
+    const { BrowserWindow } = require('electron');
+    const windows = BrowserWindow.getAllWindows();
+    if (windows.length > 0) {
+      windows[0].webContents.send(`eval:updates:${runId}`, data);
+    }
+  } catch {
+    // Not in Electron context (CLI mode) — ignore
   }
+};
+
+export function setSendUpdate(fn: (runId: UUID, data: any) => void): void {
+  _sendUpdate = fn;
+}
+
+function sendUpdate(runId: UUID, data: any): void {
+  _sendUpdate(runId, data);
 }
 
 /**
@@ -181,8 +196,10 @@ export async function startEvaluation(
       elite: { totalDelta: 0, count: 0 },
     },
     totalPausedMs: 0,
+    gradingTotal: 0,
+    gradingFailures: 0,
   };
-  
+
   activeEvaluations.set(runId, state);
   
   // Send running status
@@ -631,10 +648,19 @@ async function processNode(
     console.error(`[Evaluator] Node ${node.id.slice(0, 8)} failed:`, error);
     node.status = 'failed';
     node.error = error instanceof Error ? error.message : String(error);
+
+    // Circuit breaker: if the run was stopped due to grading failures, halt everything
+    if (state.status === 'stopped' && state.run.stopReason === 'error') {
+      state.inProgress.delete(node.id);
+      sendUpdate(runId, { type: 'node_updated', node });
+      sendUpdate(runId, { type: 'error', message: node.error });
+      finishEvaluation(runId, state);
+      return;
+    }
   }
-  
+
   state.inProgress.delete(node.id);
-  
+
   // Only send update if we didn't already send it in recalculateAllFitness
   if (!skipFinalUpdate) {
     sendUpdate(runId, { type: 'node_updated', node });
@@ -670,13 +696,30 @@ async function runTests(
   // Run all tests in parallel
   const testPromises = state.config.testSet.map(async (test) => {
     const combinedPrompt = `${node.prompt}\n\n${test.prompt}`;
-    
+
+    // Load image if test has one
+    let images: Array<{ base64: string; mimeType: string }> | undefined;
+    if (test.image) {
+      try {
+        const fs = await import('fs');
+        const path = await import('path');
+        const imgBuf = fs.readFileSync(test.image);
+        const ext = path.extname(test.image).toLowerCase();
+        const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
+        images = [{ base64: imgBuf.toString('base64'), mimeType }];
+      } catch (imgErr) {
+        console.error(`[Evaluator] Failed to load image for test "${test.name}":`, imgErr);
+      }
+    }
+
     const result = await adapter.call({
       model: node.params.model.model,
       prompt: combinedPrompt,
       temperature: node.params.temperature,
       seed: node.params.seed,
       maxTokens,
+      providerOptions: state.config.providerOptions,
+      images,
     });
     
     // Update totals immediately for candidate model call
@@ -713,7 +756,23 @@ async function runTests(
       score = gradingResult.score;
       passed = gradingResult.passed;
       llmGradeReasoning = gradingResult.reasoning;
-      
+
+      // Track grading parse failures for circuit breaker
+      state.gradingTotal++;
+      if ((gradingResult as any)._parseError) {
+        state.gradingFailures++;
+        const failRate = state.gradingFailures / state.gradingTotal;
+        const MIN_SAMPLES = 20; // Don't trigger on small sample sizes
+        if (state.gradingTotal >= MIN_SAMPLES && failRate > 0.08) {
+          const pct = (failRate * 100).toFixed(1);
+          const msg = `Run aborted: ${pct}% of grading calls failed to parse (${state.gradingFailures}/${state.gradingTotal}). The service model is producing malformed JSON. Try a different service model or adjust serviceModelMaxTokens.`;
+          console.error(`[Evaluator] CIRCUIT BREAKER: ${msg}`);
+          state.run.stopReason = 'error';
+          state.status = 'stopped';
+          throw new Error(msg);
+        }
+      }
+
       // Track service model costs from LLM grading
       state.run.totals.tokensPrompt += gradingResult.promptTokens;
       state.run.totals.tokensCompletion += gradingResult.completionTokens;
