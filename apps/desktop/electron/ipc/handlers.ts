@@ -50,6 +50,16 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('eval:getConfig', async (_event, runId: string) => {
     return getEvaluationConfig(runId);
   });
+
+  ipcMain.handle('eval:estimate', async (_event, config: EvaluationConfig) => {
+    try {
+      const { estimateRunCost, getModelCost } = await import('@promptengine/core');
+      return await estimateRunCost(config, getModelCost);
+    } catch (error) {
+      console.error('[IPC] eval:estimate failed:', error);
+      return null;
+    }
+  });
   
   // Settings handlers
   ipcMain.handle('settings:get', async () => {

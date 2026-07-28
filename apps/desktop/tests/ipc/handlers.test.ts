@@ -130,6 +130,15 @@ describe('evaluation CRUD round-trip', () => {
     expect(await invoke('eval:getConfig', run.id)).toBeNull();
   });
 
+  it('eval:estimate returns a cost estimate without creating a run', async () => {
+    const before = (await invoke('eval:list')).length;
+    const est = await invoke('eval:estimate', makeConfig('cfg-est'));
+    expect(est.calls).toBeGreaterThan(0);
+    expect(est.low).toBeLessThanOrEqual(est.high);
+    expect(Array.isArray(est.breakdown)).toBe(true);
+    expect((await invoke('eval:list')).length).toBe(before); // no run row
+  });
+
   it('resolves config id collisions by generating a fresh id', async () => {
     const first = await invoke('eval:create', makeConfig('cfg-dup'));
     const second = await invoke('eval:create', makeConfig('cfg-dup')); // same id — must not throw

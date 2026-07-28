@@ -168,6 +168,7 @@ Here is the bug report:
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const estimate = useCostEstimate(config);
 
   // Ensure topK doesn't exceed generationSize in simple mode
   useEffect(() => {
@@ -368,10 +369,18 @@ Here is the bug report:
           </div>
         </Tabs>
 
-        <div className="flex justify-between border-t pt-4">
+        <div className="flex justify-between items-center border-t pt-4">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
+          {estimate && (
+            <span
+              className="text-xs text-muted-foreground px-2 text-center"
+              title={estimate.warnings?.join('\n')}
+            >
+              ≈ ${estimate.low.toFixed(4)} – ${estimate.high.toFixed(4)} · ~{estimate.calls} calls{estimate.perGeneration ? ' /gen' : ''}
+            </span>
+          )}
           <Button onClick={handleStart}>Start Evaluation</Button>
         </div>
       </DialogContent>
@@ -1019,6 +1028,20 @@ function JsonField({ label, value, onValid, placeholder }: {
       {error && <div className="text-xs text-red-500">Invalid JSON: {error}</div>}
     </div>
   );
+}
+
+// Debounced live cost estimate for the modal footer
+function useCostEstimate(config: Partial<EvaluationConfig>) {
+  const [estimate, setEstimate] = useState<any>(null);
+  useEffect(() => {
+    if (!config.enabledModels?.length || !config.testSet?.length) { setEstimate(null); return; }
+    const t = setTimeout(async () => {
+      try { setEstimate(await window.electronAPI.eval.estimate(config as EvaluationConfig)); }
+      catch { setEstimate(null); }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [config]);
+  return estimate;
 }
 
 function TestSetTab({ config, setConfig, isSimpleMode }: TabProps) {
