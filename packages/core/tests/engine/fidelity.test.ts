@@ -110,6 +110,47 @@ describe('samplesPerTest', () => {
   });
 });
 
+describe('holdout generalization', () => {
+  it('evaluates seed and champion on held-out tests and emits holdout_result', async () => {
+    registerProvider({ adapter: fakeAdapter(c => c.prompt) }); // echo → exact_match passes when expected === input
+    const events = await runOnce(makeConfig({
+      targets: { maxGenerations: 1 },
+      testSet: [
+        { id: 'fit1', name: 'fitness test', mode: 'exact_match', prompt: 'INPUT ONE', expected: 'INPUT ONE' },
+        { id: 'hold1', name: 'holdout test', mode: 'exact_match', prompt: 'UNSEEN INPUT', expected: 'UNSEEN INPUT', holdout: true },
+      ],
+    }));
+
+    const holdoutEvent = events.find(e => e.type === 'holdout_result');
+    expect(holdoutEvent).toBeDefined();
+    expect(holdoutEvent.holdout.testIds).toEqual(['hold1']);
+    expect(holdoutEvent.holdout.champion.score).toBeCloseTo(10, 5);
+    expect(holdoutEvent.holdout.seed.score).toBeCloseTo(10, 5);
+    expect(holdoutEvent.holdout.champion.perTest).toEqual([{ testId: 'hold1', score: 10 }]);
+
+    // Holdout test ran exactly twice: once for champion, once for seed (samplesPerTest=1)
+    expect(calls.filter(c => c.prompt === 'UNSEEN INPUT' || c.prompt.includes('UNSEEN INPUT')).length).toBe(2);
+
+    // Ordering: holdout_result arrives before final finished status
+    const hIdx = events.findIndex(e => e.type === 'holdout_result');
+    const fIdx = events.findIndex(e => e.type === 'status' && e.status === 'finished');
+    expect(hIdx).toBeLessThan(fIdx);
+  });
+
+  it('skips holdout with no-champion marker when nothing finished', async () => {
+    registerProvider({ adapter: { name: 'fake', estimateTokens: () => ({ prompt: 1 }),
+      call: async () => { throw new Error('always down'); } } as any });
+    const events = await runOnce(makeConfig({
+      testSet: [
+        { id: 'fit1', name: 'f', mode: 'exact_match', prompt: 'X', expected: 'X' },
+        { id: 'hold1', name: 'h', mode: 'exact_match', prompt: 'Y', expected: 'Y', holdout: true },
+      ],
+    }));
+    const holdoutEvent = events.find(e => e.type === 'holdout_result');
+    expect(holdoutEvent.holdout.skipped).toBe('no-champion');
+  });
+});
+
 describe('evaluatePromptOnTests', () => {
   it('is callable with an arbitrary prompt and uses seed+i per sample', async () => {
     registerProvider({ adapter: fakeAdapter(c => c.prompt) });

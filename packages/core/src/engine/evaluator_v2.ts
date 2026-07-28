@@ -423,7 +423,7 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       
       // Check stopping conditions
       if (shouldStop(state)) {
-        finishEvaluation(runId, state);
+        await finishEvaluation(runId, state);
         return;
       }
       
@@ -432,7 +432,7 @@ async function evaluationLoop(runId: UUID): Promise<void> {
         if (state.currentGeneration + 1 >= state.config.targets.maxGenerations) {
           console.log(`[Evaluator] Reached max generations (${state.config.targets.maxGenerations})`);
           state.run.stopReason = 'target';
-          finishEvaluation(runId, state);
+          await finishEvaluation(runId, state);
           return;
         }
       }
@@ -474,7 +474,7 @@ async function evaluationLoop(runId: UUID): Promise<void> {
     sendUpdate(runId, { type: 'status', status: 'paused', totalPausedMs: state.totalPausedMs, pausedAt: state.pausedAt });
   } else if (state.status === 'running') {
     // Loop exited naturally (queue empty)
-    finishEvaluation(runId, state);
+    await finishEvaluation(runId, state);
   }
 }
 
@@ -641,7 +641,7 @@ async function processNode(
       state.inProgress.delete(node.id);
       sendUpdate(runId, { type: 'node_updated', node });
       sendUpdate(runId, { type: 'error', message: node.error });
-      finishEvaluation(runId, state);
+      await finishEvaluation(runId, state);
       return;
     }
   }
@@ -996,7 +996,48 @@ async function moveToNextGeneration(
 /**
  * Finish evaluation
  */
-function finishEvaluation(runId: UUID, state: EvaluationState): void {
+async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promise<void> {
+  if (state.holdoutTests.length === 0) return;
+
+  const holdout: NonNullable<EvaluationRun['holdout']> = {
+    testIds: state.holdoutTests.map(t => t.id),
+    samplesPerTest: state.samplesPerTest,
+  };
+  state.run.holdout = holdout;
+
+  // Champion = best finished node across all generations
+  const finished = state.run.generations.flat().filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined);
+  const champion = [...finished].sort((a, b) => b.metrics!.fitness! - a.metrics!.fitness!)[0];
+  if (!champion) {
+    holdout.skipped = 'no-champion';
+    sendUpdate(runId, { type: 'holdout_result', holdout });
+    return;
+  }
+  if (state.config.targets.budgetUSD && state.run.totals.usd >= state.config.targets.budgetUSD) {
+    holdout.skipped = 'budget';
+    console.warn('[Evaluator] Budget exhausted — skipping holdout evaluation');
+    sendUpdate(runId, { type: 'holdout_result', holdout });
+    return;
+  }
+
+  console.log(`[Evaluator] Holdout: evaluating seed + champion on ${state.holdoutTests.length} unseen test(s)`);
+  const meanScore = (rs: TestResult[]) => rs.reduce((a, r) => a + r.score, 0) / rs.length;
+  const perTest = (rs: TestResult[]) => rs.map(r => ({ testId: r.testId, score: r.score }));
+
+  try {
+    const championResults = await evaluatePromptOnTests(champion.prompt, champion.params, state.holdoutTests, state, runId);
+    holdout.champion = { score: meanScore(championResults), perTest: perTest(championResults) };
+    const seedResults = await evaluatePromptOnTests(state.config.population.seedPrompt, champion.params, state.holdoutTests, state, runId);
+    holdout.seed = { score: meanScore(seedResults), perTest: perTest(seedResults) };
+    console.log(`[Evaluator] Generalization (unseen tests): seed ${holdout.seed.score.toFixed(2)} → champion ${holdout.champion.score.toFixed(2)}`);
+  } catch (error) {
+    console.error('[Evaluator] Holdout evaluation failed:', error);
+  }
+  sendUpdate(runId, { type: 'holdout_result', holdout });
+}
+
+async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<void> {
+  await runHoldoutEvaluation(runId, state);
   console.log(`[Evaluator] Finishing evaluation, reason=${state.run.stopReason}`);
   
   state.status = 'stopped';
@@ -1080,7 +1121,8 @@ export function stopEvaluation(runId: UUID): void {
   if (state) {
     state.status = 'stopped';
     state.run.stopReason = 'manual';
-    finishEvaluation(runId, state);
+    // stopEvaluation is a sync host API — fire and forget the async finish
+    finishEvaluation(runId, state).catch(err => console.error('[Evaluator] finish failed:', err));
   }
 }
 
