@@ -12,6 +12,7 @@ npm run cli -- --config <path>              # Run evolution from JSON config
 npm run cli -- --output <path>              # Write JSON results to file (default: stdout)
 npm run cli -- --db <path>                  # Use a specific database file
 npm run cli -- --seed <n>                   # Reproducibility seed (overrides config "seed")
+npm run cli -- --resume <runId>             # Resume an interrupted run from its checkpoint
 npm run cli -- --sync-models                # Sync models from OpenRouter
 npm run cli -- --list-models                # List all models with pricing
 npm run cli -- --set-key <provider> <key>   # Save API key (shared with desktop app)
@@ -31,6 +32,16 @@ Progress and all engine logs go to stderr; stdout carries exactly the JSON resul
 - Holdout: mark tests `"holdout": true` and/or set `"holdoutShare": 0.3` (+ optional `"holdoutSeed"`, default 42) to reserve tests evolution never sees. After the run, the seed prompt AND the champion are scored on them — results.json's `holdout` field and the report's "Generalization" section show `seed X → champion Y`. That number is the honest one: it can't be overfit.
 - `"seed": 42` (or `--seed 42`) makes the run reproducible: same seed + same config ⇒ identical operator plans, parent assignments, mutation strategies, temperatures, model hops, holdout splits, and candidate seeds. LLM outputs are provider-dependent: measured 2026-07 at temperature 0.9, Gemini reproduced seeded outputs exactly (6/6 identical), OpenAI collapsed to near-identical variants (best-effort per their docs), and Anthropic has no seed parameter — the seed always reproduces the experimental protocol, usually the outputs too. Explicit `holdoutSeed` still wins over `seed` for the split. The effective seed is echoed in results.json and the report.
 - `"pairwise": { "enabled": true, "contenders": 4 }` runs a pairwise playoff among each generation's top candidates: their stored outputs are compared head-to-head by the judge in BOTH orders (position bias cancels), and the resulting rank decides selection, the elite, and the champion. Applies to `llm_grade` tests; judge calls count toward totals and the budget (`playoff_result` events carry the call count). Sharpens selection exactly where absolute 0-10 scores cluster — a 9.87-vs-9.89 distinction is noise, "which output is better?" is not. Contenders clamp to 2..8 (default 4); results.json gains a `playoffs` array and ranked nodes carry `metrics.playoffRank`. Playoff quality is judge-limited: use the strongest `serviceModel` you can afford — the default judging prompt guards against verbosity bias (preferring longer outputs), but a weak judge weakens the ranking.
+
+## Resuming interrupted runs
+
+Every run checkpoints to the database as nodes and generations complete. If the process dies (Ctrl+C, crash, network), nothing is lost:
+
+```bash
+npm run cli -- --resume <runId> --db ./run.db
+```
+
+The config comes from the database; finished nodes keep their scores; the budget continues from cumulative spend. Add `--config original.json` alongside to re-supply what the database doesn't store: config-file API keys, `systemPrompts` overrides, and `plugins` (plugin operators that aren't re-registered fall back to carrying the parent forward). Runs with a `seed` resume bit-deterministically. Finished runs refuse to resume — reseed a new run from `best.prompt` instead.
 
 ## Plugins
 

@@ -16,7 +16,8 @@ import { loadCliConfig, toEvaluationConfig, extractConfigKeys } from './config.j
 import { installStoreShim } from './engine.js';
 import { resolveApiKey, saveApiKey } from './store.js';
 import { initCliDatabase } from './database.js';
-import type { Provider } from '@promptengine/core';
+import type { Provider, EvaluationConfig } from '@promptengine/core';
+import type { CliConfig } from './config.js';
 
 // The engine logs via console.log/info/warn. Route ALL of it to stderr so
 // stdout carries exactly one thing: the JSON result (pipe-friendly contract).
@@ -85,6 +86,7 @@ OPTIONS:
   --db <path>                  Use a specific database file
   --plugins <dir>              Load plugins from a directory (repeatable)
   --seed <n>                   Reproducibility seed (overrides config "seed")
+  --resume <runId>             Resume an interrupted run from its checkpoint
   --sync-models                Sync available models from OpenRouter
   --list-models                List all models in the database with pricing
   --set-key <provider> <key>   Save an API key (shared with desktop app)
@@ -133,6 +135,7 @@ function parseArgs(argv: string[]): {
   help: boolean;
   pluginDirs: string[];
   seed?: number;
+  resume?: string;
 } {
   const args = argv.slice(2);
   const result = {
@@ -145,6 +148,7 @@ function parseArgs(argv: string[]): {
     help: false,
     pluginDirs: [] as string[],
     seed: undefined as number | undefined,
+    resume: undefined as string | undefined,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -160,6 +164,13 @@ function parseArgs(argv: string[]): {
         break;
       case '--plugins':
         result.pluginDirs.push(args[++i]);
+        break;
+      case '--resume':
+        result.resume = args[++i];
+        if (!result.resume) {
+          console.error('--resume requires a run id');
+          process.exit(1);
+        }
         break;
       case '--seed': {
         const parsed = parseInt(args[++i], 10);
@@ -338,10 +349,20 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
   });
   activeRunId = null;
 
+  await emitOutputs(result, evalConfig, cliConfig, outputPath);
+}
+
+/** Shared post-run tail: results file, markdown report, DB close, exit code. */
+async function emitOutputs(
+  result: import('./engine.js').EvolutionResult,
+  evalConfig: EvaluationConfig,
+  cliConfig: CliConfig | undefined,
+  outputPath?: string,
+): Promise<void> {
   // Optionally write to output file
   if (outputPath) {
-    const fs = await import('fs');
-    fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));
+    const fsMod = await import('fs');
+    fsMod.writeFileSync(outputPath, JSON.stringify(result, null, 2));
     process.stderr.write(`\nResults written to ${outputPath}\n`);
   }
 
@@ -354,9 +375,9 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
     ? path.join(path.dirname(path.resolve(outputPath)), 'testoutputs')
     : path.resolve('testoutputs');
   fs.mkdirSync(reportDir, { recursive: true });
-  const slug = slugify(cliConfig.name || evalConfig.name || 'evolution');
+  const slug = slugify(cliConfig?.name || evalConfig.name || 'evolution');
   const reportPath = path.join(reportDir, `output-${slug}.md`);
-  fs.writeFileSync(reportPath, generateReport(result, evalConfig, cliConfig));
+  fs.writeFileSync(reportPath, generateReport(result, evalConfig, cliConfig ?? ({} as CliConfig)));
   process.stderr.write(`\nReport written to ${reportPath}\n`);
 
   const { closeDatabase } = await import('@promptengine/core');
@@ -367,6 +388,64 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
     process.stderr.write(`\nEvolution produced no usable result${result.error ? `: ${result.error}` : ''}\n`);
     process.exitCode = 1;
   }
+}
+
+async function handleResumeRun(runId: string, configPath?: string, outputPath?: string, dbPath?: string, pluginDirs: string[] = []): Promise<void> {
+  // Optional --config re-supplies file-based extras: keys, systemPrompts, plugins
+  const cliConfig = configPath ? loadCliConfig(configPath) : undefined;
+  const configKeys = cliConfig ? extractConfigKeys(cliConfig) : {};
+  installStoreShim(configKeys, cliConfig?.systemPrompts);
+
+  const pathMod = await import('path');
+  if ((cliConfig?.plugins?.length ?? 0) > 0 || pluginDirs.length > 0) {
+    const configDir = configPath ? pathMod.dirname(pathMod.resolve(configPath)) : process.cwd();
+    const { loadCliPlugins } = await import('./plugins.js');
+    await loadCliPlugins({ configDir, configPlugins: cliConfig?.plugins ?? [], flagDirs: pluginDirs });
+  }
+
+  await initCliDatabase(dbPath);
+  const { getDatabase } = await import('@promptengine/core');
+  const db = getDatabase();
+  const row = db.prepare('SELECT run_json, config_id FROM evaluation_runs WHERE id = ?').get(runId) as { run_json: string; config_id: string } | undefined;
+  if (!row) {
+    console.error(`Run not found: ${runId}`);
+    process.exit(1);
+  }
+  const run = JSON.parse(row.run_json);
+  if (run.status === 'finished') {
+    console.error(`Run ${runId} is already finished — nothing to resume. Reseed a new run from its best prompt instead.`);
+    process.exit(1);
+  }
+  const cfgRow = db.prepare('SELECT config_json FROM evaluation_configs WHERE id = ?').get(row.config_id) as { config_json: string } | undefined;
+  if (!cfgRow) {
+    console.error(`Config not found for run: ${row.config_id}`);
+    process.exit(1);
+  }
+  const evalConfig: EvaluationConfig = JSON.parse(cfgRow.config_json);
+
+  // Same key preflight as a fresh run
+  const requiredProviders = new Set<Provider>();
+  for (const model of evalConfig.enabledModels) {
+    requiredProviders.add(model.provider);
+  }
+  requiredProviders.add(evalConfig.serviceModel.provider);
+  for (const provider of requiredProviders) {
+    const key = resolveApiKey(provider, configKeys);
+    if (!key) {
+      console.error(`No API key found for provider: ${provider}`);
+      console.error(`Set via: --set-key ${provider} <key>, or ${provider.toUpperCase()}_API_KEY env var, or "${provider}Key" in config file`);
+      process.exit(1);
+    }
+  }
+
+  const { runEvolution } = await import('./engine.js');
+  const result = await runEvolution(evalConfig, {
+    existingRun: run,
+    onRunId: (id) => { activeRunId = id; },
+  });
+  activeRunId = null;
+
+  await emitOutputs(result, evalConfig, cliConfig, outputPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +474,11 @@ async function main(): Promise<void> {
 
   if (args.listModels) {
     await handleListModels(args.db);
+    return;
+  }
+
+  if (args.resume) {
+    await handleResumeRun(args.resume, args.config, args.output, args.db, args.pluginDirs);
     return;
   }
 

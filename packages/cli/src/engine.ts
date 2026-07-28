@@ -186,6 +186,7 @@ function buildResult(
 
 export interface RunEvolutionOptions {
   onRunId?: (id: string) => void;
+  existingRun?: EvaluationRun; // resume: checkpointed run loaded from the DB (skips inserts)
 }
 
 /**
@@ -206,7 +207,7 @@ export async function runEvolution(
     '@promptengine/core'
   );
 
-  const runId: UUID = uuidv4();
+  const runId: UUID = options?.existingRun?.id ?? uuidv4();
   options?.onRunId?.(runId);
 
   let resolveFinished: (() => void) | null = null;
@@ -295,8 +296,8 @@ export async function runEvolution(
     }
   });
 
-  // Create the run object
-  const run: EvaluationRun = {
+  // Create (or reuse) the run object
+  const run: EvaluationRun = options?.existingRun ?? {
     id: runId,
     configId: config.id,
     startedAt: Date.now(),
@@ -306,43 +307,50 @@ export async function runEvolution(
     version: '1.0',
   };
 
-  // Persist config + run to DB (matching electron/ipc/handlers.ts behavior)
-  const { getDatabase } = await import('@promptengine/core');
-  const db = getDatabase();
+  if (!options?.existingRun) {
+    // Persist config + run to DB (matching electron/ipc/handlers.ts behavior)
+    const { getDatabase } = await import('@promptengine/core');
+    const db = getDatabase();
 
-  // Retry loop for config INSERT — handles rare UUID collision (matches handlers.ts)
-  let configId = config.id;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      db.prepare(
-        'INSERT INTO evaluation_configs (id, name, config_json, created_at) VALUES (?, ?, ?, ?)',
-      ).run(configId, config.name, JSON.stringify({ ...config, id: configId }), Date.now());
-      break;
-    } catch (err: any) {
-      if (err.code === 'SQLITE_CONSTRAINT' && attempt < 9) {
-        configId = uuidv4();
-      } else {
-        throw err;
+    // Retry loop for config INSERT — handles rare UUID collision (matches handlers.ts)
+    let configId = config.id;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        db.prepare(
+          'INSERT INTO evaluation_configs (id, name, config_json, created_at) VALUES (?, ?, ?, ?)',
+        ).run(configId, config.name, JSON.stringify({ ...config, id: configId }), Date.now());
+        break;
+      } catch (err: any) {
+        if (err.code === 'SQLITE_CONSTRAINT' && attempt < 9) {
+          configId = uuidv4();
+        } else {
+          throw err;
+        }
       }
     }
+    config.id = configId;
+    run.configId = configId;
+
+    db.prepare(
+      'INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version) VALUES (?, ?, ?, ?, ?)',
+    ).run(run.id, run.configId, run.startedAt, JSON.stringify(run), run.version);
+
+    process.stderr.write(`Starting evolution: "${config.name}"\n`);
+    process.stderr.write(
+      `Models: ${config.enabledModels.map((m) => `${m.provider}/${m.model}`).join(', ')}\n`,
+    );
+    process.stderr.write(
+      `Population: ${config.population.initialSize} | Generations: ${config.targets.maxGenerations ?? 'unlimited'}\n`,
+    );
+    if (config.targets.budgetUSD)
+      process.stderr.write(`Budget: $${config.targets.budgetUSD}\n`);
+    process.stderr.write('\n');
+  } else {
+    const finishedCount = run.generations.flat().filter((n) => n.status === 'finished').length;
+    process.stderr.write(
+      `Resuming run ${run.id.slice(0, 8)} from generation ${run.generations.length - 1} (${finishedCount} finished nodes, $${run.totals.usd.toFixed(4)} already spent)\n\n`,
+    );
   }
-  config.id = configId;
-  run.configId = configId;
-
-  db.prepare(
-    'INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version) VALUES (?, ?, ?, ?, ?)',
-  ).run(run.id, run.configId, run.startedAt, JSON.stringify(run), run.version);
-
-  process.stderr.write(`Starting evolution: "${config.name}"\n`);
-  process.stderr.write(
-    `Models: ${config.enabledModels.map((m) => `${m.provider}/${m.model}`).join(', ')}\n`,
-  );
-  process.stderr.write(
-    `Population: ${config.population.initialSize} | Generations: ${config.targets.maxGenerations ?? 'unlimited'}\n`,
-  );
-  if (config.targets.budgetUSD)
-    process.stderr.write(`Budget: $${config.targets.budgetUSD}\n`);
-  process.stderr.write('\n');
 
   // Start the evaluation — catch synchronous setup errors
   try {
