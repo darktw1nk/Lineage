@@ -289,6 +289,9 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
               {node.metrics.fitness !== undefined && (
                 <Metric label="Fitness" value={node.metrics.fitness.toFixed(2)} />
               )}
+              {node.metrics.playoffRank !== undefined && (
+                <Metric label="Playoff" value={`#${node.metrics.playoffRank}`} />
+              )}
             </div>
           </Section>
         )}

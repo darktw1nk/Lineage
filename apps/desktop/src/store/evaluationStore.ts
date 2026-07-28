@@ -26,6 +26,7 @@ interface EvaluationStore {
   addGenerationToEvaluation: (evalId: UUID, generation: number, nodes: CandidateNode[]) => void;
   updateTotals: (evalId: UUID, totals: any, cacheHits: number) => void;
   setHoldout: (evalId: UUID, holdout: EvaluationRun['holdout']) => void;
+  addPlayoff: (evalId: UUID, playoff: { generation: number; ranking: UUID[] }) => void;
   updateStatus: (evalId: UUID, status: string, totalPausedMs?: number, pausedAt?: number) => void;
   setLoading: (evalId: UUID, isLoading: boolean) => void;
   
@@ -146,6 +147,18 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
     });
   },
 
+  addPlayoff: (evalId, playoff) => {
+    set((state) => {
+      const evaluation = state.evaluations.get(evalId);
+      if (!evaluation) return state;
+
+      const newEvaluations = new Map(state.evaluations);
+      newEvaluations.set(evalId, { ...evaluation, playoffs: [...(evaluation.playoffs ?? []), playoff] });
+
+      return { evaluations: newEvaluations };
+    });
+  },
+
   setHoldout: (evalId, holdout) => {
     set((state) => {
       const evaluation = state.evaluations.get(evalId);
@@ -232,6 +245,10 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
 
         case 'holdout_result':
           store.setHoldout(evalId, data.holdout);
+          break;
+
+        case 'playoff_result':
+          store.addPlayoff(evalId, { generation: data.generation, ranking: data.ranking });
           break;
           
         default:

@@ -2214,6 +2214,37 @@ function AdvancedTab({ config, setConfig }: TabProps) {
             onChange={(e) => setConfig({ ...config, holdoutShare: parseFloat(e.target.value) || 0 })}
           />
         </div>
+
+        <div className="flex items-center space-x-2">
+          <Switch
+            id="pairwiseEnabled"
+            checked={config.pairwise?.enabled || false}
+            onCheckedChange={(checked) =>
+              setConfig({ ...config, pairwise: { ...(config.pairwise ?? {}), enabled: checked } })
+            }
+          />
+          <Label htmlFor="pairwiseEnabled" className="text-sm">
+            Pairwise playoff (top contenders re-ranked head-to-head each generation)
+          </Label>
+        </div>
+
+        {config.pairwise?.enabled && (
+          <div>
+            <LabelWithTooltip
+              htmlFor="pairwiseContenders"
+              label="Playoff Contenders"
+              tooltip="How many top candidates enter the pairwise playoff each generation (2-8). Judge calls per playoff: pairs × LLM-graded tests × 2 orders — counted in evaluation costs and the budget."
+            />
+            <Input
+              id="pairwiseContenders"
+              type="number"
+              min="2"
+              max="8"
+              value={config.pairwise?.contenders ?? 4}
+              onChange={(e) => setConfig({ ...config, pairwise: { enabled: true, contenders: parseInt(e.target.value) || 4 } })}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

@@ -192,6 +192,17 @@ describe('evaluationStore subscriptions', () => {
     expect((store().evaluations.get('run-1') as any).holdout.champion.score).toBe(9);
   });
 
+  it('playoff_result appends to run.playoffs', () => {
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().subscribe('run-1');
+    capturedCallbacks.get('run-1')!({}, { type: 'playoff_result', generation: 0, ranking: ['n2', 'n1'], matches: 6 });
+    capturedCallbacks.get('run-1')!({}, { type: 'playoff_result', generation: 1, ranking: ['n1', 'n2'], matches: 4 });
+    expect((store().evaluations.get('run-1') as any).playoffs).toEqual([
+      { generation: 0, ranking: ['n2', 'n1'] },
+      { generation: 1, ranking: ['n1', 'n2'] },
+    ]);
+  });
+
   it('cleanup unsubscribes everything', () => {
     store().subscribe('run-1');
     store().subscribe('run-2');
