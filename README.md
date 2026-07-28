@@ -45,6 +45,8 @@ Each generation, the engine:
 
 Every node carries a **changelog** of what created it (`[MUTATION] Removed vague instruction…`, `[CROSSOVER] Merged a1b2 + c3d4`), and the engine tracks **per-operator effectiveness** (average fitness delta) as the run progresses.
 
+**And the gene pool is open.** Operators are plugins — a ~20-line JS file dropped in a folder joins the breeding mix on equal footing with the built-ins (which run through the same registry). In our first live test, a deterministic section-rotation plugin bred the run's champion (fitness 9.89) while the LLM-powered operators watched. Author guide: [docs/plugins.md](docs/plugins.md).
+
 ## Fitness: five dimensions, your weights
 
 ```json
@@ -136,7 +138,7 @@ Watch generations appear with full lineage, then click any node: its evolved pro
 
 ## Providers & repository layout
 
-**Providers**: OpenAI, Anthropic, Google Gemini, Groq directly — or any model via OpenRouter (one key, synced catalog with pricing).
+**Providers**: OpenAI, Anthropic, Google Gemini, Groq directly — any model via OpenRouter (one key, synced catalog with pricing) — or bring your own via a provider plugin (the shipped [Ollama example](examples/plugins/ollama/index.mjs) runs evolution on free local models).
 
 ```
 packages/core     @promptengine/core — engine, operators, providers, sql.js persistence
@@ -147,7 +149,7 @@ docs/cli.md       Full CLI + config reference
 docs/plugins.md   Plugin author guide
 ```
 
-Architecture details in [CLAUDE.md](CLAUDE.md). Tests: `npm test` (320 across all packages).
+Architecture details in [CLAUDE.md](CLAUDE.md). Tests: `npm test` (347 across all packages, including an end-to-end evolution driven entirely by plugins).
 
 ## License
 
