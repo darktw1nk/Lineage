@@ -16,7 +16,7 @@ export interface CliConfig {
   testSet: Array<{
     id?: string;
     name?: string;
-    mode?: 'llm_grade' | 'exact_match';
+    mode?: 'llm_grade' | 'exact_match' | 'json_schema' | 'tool_call';
     prompt: string;
     expected?: string;
     image?: string; // path to image file (relative to config or absolute)
@@ -25,6 +25,9 @@ export interface CliConfig {
       strictZeroOnDeviation?: boolean;
       distanceMetric?: 'levenshtein' | 'json_diff' | 'numeric_abs';
     };
+    schema?: object; // json_schema mode
+    tools?: Array<{ name: string; description?: string; parameters?: object }>; // tool_call mode
+    expectedTool?: { name: string; args?: Record<string, unknown>; argsMode?: 'subset' | 'exact' }; // tool_call mode
   }>;
   models?: string[];          // e.g. ["openai/gpt-4o", "anthropic/claude-sonnet-4.5"]
   serviceModel?: string;      // e.g. "openai/gpt-4o-mini"
@@ -182,6 +185,9 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
       image: imagePath,
       ...(t.holdout ? { holdout: true } : {}),
       grading: t.grading,
+      ...(t.schema ? { schema: t.schema } : {}),
+      ...(t.tools ? { tools: t.tools } : {}),
+      ...(t.expectedTool ? { expectedTool: t.expectedTool } : {}),
     };
   });
 

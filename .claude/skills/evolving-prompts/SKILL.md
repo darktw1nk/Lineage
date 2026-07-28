@@ -43,6 +43,7 @@ Progress/logs → stderr. `--output` (and stdout) → pure JSON. Exit 0 = usable
 
 - `llm_grade` + `expected`: the judge receives `expected` as a reference and grades content AND format consistency with it. Encode format rules in `expected` itself; for very strict rubrics override `systemPrompts.llmGradingPrompt` (see `docs/cli.md`).
 - `exact_match` needs the prompt to force terse output, or scores stay low on verbose models.
+- Prompts for agents? Use mode `"json_schema"` (output must conform to a JSON Schema) and mode `"tool_call"` (`tools` + `expectedTool`: right function, right args) — both deterministic and judge-free, so they're cheap and noise-free. `argsMode` `"subset"` (default) ignores extra args; see docs/cli.md "Agent-builder test modes".
 - `budget` is a hard stop. 4 nodes x 2 generations x 3 tests on flash-lite ≈ $0.003.
 - `maxGenerations` counts from generation 0: `maxGenerations: 2` runs exactly generations 0 and 1.
 

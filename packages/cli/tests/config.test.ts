@@ -167,6 +167,20 @@ describe('CLI Config - toEvaluationConfig', () => {
     expect(toEvaluationConfig(MINIMAL_CONFIG).seed).toBeUndefined();
   });
 
+  it('passes json_schema and tool_call fields through', () => {
+    const cfg = toEvaluationConfig({
+      seedPrompt: 's',
+      testSet: [
+        { prompt: 'x', mode: 'json_schema', schema: { type: 'object' } },
+        { prompt: 'y', mode: 'tool_call', tools: [{ name: 'f' }], expectedTool: { name: 'f', args: { a: 1 } } },
+      ],
+    } as any);
+    expect(cfg.testSet[0].mode).toBe('json_schema');
+    expect(cfg.testSet[0].schema).toEqual({ type: 'object' });
+    expect(cfg.testSet[1].tools).toEqual([{ name: 'f' }]);
+    expect(cfg.testSet[1].expectedTool).toEqual({ name: 'f', args: { a: 1 } });
+  });
+
   it('passes callTimeoutMs through', () => {
     const evalConfig = toEvaluationConfig({
       seedPrompt: 'test', testSet: [{ prompt: 'x' }], callTimeoutMs: 30000,

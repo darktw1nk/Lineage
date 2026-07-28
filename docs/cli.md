@@ -34,6 +34,35 @@ Progress and all engine logs go to stderr; stdout carries exactly the JSON resul
 - `"callTimeoutMs": 120000` (the default) aborts any single LLM HTTP attempt after that long — a hung request is retried with a fresh budget instead of stalling a parallel slot forever (worst case per call: timeout × retries). Raise it for slow reasoning models; lower it for fast models on flaky networks.
 - `"pairwise": { "enabled": true, "contenders": 4 }` runs a pairwise playoff among each generation's top candidates: their stored outputs are compared head-to-head by the judge in BOTH orders (position bias cancels), and the resulting rank decides selection, the elite, and the champion. Applies to `llm_grade` tests; judge calls count toward totals and the budget (`playoff_result` events carry the call count). Sharpens selection exactly where absolute 0-10 scores cluster — a 9.87-vs-9.89 distinction is noise, "which output is better?" is not. Contenders clamp to 2..8 (default 4); results.json gains a `playoffs` array and ranked nodes carry `metrics.playoffRank`. Playoff quality is judge-limited: use the strongest `serviceModel` you can afford — the default judging prompt guards against verbosity bias (preferring longer outputs), but a weak judge weakens the ranking.
 
+## Agent-builder test modes
+
+Both modes score **deterministically** — no judge calls, zero grading cost, no judge noise.
+
+`"mode": "json_schema"` — the output must parse as JSON and conform to a schema:
+
+```json
+{ "name": "extract", "mode": "json_schema",
+  "prompt": "Extract the contact from: 'Reach Bob at b@x.co'",
+  "schema": { "type": "object", "required": ["name", "email"],
+              "properties": { "name": { "type": "string" }, "email": { "type": "string" } } } }
+```
+
+Scoring: unparseable JSON → 0; parses but violates the schema → 1–5 (fewer violations score higher); fully conformant → 10. Passed at ≥7, so only conformance passes. Markdown fences are stripped before parsing.
+
+`"mode": "tool_call"` — tools are offered to the model; success is calling the right function with the right arguments:
+
+```json
+{ "name": "weather-routing", "mode": "tool_call",
+  "prompt": "What's the weather in Paris?",
+  "tools": [
+    { "name": "get_weather", "parameters": { "type": "object", "properties": { "city": { "type": "string" } }, "required": ["city"] } },
+    { "name": "get_time", "parameters": { "type": "object", "properties": { "city": { "type": "string" } } } }
+  ],
+  "expectedTool": { "name": "get_weather", "args": { "city": "Paris" }, "argsMode": "subset" } }
+```
+
+Scoring: no tool called → 0; wrong tool → 2; right tool, wrong args → 6; right tool + args → 10. `argsMode` `"subset"` (default): every expected key must deep-equal the actual value, extra actual args are fine; `"exact"`: whole-object deep equality. When multiple tools are called, the FIRST call is judged. Omit `expectedTool.args` to accept any arguments. Tool definitions use the OpenAI function shape and are translated per provider (OpenAI/Groq/OpenRouter natively, Gemini `functionDeclarations`, Anthropic `input_schema`).
+
 ## Resuming interrupted runs
 
 Every run checkpoints to the database as nodes and generations complete. If the process dies (Ctrl+C, crash, network), nothing is lost:
