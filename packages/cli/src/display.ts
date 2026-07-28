@@ -55,9 +55,10 @@ export function onGenerationCreated(generation: number, nodes: CandidateNode[]):
   // Print summary for the generation that just finished
   log(`\nGeneration ${state.currentGeneration}: ${state.nodesFinished}/${state.nodesTotal} nodes | Best fitness: ${state.bestFitness.toFixed(2)} | Cost: $${state.totalCost.toFixed(4)}`);
 
-  // Reset counters for the new generation
+  // Reset counters for the new generation. Nodes carried over already
+  // terminal (cached elites) never emit a later node_updated — count them now.
   state.currentGeneration = generation;
-  state.nodesFinished = 0;
+  state.nodesFinished = nodes.filter(n => n.status === 'finished' || n.status === 'failed').length;
   state.nodesTotal = nodes.length;
 
   log(`\n--- Generation ${generation} (${nodes.length} nodes) ---`);

@@ -5,6 +5,7 @@ import {
   onNodeCreated,
   onNodeUpdated,
   onTotals,
+  onGenerationCreated,
 } from '../src/display.js';
 import type { CandidateNode } from '@promptengine/core';
 
@@ -63,6 +64,32 @@ describe('CLI Display', () => {
       expect(state.bestFitness).toBe(0.5);
 
       // Clean up for other tests
+      resetState();
+    });
+  });
+
+  describe('onGenerationCreated', () => {
+    it('counts nodes that arrive already finished (cached elites) as finished', () => {
+      resetState();
+
+      onGenerationCreated(1, [
+        makeNode({ id: 'elite-1', status: 'finished' }), // cached elite — no later node_updated
+        makeNode({ id: 'child-1', status: 'pending', metrics: undefined }),
+        makeNode({ id: 'child-2', status: 'pending', metrics: undefined }),
+      ]);
+
+      let state = getState();
+      expect(state.currentGeneration).toBe(1);
+      expect(state.nodesTotal).toBe(3);
+      expect(state.nodesFinished).toBe(1);
+
+      // The two live children finish via node_updated
+      onNodeUpdated(makeNode({ id: 'child-1', status: 'finished' }));
+      onNodeUpdated(makeNode({ id: 'child-2', status: 'failed', metrics: undefined }));
+
+      state = getState();
+      expect(state.nodesFinished).toBe(3);
+
       resetState();
     });
   });
