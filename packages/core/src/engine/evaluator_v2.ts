@@ -44,6 +44,8 @@ interface EvaluationState {
   holdoutTests: TestCase[];   // reserved for the final generalization report
   samplesPerTest: number;     // resolved + clamped from config
   promptMode: 'system' | 'inline'; // resolved from config (default 'system')
+  pairwiseEnabled: boolean;   // opt-in pairwise playoff
+  pairwiseContenders: number; // resolved + clamped (2..8) from config
   pausedAt?: number; // Timestamp when paused (if currently paused)
   totalPausedMs: number; // Total time spent paused
   gradingTotal: number; // Total grading calls completed
@@ -162,6 +164,12 @@ export async function startEvaluation(
   if (holdoutTests.length > 0) {
     console.log(`[Evaluator] Holdout: ${holdoutTests.length} test(s) reserved (${holdoutTests.map(t => t.name).join(', ')})`);
   }
+  const pairwiseEnabled = config.pairwise?.enabled === true;
+  const rawContenders = config.pairwise?.contenders ?? 4;
+  const pairwiseContenders = Math.min(Math.max(Math.floor(rawContenders), 2), 8);
+  if (pairwiseEnabled && pairwiseContenders !== rawContenders) {
+    console.warn(`[Playoff] contenders clamped from ${rawContenders} to ${pairwiseContenders}`);
+  }
 
   // Initialize state
   const state: EvaluationState = {
@@ -182,6 +190,8 @@ export async function startEvaluation(
     holdoutTests,
     samplesPerTest,
     promptMode: config.promptMode ?? 'system',
+    pairwiseEnabled,
+    pairwiseContenders,
     totalPausedMs: 0,
     gradingTotal: 0,
     gradingFailures: 0,
@@ -934,6 +944,61 @@ function shouldStop(state: EvaluationState): boolean {
 }
 
 /**
+ * Pairwise playoff for the CURRENT generation (if enabled and not yet run).
+ * Re-ranks the top contenders by head-to-head judging of their stored outputs;
+ * ranks land on metrics.playoffRank and sharpen selection/elite/champion.
+ * Judge calls are evaluation costs: accrued to run totals immediately and
+ * counted against the budget (mid-playoff trip abandons remaining matches).
+ */
+async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<void> {
+  if (!state.pairwiseEnabled) return;
+  const genIndex = state.currentGeneration;
+  if (state.run.playoffs?.some(p => p.generation === genIndex)) return;
+  const llmTests = state.fitnessTests.filter(t => t.mode === 'llm_grade');
+  if (llmTests.length === 0) return;
+
+  const gen = state.run.generations[genIndex] || [];
+  const finished = gen
+    .filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
+    .sort((a, b) => b.metrics!.fitness! - a.metrics!.fitness!);
+  const contenders = finished.slice(0, state.pairwiseContenders);
+  if (contenders.length < 2) return;
+
+  const budget = state.config.targets.budgetUSD;
+  if (budget && state.run.totals.usd >= budget) {
+    console.warn('[Playoff] Budget exhausted — skipping playoff');
+    return;
+  }
+
+  const { runPairwisePlayoff } = await import('./pairwise.js');
+  const result = await runPairwisePlayoff({
+    contenders,
+    tests: llmTests,
+    config: state.config,
+    accrue: (usd, promptTokens, completionTokens) => {
+      state.run.totals.usd += usd;
+      state.run.totals.tokensPrompt += promptTokens;
+      state.run.totals.tokensCompletion += completionTokens;
+      state.run.totals.calls++;
+      sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+    },
+    shouldAbort: () => !!(budget && state.run.totals.usd >= budget),
+  });
+  if (!result) return;
+
+  result.ranking.forEach((id, i) => {
+    const node = contenders.find(n => n.id === id);
+    if (node?.metrics) {
+      node.metrics.playoffRank = i + 1;
+      sendUpdate(runId, { type: 'node_updated', node });
+    }
+  });
+  state.run.playoffs = [...(state.run.playoffs ?? []), { generation: genIndex, ranking: result.ranking }];
+  sendUpdate(runId, { type: 'playoff_result', generation: genIndex, ranking: result.ranking, matches: result.matches });
+  console.log(`[Playoff] Gen ${genIndex}: winner ${result.ranking[0].slice(0, 8)} (${result.matches} judge calls, ${result.ranking.length} contenders)`);
+}
+
+/**
  * Move to next generation: selection + variation
  */
 async function moveToNextGeneration(
@@ -942,6 +1007,9 @@ async function moveToNextGeneration(
 ): Promise<void> {
   console.log(`[Evaluator] Moving to generation ${state.currentGeneration + 1}`);
   
+  // Playoff (if enabled) re-ranks the top contenders before selection
+  await maybeRunPlayoff(runId, state);
+
   // Select top performers
   const currentGen = state.run.generations[state.currentGeneration];
   const topPerformers = selectTopPerformers(currentGen, state.config);
@@ -1005,9 +1073,13 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
   };
   state.run.holdout = holdout;
 
-  // Champion = best finished node across all generations
+  // Champion = latest playoff winner when playoffs ran, else best finished node by fitness
   const finished = state.run.generations.flat().filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined);
-  const champion = [...finished].sort((a, b) => b.metrics!.fitness! - a.metrics!.fitness!)[0];
+  const playoffChampionId = [...(state.run.playoffs ?? [])]
+    .sort((a, b) => b.generation - a.generation)[0]?.ranking[0];
+  const champion =
+    (playoffChampionId ? finished.find(n => n.id === playoffChampionId) : undefined)
+    ?? [...finished].sort((a, b) => b.metrics!.fitness! - a.metrics!.fitness!)[0];
   if (!champion) {
     holdout.skipped = 'no-champion';
     sendUpdate(runId, { type: 'holdout_result', holdout });
@@ -1037,6 +1109,9 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
 }
 
 async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<void> {
+  // The final generation never reaches moveToNextGeneration — run its playoff here
+  // so the champion (and the holdout below) reflect the last generation's ranking.
+  await maybeRunPlayoff(runId, state);
   await runHoldoutEvaluation(runId, state);
   console.log(`[Evaluator] Finishing evaluation, reason=${state.run.stopReason}`);
   

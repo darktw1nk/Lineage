@@ -71,9 +71,16 @@ export function selectTopPerformers(
   currentGeneration: CandidateNode[],
   config: EvaluationConfig
 ): CandidateNode[] {
+  // Playoff-rank aware: pairwise playoff winners outrank raw fitness (rank 1 first,
+  // unranked nodes sort after ranked ones by fitness)
   const sorted = currentGeneration
     .filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
-    .sort((a, b) => b.metrics!.fitness! - a.metrics!.fitness!);
+    .sort((a, b) => {
+      const ra = a.metrics?.playoffRank ?? Infinity;
+      const rb = b.metrics?.playoffRank ?? Infinity;
+      if (ra !== rb) return ra - rb;
+      return b.metrics!.fitness! - a.metrics!.fitness!;
+    });
 
   let topPerformers: CandidateNode[];
   
@@ -251,8 +258,13 @@ export async function createNextGeneration(
         }
       }
       
-      // Sort by fitness descending
-      lastGenFinishedNodes.sort((a, b) => b.metrics!.fitness! - a.metrics!.fitness!);
+      // Sort playoff-rank first (rank 1 = playoff winner), then fitness descending
+      lastGenFinishedNodes.sort((a, b) => {
+        const ra = a.metrics?.playoffRank ?? Infinity;
+        const rb = b.metrics?.playoffRank ?? Infinity;
+        if (ra !== rb) return ra - rb;
+        return b.metrics!.fitness! - a.metrics!.fitness!;
+      });
       
       // Take top N elites from last generation
       const elites = lastGenFinishedNodes.slice(0, Math.min(numElite, lastGenFinishedNodes.length));
@@ -261,12 +273,15 @@ export async function createNextGeneration(
       
       // Clone elites - keep them finished so they don't get re-evaluated
       for (const elite of elites) {
+        // Clone sheds the stale playoffRank — it competes in the next playoff on its own
+        const { playoffRank: _stalePlayoffRank, ...eliteMetrics } = elite.metrics ?? {};
         const eliteClone: CandidateNode = {
           ...elite,  // Copy everything
           id: uuidv4(),  // New ID
           generation: nextGenerationNumber,  // New generation number
           status: 'finished',  // KEEP AS FINISHED - don't re-evaluate
           lineageParents: [elite.id],
+          metrics: elite.metrics ? eliteMetrics : undefined,
           changeLog: [{ label: 'ELITE', text: `Elite from gen ${elite.generation} (fitness=${elite.metrics?.fitness?.toFixed(3)})` }],
         };
         newGenNodes.push(eliteClone);
