@@ -32,6 +32,8 @@ export {
   resetRegistry, flushPendingPluginModels, BUILTIN_OPERATOR_NAMES,
 } from './registry.js';
 export { BaseProviderAdapter } from './providers/base.js';
+export { loadPlugins } from './pluginLoader.js';
+export type { LoadPluginsOptions } from './pluginLoader.js';
 export type {
   OperatorContext, OperatorResult, OperatorPlugin, ProviderPlugin, PluginManifest,
 } from './types.js';
