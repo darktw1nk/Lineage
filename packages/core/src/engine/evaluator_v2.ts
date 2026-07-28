@@ -23,6 +23,7 @@ import type {
   TestResult,
   ProviderAdapter,
 } from '../types.js';
+import { createHash } from 'crypto';
 import { createShellPopulation, mutateNode } from './operators_v2.js';
 import { selectTopPerformers, createNextGeneration } from './generation.js';
 import { getProviderAdapter } from '../providers/index.js';
@@ -320,7 +321,8 @@ async function mutatePopulationInBackground(
     await Promise.all(mutationPromises);
     
     console.log(`[Evaluator] All mutations complete`);
-    
+    persistRun(state);
+
     // Send population ready event
     sendUpdate(runId, { type: 'population_ready' });
     
@@ -338,6 +340,7 @@ async function mutatePopulationInBackground(
       state.pausedAt = Date.now();
       state.run.pausedAt = state.pausedAt; // Send to frontend
       sendUpdate(runId, { type: 'status', status: 'paused', totalPausedMs: state.totalPausedMs, pausedAt: state.pausedAt });
+      persistRun(state);
       return;
     }
     
@@ -485,6 +488,7 @@ async function evaluationLoop(runId: UUID): Promise<void> {
     state.pausedAt = Date.now(); // Record when actually paused
     state.run.pausedAt = state.pausedAt; // Send to frontend
     sendUpdate(runId, { type: 'status', status: 'paused', totalPausedMs: state.totalPausedMs, pausedAt: state.pausedAt });
+    persistRun(state);
   } else if (state.status === 'running') {
     // Loop exited naturally (queue empty)
     await finishEvaluation(runId, state);
@@ -665,6 +669,8 @@ async function processNode(
   if (!skipFinalUpdate) {
     sendUpdate(runId, { type: 'node_updated', node });
   }
+
+  persistRun(state);
 }
 
 /**
@@ -676,11 +682,7 @@ async function runTests(
   state: EvaluationState
 ): Promise<TestResult[]> {
   // Generate cache key: hash(prompt, model, temperature, harness, fitness-test signature)
-  const crypto = await import('crypto');
-  const testSetSig = state.fitnessTests.map(t => t.id).join(',');
-  const cacheKey = crypto.createHash('sha256')
-    .update(`${node.prompt}|${node.params.model.provider}/${node.params.model.model}|${node.params.temperature}|${state.promptMode}|${state.samplesPerTest}|${testSetSig}`)
-    .digest('hex');
+  const cacheKey = computeCacheKey(node, state);
 
   // Check cache
   if (state.cache.has(cacheKey)) {
@@ -998,6 +1000,7 @@ async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<voi
   });
   state.run.playoffs = [...(state.run.playoffs ?? []), { generation: genIndex, ranking: result.ranking }];
   sendUpdate(runId, { type: 'playoff_result', generation: genIndex, ranking: result.ranking, matches: result.matches });
+  persistRun(state);
   console.log(`[Playoff] Gen ${genIndex}: winner ${result.ranking[0].slice(0, 8)} (${result.matches} judge calls, ${result.ranking.length} contenders)`);
 }
 
@@ -1060,7 +1063,9 @@ async function moveToNextGeneration(
     generation: state.currentGeneration,
     nodes: newGenNodes,
   });
-  
+
+  persistRun(state);
+
   console.log(`[Evaluator] Generation ${state.currentGeneration} created with ${newGenNodes.length} nodes`);
 }
 
@@ -1109,6 +1114,7 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
     console.error('[Evaluator] Holdout evaluation failed:', error);
   }
   sendUpdate(runId, { type: 'holdout_result', holdout });
+  persistRun(state);
 }
 
 async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<void> {
@@ -1121,15 +1127,9 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   state.status = 'stopped';
   state.run.status = 'finished';
   state.run.finishedAt = Date.now();
-  
-  // Persist to database
-  const db = getDatabase();
-  db.prepare(`
-    UPDATE evaluation_runs
-    SET run_json = ?
-    WHERE id = ?
-  `).run(JSON.stringify(state.run), runId);
-  
+
+  persistRun(state);
+
   // Send final updates
   if (state.run.stopReason) {
     sendUpdate(runId, { type: 'stop', reason: state.run.stopReason });
@@ -1141,6 +1141,33 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   activeEvaluations.delete(runId);
   
   console.log(`[Evaluator] Evaluation ${runId.slice(0, 8)} finished`);
+}
+
+/** Cache key: hash(prompt, model, temperature, harness, fitness-test signature). */
+function computeCacheKey(node: CandidateNode, state: EvaluationState): string {
+  const testSetSig = state.fitnessTests.map(t => t.id).join(',');
+  return createHash('sha256')
+    .update(`${node.prompt}|${node.params.model.provider}/${node.params.model.model}|${node.params.temperature}|${state.promptMode}|${state.samplesPerTest}|${testSetSig}`)
+    .digest('hex');
+}
+
+/** Checkpoint the run so an interrupted process loses nothing. Never throws. */
+function persistRun(state: EvaluationState): void {
+  try {
+    const db = getDatabase();
+    db.prepare(`
+      UPDATE evaluation_runs
+      SET run_json = ?
+      WHERE id = ?
+    `).run(JSON.stringify(state.run), state.run.id);
+  } catch (error) {
+    console.error('[Evaluator] Checkpoint persist failed:', error);
+  }
+}
+
+/** True while a run is registered in this process (running/pausing/paused). */
+export function isEvaluationActive(runId: UUID): boolean {
+  return activeEvaluations.has(runId);
 }
 
 /**
