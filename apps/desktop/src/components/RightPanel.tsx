@@ -229,7 +229,17 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
                       <div>
                         <span className="font-medium">Output:</span>
                         <div className="mt-1 max-h-32 overflow-y-auto rounded bg-muted p-2 whitespace-pre-wrap font-mono text-xs">
-                          {test.outputText || 'No output'}
+                          {(() => {
+                            try {
+                              const parsed = JSON.parse(test.outputText || '');
+                              if (parsed && Array.isArray(parsed.toolCalls)) {
+                                return parsed.toolCalls.map((tc: any, i: number) => (
+                                  <div key={i}>→ {tc.name}({JSON.stringify(tc.arguments)})</div>
+                                ));
+                              }
+                            } catch { /* plain text */ }
+                            return test.outputText || 'No output';
+                          })()}
                         </div>
                       </div>
                       

@@ -995,6 +995,32 @@ function ModelsTab({ config, setConfig }: TabProps) {
 }
 
 // Test Set Tab
+// Validated JSON editor: invalid text shows an error and never overwrites the
+// last valid value, so the config always stays well-formed.
+function JsonField({ label, value, onValid, placeholder }: {
+  label: string; value: unknown; onValid: (parsed: any) => void; placeholder: string;
+}) {
+  const [text, setText] = useState(() => (value === undefined ? '' : JSON.stringify(value, null, 2)));
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div>
+      <Label className="text-xs">{label}</Label>
+      <textarea
+        className={`w-full h-24 rounded-md border bg-background px-3 py-2 font-mono text-xs ${error ? 'border-red-500' : 'border-input'}`}
+        value={text}
+        placeholder={placeholder}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (e.target.value.trim() === '') { setError(null); onValid(undefined); return; }
+          try { onValid(JSON.parse(e.target.value)); setError(null); }
+          catch (err: any) { setError(err.message); }
+        }}
+      />
+      {error && <div className="text-xs text-red-500">Invalid JSON: {error}</div>}
+    </div>
+  );
+}
+
 function TestSetTab({ config, setConfig, isSimpleMode }: TabProps) {
   const addTest = () => {
     const newTest: TestCase = {
@@ -1076,6 +1102,8 @@ function TestSetTab({ config, setConfig, isSimpleMode }: TabProps) {
                 >
                   <option value="llm_grade">LLM Graded (1-10)</option>
                   <option value="exact_match">Exact Match</option>
+                  <option value="json_schema">JSON Schema</option>
+                  <option value="tool_call">Tool Call</option>
                 </select>
               </div>
             )}
@@ -1090,6 +1118,32 @@ function TestSetTab({ config, setConfig, isSimpleMode }: TabProps) {
                 placeholder="Enter test prompt..."
               />
             </div>
+
+            {test.mode === 'json_schema' && (
+              <JsonField
+                label="Response Schema (JSON)"
+                value={test.schema}
+                onValid={(v) => updateTest(test.id, { schema: v })}
+                placeholder='{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}'
+              />
+            )}
+
+            {test.mode === 'tool_call' && (
+              <>
+                <JsonField
+                  label="Tools (JSON array)"
+                  value={test.tools}
+                  onValid={(v) => updateTest(test.id, { tools: v })}
+                  placeholder='[{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}]'
+                />
+                <JsonField
+                  label="Expected Tool (JSON)"
+                  value={test.expectedTool}
+                  onValid={(v) => updateTest(test.id, { expectedTool: v })}
+                  placeholder='{"name":"get_weather","args":{"city":"Paris"},"argsMode":"subset"}'
+                />
+              </>
+            )}
 
             {test.mode === 'exact_match' && (
               <>
