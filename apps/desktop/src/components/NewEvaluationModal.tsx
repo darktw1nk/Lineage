@@ -2215,6 +2215,24 @@ function AdvancedTab({ config, setConfig }: TabProps) {
           />
         </div>
 
+        <div>
+          <LabelWithTooltip
+            htmlFor="runSeed"
+            label="Seed"
+            tooltip="Reproducibility seed: same seed + same config reproduces all evolution decisions (operator plan, parents, temperatures, holdout split). LLM outputs remain best-effort. Blank = random."
+          />
+          <Input
+            id="runSeed"
+            type="number"
+            placeholder="random"
+            value={config.seed ?? ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              setConfig({ ...config, seed: v === '' ? undefined : parseInt(v, 10) });
+            }}
+          />
+        </div>
+
         <div className="flex items-center space-x-2">
           <Switch
             id="pairwiseEnabled"
