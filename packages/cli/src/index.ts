@@ -4,11 +4,11 @@
  * PromptEngine.AI — CLI / Script Mode
  *
  * Usage:
- *   npx tsx cli/index.ts --config <path>           Run evolution from config file
- *   npx tsx cli/index.ts --sync-models              Sync models from OpenRouter
- *   npx tsx cli/index.ts --list-models              List available models
- *   npx tsx cli/index.ts --set-key <provider> <key> Save API key
- *   npx tsx cli/index.ts --help                     Show help
+ *   promptengine --config <path>           Run evolution from config file
+ *   promptengine --sync-models              Sync models from OpenRouter
+ *   promptengine --list-models              List available models
+ *   promptengine --set-key <provider> <key> Save API key
+ *   promptengine --help                     Show help
  */
 
 import { loadCliConfig, toEvaluationConfig, extractConfigKeys } from './config.js';
@@ -66,7 +66,7 @@ function printHelp(): void {
 PromptEngine.AI — CLI / Script Mode
 
 USAGE:
-  npx tsx cli/index.ts [OPTIONS]
+  promptengine [OPTIONS]
 
 OPTIONS:
   --config <path>              Run evolution from a JSON config file
@@ -97,16 +97,16 @@ SYSTEM PROMPTS:
 
 EXAMPLES:
   # Run an evolution
-  npx tsx cli/index.ts --config evolution.json
+  promptengine --config evolution.json
 
   # Save an API key (shared with desktop app)
-  npx tsx cli/index.ts --set-key openrouter sk-or-v1-xxx
+  promptengine --set-key openrouter sk-or-v1-xxx
 
   # Sync OpenRouter models
-  npx tsx cli/index.ts --sync-models
+  promptengine --sync-models
 
   # Pipe JSON output
-  npx tsx cli/index.ts --config evolution.json 2>/dev/null > results.json
+  promptengine --config evolution.json 2>/dev/null > results.json
 `);
 }
 

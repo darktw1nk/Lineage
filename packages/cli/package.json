@@ -1,0 +1,23 @@
+{
+  "name": "@promptengine/cli",
+  "version": "1.0.0",
+  "description": "Command-line runner for PromptEngine.AI prompt evolution — for CI, scripts, and AI agents.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "promptengine": "./dist/index.js" },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@promptengine/core": "^1.0.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/uuid": "^9.0.7",
+    "tsup": "^8.0.0"
+  }
+}

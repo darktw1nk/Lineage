@@ -5,7 +5,7 @@ import {
   onNodeCreated,
   onNodeUpdated,
   onTotals,
-} from '../../../cli/display.js';
+} from '../src/display.js';
 import type { CandidateNode } from '@promptengine/core';
 
 function makeNode(overrides: Partial<CandidateNode> = {}): CandidateNode {

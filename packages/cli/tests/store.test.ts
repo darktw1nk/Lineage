@@ -7,7 +7,7 @@ import {
   readElectronStore,
   writeElectronStore,
   getElectronStorePath,
-} from '../../../cli/store.js';
+} from '../src/store.js';
 
 describe('CLI Store - resolveApiKey', () => {
   const originalEnv = { ...process.env };

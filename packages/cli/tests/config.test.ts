@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { loadCliConfig, validateCliConfig, toEvaluationConfig, extractConfigKeys } from '../../../cli/config.js';
-import type { CliConfig } from '../../../cli/config.js';
+import { loadCliConfig, validateCliConfig, toEvaluationConfig, extractConfigKeys } from '../src/config.js';
+import type { CliConfig } from '../src/config.js';
 
 const MINIMAL_CONFIG: CliConfig = {
   seedPrompt: 'You are a helpful assistant.',

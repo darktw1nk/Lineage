@@ -32,7 +32,7 @@ function log(msg: string): void {
   process.stderr.write(msg + '\n');
 }
 
-export function onNodeCreated(node: CandidateNode): void {
+export function onNodeCreated(_node: CandidateNode): void {
   state.nodesTotal++;
 }
 

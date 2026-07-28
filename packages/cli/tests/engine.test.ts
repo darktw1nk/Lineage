@@ -140,7 +140,7 @@ describe('CLI Engine - runEvolution', () => {
   });
 
   it('inserts config and run into DB before starting evaluation', async () => {
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     const config = makeConfig();
 
     await runEvolution(config);
@@ -175,14 +175,14 @@ describe('CLI Engine - runEvolution', () => {
       setTimeout(() => simulateEvolution(runId, [makeNode()]), 0);
     });
 
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     await runEvolution(makeConfig());
 
     expect(callOrder).toEqual(['db:config', 'db:run', 'startEvaluation']);
   });
 
   it('returns rich result with generations, nodes, tests, and metrics', async () => {
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     const result = await runEvolution(makeConfig());
 
     expect(result.runId).toBeDefined();
@@ -219,7 +219,7 @@ describe('CLI Engine - runEvolution', () => {
   });
 
   it('tracks best node correctly', async () => {
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     const result = await runEvolution(makeConfig());
 
     expect(result.best).toBeDefined();
@@ -247,7 +247,7 @@ describe('CLI Engine - runEvolution', () => {
       }, 0);
     });
 
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     const result = await runEvolution(makeConfig());
 
     expect(result.error).toBe('Background mutation failed');
@@ -259,7 +259,7 @@ describe('CLI Engine - runEvolution', () => {
   it('handles startEvaluation throwing synchronously', async () => {
     mockStartEvaluation.mockRejectedValue(new Error('Setup failed: no models'));
 
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     const result = await runEvolution(makeConfig());
 
     expect(result.error).toBe('Setup failed: no models');
@@ -267,7 +267,7 @@ describe('CLI Engine - runEvolution', () => {
   });
 
   it('uses version 1.0 matching IPC handler', async () => {
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     await runEvolution(makeConfig());
 
     const runInsertCall = mockDbRun.mock.calls.find(
@@ -279,7 +279,7 @@ describe('CLI Engine - runEvolution', () => {
   });
 
   it('calls onRunId callback with the run ID', async () => {
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     let capturedRunId: string | null = null;
 
     await runEvolution(makeConfig(), {
@@ -292,7 +292,7 @@ describe('CLI Engine - runEvolution', () => {
   });
 
   it('writes JSON to stdout', async () => {
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     await runEvolution(makeConfig());
 
     const stdoutCalls = stdoutSpy.mock.calls;
@@ -317,7 +317,7 @@ describe('CLI Engine - runEvolution', () => {
       }, 0);
     });
 
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     const result = await runEvolution(makeConfig());
 
     expect(result.stopReason).toBe('budget');
@@ -336,7 +336,7 @@ describe('CLI Engine - runEvolution', () => {
       }
     });
 
-    const { runEvolution } = await import('../../../cli/engine.js');
+    const { runEvolution } = await import('../src/engine.js');
     const result = await runEvolution(makeConfig());
 
     // Should have retried 3 times (2 failures + 1 success)
