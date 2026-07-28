@@ -63,6 +63,7 @@ export interface EvolutionResult {
     generation: number;
   } | null;
   holdout?: HoldoutResult;
+  playoffs?: Array<{ generation: number; ranking: string[] }>;
   generations: EvolutionResultGeneration[];
 }
 
@@ -78,6 +79,7 @@ interface RunCollector {
   error: string | null;
   stopReason: string | null;
   holdout: HoldoutResult | null;
+  playoffs: Array<{ generation: number; ranking: string[] }>;
 }
 
 function createCollector(): RunCollector {
@@ -89,6 +91,7 @@ function createCollector(): RunCollector {
     error: null,
     stopReason: null,
     holdout: null,
+    playoffs: [],
   };
 }
 
@@ -138,7 +141,15 @@ function buildResult(
     })),
   }));
 
-  const best = collector.bestNode;
+  // Champion: latest playoff winner when playoffs ran, else best-by-fitness
+  let best = collector.bestNode;
+  const lastPlayoff = collector.playoffs[collector.playoffs.length - 1];
+  if (lastPlayoff) {
+    for (const nodesMap of collector.generations.values()) {
+      const winner = nodesMap.get(lastPlayoff.ranking[0]);
+      if (winner) { best = winner; break; }
+    }
+  }
 
   return {
     runId: run.id,
@@ -152,6 +163,7 @@ function buildResult(
     totals: { ...collector.totals },
     cacheHits: collector.cacheHits,
     holdout: collector.holdout ?? undefined,
+    ...(collector.playoffs.length ? { playoffs: collector.playoffs } : {}),
     best: best
       ? {
           prompt: best.prompt,
@@ -267,6 +279,9 @@ export async function runEvolution(
         break;
       case 'holdout_result':
         collector.holdout = data.holdout;
+        break;
+      case 'playoff_result':
+        collector.playoffs.push({ generation: data.generation, ranking: data.ranking });
         break;
       case 'error':
         collector.error = data.message;

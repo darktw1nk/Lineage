@@ -33,6 +33,7 @@ export interface CliConfig {
   samplesPerTest?: number;    // default 1: samples averaged per test
   holdoutShare?: number;      // default 0: seeded share of non-flagged tests held out
   holdoutSeed?: number;       // default 42: PRNG seed for the share split
+  pairwise?: { enabled: boolean; contenders?: number }; // opt-in playoff among top contenders
   populationSize?: number;
   generationSize?: number;
   maxGenerations?: number;
@@ -252,6 +253,7 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
     ...(config.samplesPerTest !== undefined ? { samplesPerTest: config.samplesPerTest } : {}),
     ...(config.holdoutShare !== undefined ? { holdoutShare: config.holdoutShare } : {}),
     ...(config.holdoutSeed !== undefined ? { holdoutSeed: config.holdoutSeed } : {}),
+    ...(config.pairwise ? { pairwise: config.pairwise } : {}),
   };
 }
 

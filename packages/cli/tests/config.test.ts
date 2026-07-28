@@ -156,6 +156,21 @@ describe('CLI Config - toEvaluationConfig', () => {
     expect(evalConfig.serviceModel).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4.5' });
   });
 
+  it('passes pairwise config through', () => {
+    const config: CliConfig = {
+      seedPrompt: 'test',
+      testSet: [{ prompt: 'x' }],
+      pairwise: { enabled: true, contenders: 6 },
+    };
+    const evalConfig = toEvaluationConfig(config);
+    expect(evalConfig.pairwise).toEqual({ enabled: true, contenders: 6 });
+  });
+
+  it('omits pairwise when not configured', () => {
+    const evalConfig = toEvaluationConfig(MINIMAL_CONFIG);
+    expect(evalConfig.pairwise).toBeUndefined();
+  });
+
   it('generationSize defaults to populationSize', () => {
     const config: CliConfig = {
       seedPrompt: 'test',

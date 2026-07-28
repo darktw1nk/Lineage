@@ -31,7 +31,7 @@ PromptEngine treats a prompt like a genome: it spawns a population of variants, 
 Each generation, the engine:
 
 1. **Evaluates** every candidate against the full test set, in parallel, with per-call cost tracking.
-2. **Selects** parents — **Top-K** (take the best K) or **Top-P** (sample by cumulative fitness probability, keeps more diversity), with **elitism** (`eliteShare`): champions survive unchanged, so fitness never regresses.
+2. **Selects** parents — **Top-K** (take the best K) or **Top-P** (sample by cumulative fitness probability, keeps more diversity), with **elitism** (`eliteShare`): champions survive unchanged, so fitness never regresses. Optionally, a **pairwise playoff** re-ranks the top contenders head-to-head (both presentation orders, position bias cancelled) — decisive exactly where absolute scores cluster at 9.8-vs-9.9.
 3. **Distributes offspring** fitness-proportionally: stronger parents get more children.
 4. **Breeds** the next generation with five operators, mixed by configurable shares:
 

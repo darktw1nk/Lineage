@@ -195,6 +195,12 @@ export function generateReport(
   lines.push('## Best Evolved Prompt');
   lines.push('');
 
+  if (result.playoffs && result.playoffs.length > 0) {
+    const lastPlayoff = result.playoffs[result.playoffs.length - 1];
+    lines.push(`*Champion selected by pairwise playoff (${lastPlayoff.ranking.length} contenders, both-orders judging).*`);
+    lines.push('');
+  }
+
   if (bestNode && result.best) {
     lines.push(`**Fitness:** ${result.best.fitness.toFixed(3)}  `);
     lines.push(`**Quality:** ${result.best.quality.toFixed(1)}  `);
