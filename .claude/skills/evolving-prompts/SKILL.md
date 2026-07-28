@@ -1,0 +1,64 @@
+---
+name: evolving-prompts
+description: Use when asked to improve, optimize, or evolve an LLM prompt with measurable quality — or to run the PromptEngine evolution CLI, author an evolution config, or interpret evolution results/fitness.
+---
+
+# Evolving Prompts (PromptEngine CLI)
+
+## Overview
+
+This repo's genetic-algorithm engine evolves a seed prompt against a test set. You author a JSON config, run the CLI, and read the JSON result. Full config reference: `docs/cli.md`.
+
+```bash
+npm run cli -- --config cfg.json --db ./run.db --output results.json
+```
+
+Progress/logs → stderr. `--output` (and stdout) → pure JSON. Exit 0 = usable best prompt; exit 1 = none. A markdown report lands in `testoutputs/` beside the output file.
+
+## Before the first run
+
+1. **Pick catalogued models**: `npm run cli -- --list-models --db ./throwaway.db` (the `--db` keeps even this read isolated from the shared desktop DB). Budget enforcement needs the model in the catalog; uncatalogued IDs get default pricing. Providers retire models — a 404 "model no longer available" means pick a newer one from the list.
+2. **Keys**: env vars (`GEMINI_API_KEY`, `OPENAI_API_KEY`, …) win over stored keys. Cheap default when only Gemini is available: `gemini/gemini-2.5-flash-lite` for both `models` and `serviceModel`.
+3. **Isolate**: always pass `--db ./throwaway.db` — the default DB is shared with the desktop app.
+
+## Minimal config
+
+```json
+{
+  "name": "Ticket triage",
+  "seedPrompt": "Summarize the ticket.",
+  "models": ["gemini/gemini-2.5-flash-lite"],
+  "serviceModel": "gemini/gemini-2.5-flash-lite",
+  "populationSize": 4, "generationSize": 4, "maxGenerations": 2,
+  "budget": 0.02, "parallelLimit": 4,
+  "testSet": [
+    { "name": "refund", "mode": "llm_grade",
+      "prompt": "<realistic input>", "expected": "<reference answer>" },
+    { "name": "exact", "mode": "exact_match",
+      "prompt": "<input>", "expected": "<only-correct output>" }
+  ],
+  "fitnessWeights": { "quality": 1.0, "cost": 0.1, "latency": 0.1 }
+}
+```
+
+- `llm_grade` + `expected`: the judge receives `expected` as a reference and grades content AND format consistency with it. Encode format rules in `expected` itself; for very strict rubrics override `systemPrompts.llmGradingPrompt` (see `docs/cli.md`).
+- `exact_match` needs the prompt to force terse output, or scores stay low on verbose models.
+- `budget` is a hard stop. 4 nodes x 2 generations x 3 tests on flash-lite ≈ $0.003.
+- `maxGenerations` counts from generation 0: `maxGenerations: 2` runs exactly generations 0 and 1.
+
+## Getting improvement (not just runs)
+
+- **Meta-prompting is the only failure-aware operator** — it reads test failures. When iterating on quality, set `"operators": { "mutationShare": 0.4, "metaPrompting": { "enabled": true, "share": 0.6 } }`. Blind mutations often hurt.
+- **Iterate by reseeding**: take `best.prompt` from `results.json` as the next run's `seedPrompt`, optionally add `targetFitness` to stop early. Two small runs beat one big one.
+- **`targetFitness` ceiling**: fitness is quality diluted by the other weights — with weights `{quality: 1.0, cost: 0.1, latency: 0.1}` and no cost/latency norms configured, the maximum is 10 × 1.0/1.2 ≈ **8.33**, so `targetFitness: 9` would never trigger. Compute the ceiling as `10 × qualityWeight / sum(weights)` (or use quality-only weights when you want targetFitness on a 0–10 scale).
+- **Multiple `models` entries** let evolution discover that a different model beats prompt rewording.
+
+## Reading results
+
+`results.json`: `best.prompt` / `best.fitness` (0–10) / `best.model`, per-node `tests[].score` + `llmGradeReasoning` (judge's justification — read it to understand low scores), `totals.usd`, `stopReason` (`target` | `budget` | `exhausted` | …).
+
+## Common mistakes
+
+- Judging quality by fitness alone — fitness blends cost/latency weights; compare `quality` for prompt skill.
+- Test prompts that are instructions instead of realistic inputs (the candidate prompt supplies the instructions; testSet prompts are the data).
+- One test case — the winner overfits it. Use 3+, covering distinct behaviors.
