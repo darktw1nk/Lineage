@@ -5,6 +5,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Switch } from './ui/switch';
 import { Trash2, ArrowUpDown, RefreshCw } from 'lucide-react';
 import type { AppSettings, ModelCostEntry } from '../types';
 
@@ -126,10 +127,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         </DialogHeader>
 
         <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="apikeys">API Keys</TabsTrigger>
             <TabsTrigger value="costs">Models & Costs</TabsTrigger>
+            <TabsTrigger value="plugins">Plugins</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="space-y-4 min-h-[500px]">
@@ -452,6 +454,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               + Add Model
             </Button>
           </TabsContent>
+
+          <TabsContent value="plugins" className="space-y-4 min-h-[500px]">
+            <PluginsTab />
+          </TabsContent>
         </Tabs>
 
         <div className="flex justify-end space-x-2 mt-4">
@@ -572,3 +578,62 @@ function getSortedCosts(
   return sorted;
 }
 
+
+// Plugins tab — lists discovered plugins with enable/disable (applies on restart)
+function PluginsTab() {
+  const [pluginInfo, setPluginInfo] = useState<{
+    manifests: Array<{ name: string; version?: string; source: string; operators: string[]; providers: string[]; error?: string }>;
+    disabled: string[];
+  } | null>(null);
+
+  useEffect(() => {
+    window.electronAPI.plugins.list().then(setPluginInfo).catch(() => setPluginInfo({ manifests: [], disabled: [] }));
+  }, []);
+
+  const togglePlugin = async (name: string, enabled: boolean) => {
+    const disabled = await window.electronAPI.plugins.setEnabled(name, enabled);
+    setPluginInfo(info => (info ? { ...info, disabled } : info));
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Plugins add genetic operators and LLM providers. They are local JavaScript with full access —
+        treat them like installed dependencies. Enable/disable changes apply after restarting the app.
+      </p>
+
+      {pluginInfo && pluginInfo.manifests.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No plugins installed. Drop a plugin file into the plugins folder to get started.
+        </p>
+      )}
+
+      {pluginInfo?.manifests.map(m => (
+        <div key={m.source} className="flex items-center justify-between rounded border p-3 text-sm">
+          <div>
+            <span className="font-medium">{m.name}</span>
+            {m.version && <span className="ml-1 text-xs text-muted-foreground">v{m.version}</span>}
+            <div className="text-xs text-muted-foreground">
+              {m.error
+                ? <span className="text-red-500">Failed to load: {m.error}</span>
+                : `${m.operators.length} operator(s), ${m.providers.length} provider(s)`}
+            </div>
+          </div>
+          {!m.error && (
+            <Switch
+              checked={!pluginInfo.disabled.includes(m.name)}
+              onCheckedChange={(v: boolean) => togglePlugin(m.name, v)}
+            />
+          )}
+        </div>
+      ))}
+
+      <Button variant="outline" size="sm" onClick={() => window.electronAPI.plugins.openFolder()}>
+        Open plugins folder
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Author guide: docs/plugins.md in the repository.
+      </p>
+    </div>
+  );
+}

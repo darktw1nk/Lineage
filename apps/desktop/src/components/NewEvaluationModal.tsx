@@ -1510,6 +1510,61 @@ function VariationsTab({ config, setConfig }: TabProps) {
           </>
         )}
       </div>
+
+      <PluginOperatorsSection config={config} setConfig={setConfig} />
+    </div>
+  );
+}
+
+// Plugin operators — rendered only when installed plugins contribute operators.
+// Shares are written into config.operators.custom and normalized together
+// with the built-in operator shares by the engine.
+function PluginOperatorsSection({ config, setConfig }: TabProps) {
+  const [pluginOperators, setPluginOperators] = useState<Array<{ name: string }>>([]);
+
+  useEffect(() => {
+    window.electronAPI.plugins.list().then(({ manifests, disabled }) => {
+      const ops = manifests
+        .filter(m => !m.error && !disabled.includes(m.name))
+        .flatMap(m => m.operators.map(name => ({ name })));
+      setPluginOperators(ops);
+    }).catch(() => {});
+  }, []);
+
+  if (pluginOperators.length === 0) return null;
+
+  return (
+    <div className="space-y-3 border-t pt-4">
+      <LabelWithTooltip
+        htmlFor="plugin-operators"
+        label="Plugin Operators"
+        tooltip="Operators contributed by installed plugins. Shares mix with the built-in operators and are normalized together."
+      />
+      {pluginOperators.map(op => (
+        <div key={op.name} className="flex items-center gap-3">
+          <span className="w-56 text-sm">{op.name}</span>
+          <Input
+            type="number"
+            step="0.05"
+            min="0"
+            max="1"
+            value={config.operators?.custom?.[op.name]?.share ?? 0}
+            onChange={(e) =>
+              setConfig({
+                ...config,
+                operators: {
+                  ...config.operators!,
+                  custom: {
+                    ...config.operators?.custom,
+                    [op.name]: { enabled: true, share: parseFloat(e.target.value) || 0 },
+                  },
+                },
+              })
+            }
+            placeholder="0"
+          />
+        </div>
+      ))}
     </div>
   );
 }
