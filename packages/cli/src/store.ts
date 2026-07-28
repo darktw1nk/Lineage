@@ -10,7 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Provider } from '@promptengine/core';
 
-const ENV_VAR_MAP: Record<Provider, string> = {
+const ENV_VAR_MAP: Partial<Record<Provider, string>> = {
   openai: 'OPENAI_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
   gemini: 'GEMINI_API_KEY',
@@ -100,8 +100,8 @@ export function resolveApiKey(
   provider: Provider,
   cliConfigKeys?: Record<string, string>
 ): string | null {
-  // 1. Environment variable
-  const envVar = ENV_VAR_MAP[provider];
+  // 1. Environment variable (plugin providers use <PROVIDER>_API_KEY)
+  const envVar = ENV_VAR_MAP[provider] ?? `${String(provider).toUpperCase().replace(/-/g, '_')}_API_KEY`;
   if (envVar && process.env[envVar]) {
     return process.env[envVar]!;
   }

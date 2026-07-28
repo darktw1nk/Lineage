@@ -71,7 +71,9 @@ process.on('exit', () => {
 // ---------------------------------------------------------------------------
 
 function printHelp(): void {
-  console.log(`
+  // Write directly: console.log is rerouted to stderr for engine logs, but
+  // --help output belongs on stdout.
+  process.stdout.write(`
 PromptEngine.AI — CLI / Script Mode
 
 USAGE:
@@ -81,6 +83,7 @@ OPTIONS:
   --config <path>              Run evolution from a JSON config file
   --output <path>              Write JSON results to file (default: stdout)
   --db <path>                  Use a specific database file
+  --plugins <dir>              Load plugins from a directory (repeatable)
   --sync-models                Sync available models from OpenRouter
   --list-models                List all models in the database with pricing
   --set-key <provider> <key>   Save an API key (shared with desktop app)
@@ -127,6 +130,7 @@ function parseArgs(argv: string[]): {
   listModels: boolean;
   setKey?: { provider: Provider; key: string };
   help: boolean;
+  pluginDirs: string[];
 } {
   const args = argv.slice(2);
   const result = {
@@ -137,6 +141,7 @@ function parseArgs(argv: string[]): {
     listModels: false,
     setKey: undefined as { provider: Provider; key: string } | undefined,
     help: false,
+    pluginDirs: [] as string[],
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -150,6 +155,9 @@ function parseArgs(argv: string[]): {
       case '--db':
         result.db = args[++i];
         break;
+      case '--plugins':
+        result.pluginDirs.push(args[++i]);
+        break;
       case '--sync-models':
         result.syncModels = true;
         break;
@@ -160,8 +168,7 @@ function parseArgs(argv: string[]): {
         const provider = args[++i] as Provider;
         const key = args[++i];
         if (!VALID_PROVIDERS.includes(provider)) {
-          console.error(`Invalid provider: "${provider}". Valid providers: ${VALID_PROVIDERS.join(', ')}`);
-          process.exit(1);
+          console.error(`Note: "${provider}" is not a built-in provider (${VALID_PROVIDERS.join(', ')}) — saving the key anyway (plugin provider assumed).`);
         }
         if (!key) {
           console.error('Missing API key value for --set-key');
@@ -272,7 +279,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
   closeDatabase();
 }
 
-async function handleRunEvolution(configPath: string, outputPath?: string, dbPath?: string): Promise<void> {
+async function handleRunEvolution(configPath: string, outputPath?: string, dbPath?: string, pluginDirs: string[] = []): Promise<void> {
   // Load and validate config
   const cliConfig = loadCliConfig(configPath);
   const configKeys = extractConfigKeys(cliConfig);
@@ -280,11 +287,19 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
   // Install store shim before any provider imports
   installStoreShim(configKeys, cliConfig.systemPrompts);
 
+  // Load plugins (config-relative paths + --plugins dirs) BEFORE the database
+  // opens so plugin provider model entries flush into model_costs.
+  const pathMod = await import('path');
+  const configDir = pathMod.dirname(pathMod.resolve(configPath));
+  if ((cliConfig.plugins?.length ?? 0) > 0 || pluginDirs.length > 0) {
+    const { loadCliPlugins } = await import('./plugins.js');
+    await loadCliPlugins({ configDir, configPlugins: cliConfig.plugins ?? [], flagDirs: pluginDirs });
+  }
+
   // Initialize database
   await initCliDatabase(dbPath);
 
   // Verify we have API keys for all required providers
-  const configDir = (await import('path')).dirname((await import('path')).resolve(configPath));
   const evalConfig = toEvaluationConfig(cliConfig, configDir);
   const requiredProviders = new Set<Provider>();
   for (const model of evalConfig.enabledModels) {
@@ -369,7 +384,7 @@ async function main(): Promise<void> {
   }
 
   if (args.config) {
-    await handleRunEvolution(args.config, args.output, args.db);
+    await handleRunEvolution(args.config, args.output, args.db, args.pluginDirs);
     return;
   }
 

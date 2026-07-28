@@ -27,6 +27,7 @@ export interface CliConfig {
   }>;
   models?: string[];          // e.g. ["openai/gpt-4o", "anthropic/claude-sonnet-4.5"]
   serviceModel?: string;      // e.g. "openai/gpt-4o-mini"
+  plugins?: string[];         // plugin file/dir paths, resolved relative to the config file
   populationSize?: number;
   generationSize?: number;
   maxGenerations?: number;
@@ -62,6 +63,7 @@ export interface CliConfig {
       share: number;
       temperature?: { enabled: boolean; min: number; max: number };
     };
+    custom?: Record<string, { enabled?: boolean; share: number }>; // plugin operator shares
   };
   // Inline API keys (lower priority than env vars)
   openaiKey?: string;
@@ -218,6 +220,7 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
       metaPrompting: config.operators?.metaPrompting ?? { enabled: true, share: 0.2 },
       modelVariation: config.operators?.modelVariation ?? { enabled: enabledModels.length > 1, share: 0.1 },
       paramVariation: config.operators?.paramVariation ?? { enabled: true, share: 0.1, temperature: { enabled: true, min: 0.3, max: 1.5 } },
+      ...(config.operators?.custom ? { custom: config.operators.custom } : {}),
     },
     population,
     enabledModels,

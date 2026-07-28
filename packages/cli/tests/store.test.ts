@@ -134,3 +134,14 @@ describe('CLI Store - writeElectronStore / readElectronStore', () => {
     writeElectronStore('apiKey.test_provider', undefined);
   });
 });
+
+describe('plugin provider env fallback', () => {
+  it('derives <PROVIDER>_API_KEY for non-built-in providers', () => {
+    process.env.MY_LOCAL_LLM_API_KEY = 'plugin-key';
+    try {
+      expect(resolveApiKey('my-local-llm' as any)).toBe('plugin-key');
+    } finally {
+      delete process.env.MY_LOCAL_LLM_API_KEY;
+    }
+  });
+});

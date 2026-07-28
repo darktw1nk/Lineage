@@ -23,6 +23,16 @@ Progress and all engine logs go to stderr; stdout carries exactly the JSON resul
 
 **`llm_grade` + `expected`**: when a test case has an `expected` value, the default LLM judge receives it as a reference answer and grades consistency with it (content and format). For strict formatting requirements, you can still override `systemPrompts.llmGradingPrompt` with a custom rubric.
 
+## Plugins
+
+Extend the engine with custom operators and providers (author guide: [plugins.md](plugins.md)).
+
+- Config field: `"plugins": ["./my-operator.mjs", "./plugin-dir"]` — paths relative to the config file.
+- Flag: `--plugins <dir>` (repeatable) — loads every plugin module in the directory.
+- Plugin operator shares go under `"operators": { "custom": { "<operator-name>": { "share": 0.5 } } }` and are normalized together with the built-in operators.
+- Keys for plugin providers resolve from `<PROVIDER>_API_KEY` (uppercased, dashes→underscores) or `--set-key <provider> <key>`.
+- A plugin that fails to load prints an error to stderr; the run continues without it.
+
 ---
 
 ## Config File
