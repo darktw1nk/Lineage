@@ -17,7 +17,11 @@ npm run cli -- --set-key <provider> <key>   # Save API key (shared with desktop 
 npm run cli -- --help                       # Show help
 ```
 
-Progress is written to stderr, JSON result to stdout. Pipe with `2>/dev/null` for clean JSON output.
+Progress and all engine logs go to stderr; stdout carries exactly the JSON result. Pipe with `2>/dev/null` for clean JSON, or use `--output <path>` to write it to a file.
+
+**Model IDs**: run `--list-models` first — only catalogued models get correct cost accounting (budget enforcement depends on it). Catalog pricing refreshed 2026-07; providers retire models over time, so if a run fails with a 404 "model no longer available", pick a newer model from `--list-models` or sync via OpenRouter.
+
+**`llm_grade` + `expected`**: when a test case has an `expected` value, the default LLM judge receives it as a reference answer and grades consistency with it (content and format). For strict formatting requirements, you can still override `systemPrompts.llmGradingPrompt` with a custom rubric.
 
 ---
 

@@ -8,7 +8,7 @@
 import type { EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
-import { stripPromptDelimiters } from '../utils/text.js';
+import { stripPromptDelimiters, extractJsonArray } from '../utils/text.js';
 
 /**
  * Default Mutation Strategy Catalog
@@ -208,9 +208,8 @@ export async function mutateNode(
         throw new Error('Empty response from service model (proposal step)');
       }
       
-      // Try to parse JSON
-      const cleaned = proposalResult.output.replace(/```json\n?/g, '').replace(/```/g, '').trim();
-      edits = JSON.parse(cleaned);
+      // Try to parse JSON (tolerates fences and surrounding prose)
+      edits = extractJsonArray(proposalResult.output);
       console.log(`[Mutation] Successfully parsed edits on attempt ${attempt + 1}:`, edits);
       
       // Success! Break out of retry loop

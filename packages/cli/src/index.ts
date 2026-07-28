@@ -11,11 +11,20 @@
  *   promptengine --help                     Show help
  */
 
+import { format } from 'node:util';
 import { loadCliConfig, toEvaluationConfig, extractConfigKeys } from './config.js';
 import { installStoreShim } from './engine.js';
 import { resolveApiKey, saveApiKey } from './store.js';
 import { initCliDatabase } from './database.js';
 import type { Provider } from '@promptengine/core';
+
+// The engine logs via console.log/info/warn. Route ALL of it to stderr so
+// stdout carries exactly one thing: the JSON result (pipe-friendly contract).
+const toStderr = (...args: unknown[]) => { process.stderr.write(format(...args) + '\n'); };
+console.log = toStderr;
+console.info = toStderr;
+console.warn = toStderr;
+console.debug = toStderr;
 
 const VALID_PROVIDERS: Provider[] = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq'];
 
@@ -306,11 +315,14 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
     process.stderr.write(`\nResults written to ${outputPath}\n`);
   }
 
-  // Generate markdown report
+  // Generate markdown report — next to the --output file when given,
+  // otherwise under the current working directory.
   const { generateReport, slugify } = await import('./report.js');
   const fs = await import('fs');
   const path = await import('path');
-  const reportDir = path.resolve('testoutputs');
+  const reportDir = outputPath
+    ? path.join(path.dirname(path.resolve(outputPath)), 'testoutputs')
+    : path.resolve('testoutputs');
   fs.mkdirSync(reportDir, { recursive: true });
   const slug = slugify(cliConfig.name || evalConfig.name || 'evolution');
   const reportPath = path.join(reportDir, `output-${slug}.md`);

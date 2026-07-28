@@ -8,6 +8,7 @@ USER: Rubric (1..10):
 - Format compliance
 - Hallucination avoidance
 - Brevity & clarity
+- Consistency with the EXPECTED reference in content AND format (when one is provided)
 
 Given:
 PROMPT (candidate): <<<
@@ -18,6 +19,9 @@ INPUT (test): <<<
 >>>
 OUTPUT (model): <<<
 \${modelOutput}
+>>>
+EXPECTED (reference answer; "(none)" if not provided): <<<
+\${expectedOutput}
 >>>
 
 Return:

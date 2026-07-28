@@ -14,3 +14,30 @@ export function stripPromptDelimiters(text: string): string {
   }
   return result;
 }
+
+/**
+ * Extract a JSON array from a service-model response. Models (especially
+ * small/cheap ones) often wrap the array in markdown fences or surround it
+ * with prose — this strips fences, then falls back to slicing from the
+ * first '[' to the last ']'. Throws if no parseable array is found.
+ */
+export function extractJsonArray(raw: string): any[] {
+  const cleaned = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+  try {
+    const direct = JSON.parse(cleaned);
+    if (Array.isArray(direct)) return direct;
+  } catch {
+    // Fall through to bracket extraction
+  }
+  const start = cleaned.indexOf('[');
+  const end = cleaned.lastIndexOf(']');
+  if (start !== -1 && end > start) {
+    try {
+      const sliced = JSON.parse(cleaned.slice(start, end + 1));
+      if (Array.isArray(sliced)) return sliced;
+    } catch {
+      // Fall through to the error below
+    }
+  }
+  throw new Error('No JSON array found in model output');
+}

@@ -948,8 +948,11 @@ function finishEvaluation(runId: UUID, state: EvaluationState): void {
   `).run(JSON.stringify(state.run), runId);
   
   // Send final updates
-  sendUpdate(runId, { type: 'status', status: 'finished' });
+  if (state.run.stopReason) {
+    sendUpdate(runId, { type: 'stop', reason: state.run.stopReason });
+  }
   sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+  sendUpdate(runId, { type: 'status', status: 'finished' });
   
   // Remove from active evaluations
   activeEvaluations.delete(runId);
