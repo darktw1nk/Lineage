@@ -1,7 +1,10 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import Store from 'electron-store';
 import { initializeDatabase, closeDatabase } from './database/init.js';
+import { setStore, type StoreInterface } from './store.js';
+import { setSendUpdate } from './engine/evaluator_v2.js';
 import { registerIPCHandlers } from './ipc/handlers.js';
 import { initLogger, getLogBuffer } from './logger.js';
 
@@ -40,12 +43,21 @@ const createWindow = () => {
 };
 
 app.whenReady().then(async () => {
-  // Initialize database
-  await initializeDatabase();
-  
+  // Inject platform services into the engine (host-provided: store, update sender, db path)
+  setStore(new Store({ encryptionKey: 'prompt-evolution-secure-key' }) as unknown as StoreInterface);
+
+  setSendUpdate((runId, data) => {
+    const windows = BrowserWindow.getAllWindows();
+    if (windows.length > 0) {
+      windows[0].webContents.send(`eval:updates:${runId}`, data);
+    }
+  });
+
+  await initializeDatabase(path.join(app.getPath('userData'), 'evolution.db'));
+
   // Register IPC handlers
   registerIPCHandlers(ipcMain);
-  
+
   createWindow();
 
   app.on('activate', () => {
@@ -64,4 +76,3 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
-

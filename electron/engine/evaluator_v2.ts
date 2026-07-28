@@ -57,19 +57,11 @@ interface EvaluationState {
 const activeEvaluations = new Map<UUID, EvaluationState>();
 
 /**
- * Pluggable update sender. Default uses Electron BrowserWindow IPC.
- * CLI overrides this via setSendUpdate() before starting evaluations.
+ * Pluggable update sender. Defaults to a no-op; the host injects a real
+ * sender via setSendUpdate() (Electron: BrowserWindow IPC; CLI: collector).
  */
-let _sendUpdate: (runId: UUID, data: any) => void = (runId, data) => {
-  try {
-    const { BrowserWindow } = require('electron');
-    const windows = BrowserWindow.getAllWindows();
-    if (windows.length > 0) {
-      windows[0].webContents.send(`eval:updates:${runId}`, data);
-    }
-  } catch {
-    // Not in Electron context (CLI mode) — ignore
-  }
+let _sendUpdate: (runId: UUID, data: any) => void = () => {
+  // No-op until the host injects a sender via setSendUpdate().
 };
 
 export function setSendUpdate(fn: (runId: UUID, data: any) => void): void {

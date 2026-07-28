@@ -165,15 +165,9 @@ export function getDatabase(): SqlJsWrapper {
   return db;
 }
 
-export async function initializeDatabase(customDbPath?: string): Promise<void> {
-  let dbPath: string;
-  if (customDbPath) {
-    dbPath = customDbPath;
-  } else {
-    // Dynamic import so CLI can skip Electron dependency when providing customDbPath
-    const { app } = await import('electron');
-    const userDataPath = app.getPath('userData');
-    dbPath = path.join(userDataPath, 'evolution.db');
+export async function initializeDatabase(dbPath: string): Promise<void> {
+  if (!dbPath) {
+    throw new Error('initializeDatabase requires a database file path');
   }
 
   // Ensure directory exists
