@@ -1,5 +1,5 @@
 import { BaseProviderAdapter } from './base.js';
-import type { Provider } from '../types.js';
+import type { Provider, ToolDef } from '../types.js';
 import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
@@ -21,6 +21,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
     seed?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    tools?: ToolDef[];
   }): Promise<{
     output: string;
     promptTokens: number;
@@ -42,7 +43,10 @@ export class AnthropicAdapter extends BaseProviderAdapter {
       if (opts.system) {
         body.system = opts.system;
       }
-      
+      if (opts.tools?.length) {
+        body.tools = opts.tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters ?? { type: 'object' } }));
+      }
+
       console.log(`[Anthropic] REQUEST:`, JSON.stringify(body, null, 2));
       
       const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
@@ -70,8 +74,16 @@ export class AnthropicAdapter extends BaseProviderAdapter {
       
       const latencyMs = Date.now() - startTime;
       
+      const blocks = data.content ?? [];
+      const output = blocks.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+      const uses = blocks.filter((b: any) => b.type === 'tool_use');
+      const toolCalls = uses.length > 0
+        ? uses.map((b: any) => ({ name: b.name, arguments: b.input ?? {} }))
+        : undefined;
+
       const result = {
-        output: data.content?.[0]?.text ?? '',
+        output,
+        ...(toolCalls ? { toolCalls } : {}),
         promptTokens: data.usage?.input_tokens ?? 0,
         completionTokens: data.usage?.output_tokens ?? 0,
         latencyMs,

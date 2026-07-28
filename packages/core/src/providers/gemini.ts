@@ -1,5 +1,5 @@
 import { BaseProviderAdapter } from './base.js';
-import type { Provider } from '../types.js';
+import type { Provider, ToolDef } from '../types.js';
 import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
@@ -21,6 +21,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
     seed?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    tools?: ToolDef[];
   }): Promise<{
     output: string;
     promptTokens: number;
@@ -39,6 +40,9 @@ export class GeminiAdapter extends BaseProviderAdapter {
           maxOutputTokens: opts.maxTokens ?? 4096,
           ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
         },
+        ...(opts.tools?.length
+          ? { tools: [{ functionDeclarations: opts.tools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })) }] }
+          : {}),
       };
       if (opts.system) {
         body.systemInstruction = { parts: [{ text: opts.system }] };
@@ -75,12 +79,18 @@ export class GeminiAdapter extends BaseProviderAdapter {
       const latencyMs = Date.now() - startTime;
       
       // Gemini token counting is approximate
-      const output = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      const parts = data.candidates?.[0]?.content?.parts ?? [];
+      const output = parts.filter((p: any) => typeof p.text === 'string').map((p: any) => p.text).join('');
+      const fnParts = parts.filter((p: any) => p.functionCall);
+      const toolCalls = fnParts.length > 0
+        ? fnParts.map((p: any) => ({ name: p.functionCall.name, arguments: p.functionCall.args ?? {} }))
+        : undefined;
       const promptTokens = this.estimateTokens(opts.prompt).prompt;
       const completionTokens = this.estimateTokens(output).prompt;
-      
+
       const result = {
         output,
+        ...(toolCalls ? { toolCalls } : {}),
         promptTokens,
         completionTokens,
         latencyMs,

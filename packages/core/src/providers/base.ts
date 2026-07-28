@@ -1,4 +1,4 @@
-import type { Provider, ProviderAdapter } from '../types.js';
+import type { Provider, ProviderAdapter, ToolDef } from '../types.js';
 import { getModelCost } from './costs.js';
 import { withGlobalSemaphore } from '../engine/semaphore.js';
 
@@ -16,6 +16,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     seed?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    tools?: ToolDef[];
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
@@ -23,6 +24,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     promptTokens: number;
     completionTokens: number;
     latencyMs: number;
+    toolCalls?: Array<{ name: string; arguments: Record<string, unknown> }>;
   }>;
 
   async call(opts: {
@@ -32,6 +34,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     seed?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    tools?: ToolDef[];
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
@@ -40,6 +43,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     completionTokens: number;
     latencyMs: number;
     usd: number;
+    toolCalls?: Array<{ name: string; arguments: Record<string, unknown> }>;
   }> {
     // Wrap ALL API calls with global semaphore
     return withGlobalSemaphore(async () => {

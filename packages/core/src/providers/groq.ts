@@ -1,5 +1,5 @@
 import { BaseProviderAdapter } from './base.js';
-import type { Provider } from '../types.js';
+import type { Provider, ToolDef } from '../types.js';
 import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
@@ -20,6 +20,7 @@ export class GroqAdapter extends BaseProviderAdapter {
     seed?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    tools?: ToolDef[];
     providerOptions?: Record<string, any>;
   }): Promise<{
     output: string;
@@ -48,6 +49,11 @@ export class GroqAdapter extends BaseProviderAdapter {
 
       console.log(`[Groq] Calling model: ${opts.model}, temperature: ${body.temperature}${body.reasoning_effort ? `, reasoning_effort: ${body.reasoning_effort}` : ''}`);
 
+      if (opts.tools?.length) {
+        body.tools = opts.tools.map(t => ({ type: 'function', function: t }));
+        body.tool_choice = 'auto';
+      }
+
       let response;
       try {
         response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
@@ -75,8 +81,20 @@ export class GroqAdapter extends BaseProviderAdapter {
       const data = await response.json();
       const latencyMs = Date.now() - startTime;
 
+      const message = data.choices[0]?.message;
+      let toolCalls;
+      if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+        toolCalls = message.tool_calls.map((tc: any) => {
+          let args: Record<string, unknown> = {};
+          try { args = JSON.parse(tc.function?.arguments || '{}'); }
+          catch { console.warn('[Groq] Unparseable tool arguments:', tc.function?.arguments); }
+          return { name: tc.function?.name ?? '', arguments: args };
+        });
+      }
+
       return {
-        output: data.choices[0]?.message?.content ?? '',
+        output: message?.content ?? '',
+        ...(toolCalls ? { toolCalls } : {}),
         promptTokens: data.usage?.prompt_tokens ?? 0,
         completionTokens: data.usage?.completion_tokens ?? 0,
         latencyMs,

@@ -1,5 +1,5 @@
 import { BaseProviderAdapter } from './base.js';
-import type { Provider } from '../types.js';
+import type { Provider, ToolDef } from '../types.js';
 import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
@@ -21,6 +21,7 @@ export class OpenAIAdapter extends BaseProviderAdapter {
     seed?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    tools?: ToolDef[];
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
@@ -87,6 +88,11 @@ export class OpenAIAdapter extends BaseProviderAdapter {
       
       console.log(`[OpenAI] REQUEST:`, JSON.stringify(body, null, 2));
       
+      if (opts.tools?.length) {
+        body.tools = opts.tools.map(t => ({ type: 'function', function: t }));
+        body.tool_choice = 'auto';
+      }
+
       let response;
       try {
         response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
@@ -125,8 +131,20 @@ export class OpenAIAdapter extends BaseProviderAdapter {
       
       const latencyMs = Date.now() - startTime;
       
+      const message = data.choices[0]?.message;
+      let toolCalls;
+      if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+        toolCalls = message.tool_calls.map((tc: any) => {
+          let args: Record<string, unknown> = {};
+          try { args = JSON.parse(tc.function?.arguments || '{}'); }
+          catch { console.warn('[OpenAI] Unparseable tool arguments:', tc.function?.arguments); }
+          return { name: tc.function?.name ?? '', arguments: args };
+        });
+      }
+
       return {
-        output: data.choices[0]?.message?.content ?? '',
+        output: message?.content ?? '',
+        ...(toolCalls ? { toolCalls } : {}),
         promptTokens: data.usage?.prompt_tokens ?? 0,
         completionTokens: data.usage?.completion_tokens ?? 0,
         latencyMs,

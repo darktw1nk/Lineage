@@ -222,6 +222,7 @@ export interface ProviderAdapter {
     seed?: number;
     maxTokens?: number;
     timeoutMs?: number; // per-attempt abort timeout; absent/<=0 => 120s default
+    tools?: ToolDef[]; // tool_call tests: offered to the model, translated per provider
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string }>;
   }): Promise<{
@@ -230,6 +231,7 @@ export interface ProviderAdapter {
     completionTokens: number;
     latencyMs: number;
     usd: number;
+    toolCalls?: Array<{ name: string; arguments: Record<string, unknown> }>; // present only when the model called tools
   }>;
 }
 
