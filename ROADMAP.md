@@ -9,36 +9,18 @@
 | 3. CLI / script mode + agent skill | ✅ Done — `promptengine` bin, JSON contract, `evolving-prompts` skill |
 | 3.5. Packaging split (unplanned) | ✅ Done — npm-workspaces monorepo: `packages/core` + `packages/cli` + `apps/desktop` |
 | 4. README + demo | ✅ Done — concept-first README, live UI GIF + screenshots, install guide, LICENSE, CONTRIBUTING |
-| 5. Plugin system | ⬜ Not started — the active phase |
-| 6. Publish | ⬜ Open decisions |
+| 5. Plugin system | ✅ Done — registry + loader in core, built-ins as entries, both hosts, Settings panel, examples |
+| 6. Publish | ⬜ Open decisions — the active phase |
 
 Historical phase details live in git history; what follows is only what's ahead.
 
 ---
 
-## Phase 5: Plugin system for operators and providers
+## Phase 5: Plugin system — shipped 2026-07-28
 
-**Goal**: community contributors add operators and providers without touching core.
+Registry + file-based loader in `@promptengine/core`; the five built-in operators are registry entries behind the same `OperatorPlugin` interface as plugins. Both hosts load plugins (CLI: config `plugins` field / `--plugins`; desktop: `userData/plugins` with a Settings panel). Author guide: `docs/plugins.md`; working examples in `examples/plugins/` (section-shuffle operator, Ollama provider).
 
-### Operator plugins
-- `OperatorPlugin` interface: `name`, `apply(parents, config) => CandidateNode[]`
-- Registration: file-based discovery from a `plugins/` directory + explicit registration API
-- Built-in operators (mutation, crossover, meta, param, model) become plugins themselves
-- Candidate ideas: chain-of-thought injection, few-shot example evolution, prompt compression
-
-### Provider plugins
-- `ProviderPlugin` interface extending the current `ProviderAdapter`
-- Same file-based loading; keys resolved through the existing store seam
-- Candidate ideas: Ollama (local models), Mistral, Cohere, AWS Bedrock, Azure OpenAI
-
-### UI support
-- Operator weights in NewEvaluationModal reflect registered plugins dynamically
-- Provider dropdown includes plugin providers
-- Plugin management panel in Settings (enable/disable, configure)
-
-### Constraints learned since the original plan
-- Plugins must work in BOTH hosts (Electron main process and plain-Node CLI) — loading goes through core with host-provided paths, not Electron APIs
-- `@promptengine/core`'s public index stays the only contract; plugin interfaces get exported there
+Deliberately out of scope, candidates for later: npm-package plugin discovery, per-plugin config UI/schemas, hot reload, in-app install, plugin-contributed fitness dimensions/selection policies/grading modes.
 
 ---
 

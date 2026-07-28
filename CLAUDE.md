@@ -64,6 +64,7 @@ Renderer (React)  <--IPC-->  Main Process (Node.js)
 - **Concurrency**: `engine/semaphore.ts` — global parallel limit
 - **Providers**: `providers/` — adapter pattern; `base.ts` + `openai.ts`, `anthropic.ts`, `gemini.ts`, `openrouter.ts`, `groq.ts`; factory in `providers/index.ts`; retry in `retry.ts`, cost lookup in `costs.ts`
 - **Persistence**: `database/init.ts` — `SqlJsWrapper` (better-sqlite3-compatible API over sql.js WASM). Tables: `evaluation_configs`, `evaluation_runs`, `candidate_nodes`, `model_costs`, `app_settings`, `cost_ledger`
+- **Plugins**: `registry.ts` (operator/provider registries; the five built-in operators are pre-registered entries behind the same `OperatorPlugin` interface) + `pluginLoader.ts` (file-based loading with manifest error capture). Hosts: CLI config `plugins` field / `--plugins` flag; desktop `userData/plugins` + Settings panel. Author guide: `docs/plugins.md`
 - **Public API**: `index.ts` — everything consumers may import
 
 ### CLI — `packages/cli/src/`

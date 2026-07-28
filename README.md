@@ -103,6 +103,7 @@ Two grading modes, mixable in one test set:
 | `serviceModel` | The model that powers mutation/crossover/judging — cheap models work remarkably well here |
 | `providerOptions` | Passed through to candidate calls (e.g. `reasoning_effort`) |
 | `parallelLimit` | Global concurrency across all API calls |
+| **Plugins** | Drop a JS file in the plugins folder to add operators or providers — even the five built-in operators run through the same registry ([docs/plugins.md](docs/plugins.md)) |
 
 Everything is tracked: token counts, per-node cost, cache hits (identical prompt+params are never evaluated twice), and a full cost ledger.
 
@@ -141,7 +142,9 @@ Watch generations appear with full lineage, then click any node: its evolved pro
 packages/core     @promptengine/core — engine, operators, providers, sql.js persistence
 packages/cli      @promptengine/cli  — the promptengine command
 apps/desktop      Electron app (React + React Flow)
+examples/plugins  drop-in operator/provider examples (section-shuffle, Ollama)
 docs/cli.md       Full CLI + config reference
+docs/plugins.md   Plugin author guide
 ```
 
 Architecture details in [CLAUDE.md](CLAUDE.md). Tests: `npm test` (320 across all packages).
