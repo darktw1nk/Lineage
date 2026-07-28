@@ -67,6 +67,7 @@ export interface CandidateNode {
     latencyMs?: number;
     stability?: number; // 0..10 (higher = more stable)
     fitness?: number;   // scalar fitness
+    playoffRank?: number; // 1-based rank from this generation's pairwise playoff
   };
   error?: string;
 }
@@ -116,6 +117,7 @@ export interface EvaluationConfig {
   samplesPerTest?: number;          // default 1 (clamped 1..10): samples averaged per test
   holdoutShare?: number;            // default 0: seeded share of non-flagged tests held out
   holdoutSeed?: number;             // default 42: PRNG seed for the share split
+  pairwise?: { enabled: boolean; contenders?: number }; // opt-in playoff; contenders default 4, clamped 2..8
 }
 
 export interface EvaluationRun {
@@ -135,6 +137,7 @@ export interface EvaluationRun {
     champion?: { score: number; perTest: Array<{ testId: UUID; score: number }> };
     skipped?: 'budget' | 'no-champion';
   };
+  playoffs?: Array<{ generation: number; ranking: UUID[] }>; // pairwise playoff rankings, best first
   version: string; // schema version
   totalPausedMs?: number; // Total time spent paused (for accurate elapsed time display)
   pausedAt?: number; // Timestamp when currently paused (if status is 'paused')

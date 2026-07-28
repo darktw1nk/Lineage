@@ -1,0 +1,138 @@
+/**
+ * Pairwise playoff: round-robin comparison of top contenders' STORED outputs,
+ * judged by the service model in BOTH orders per pair to cancel position bias.
+ * Produces a Copeland ranking used to sharpen selection/elite/champion.
+ * Absolute fitness is not modified.
+ */
+import type { CandidateNode, TestCase, EvaluationConfig, UUID } from '../types.js';
+import { getProviderAdapter } from '../providers/index.js';
+import { store } from '../store.js';
+
+export interface PlayoffOptions {
+  contenders: CandidateNode[];
+  tests: TestCase[];
+  config: EvaluationConfig;
+  accrue: (usd: number, promptTokens: number, completionTokens: number) => void;
+  shouldAbort?: () => boolean;
+}
+
+export interface PlayoffResult {
+  ranking: UUID[];
+  points: Record<UUID, number>;
+  matches: number;
+}
+
+const DEFAULT_PAIRWISE_JUDGING_PROMPT = `SYSTEM: You compare two candidate outputs for the same task. Return ONLY a JSON object.
+USER: TASK INPUT: <<<
+\${testPrompt}
+>>>
+\${expectedBlock}OUTPUT A: <<<
+\${outputA}
+>>>
+OUTPUT B: <<<
+\${outputB}
+>>>
+
+Which output better fulfils the task (accuracy, format, faithfulness to any reference, clarity)?
+Return: {"winner": "A" | "B" | "tie", "reason": "<one sentence>"}`;
+
+function getPairwiseTemplate(): string {
+  try {
+    const prompts = store.get('systemPrompts', null) as any;
+    if (prompts?.pairwiseJudgingPrompt) return prompts.pairwiseJudgingPrompt;
+  } catch {
+    // fall through to default
+  }
+  return DEFAULT_PAIRWISE_JUDGING_PROMPT;
+}
+
+function parseVerdict(raw: string): 'A' | 'B' | 'tie' {
+  try {
+    let text = raw.trim();
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+    }
+    const parsed = JSON.parse(text);
+    const winner = String(parsed.winner ?? '').toLowerCase();
+    if (winner === 'a') return 'A';
+    if (winner === 'b') return 'B';
+    if (winner === 'tie') return 'tie';
+  } catch {
+    // fall through to warn
+  }
+  console.warn('[Playoff] Unparseable verdict, counting as tie:', raw.slice(0, 120));
+  return 'tie';
+}
+
+function outputFor(node: CandidateNode, testId: string): string | undefined {
+  const text = node.tests?.find(t => t.testId === testId)?.outputText;
+  return text && text.length > 0 ? text : undefined;
+}
+
+export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffResult | null> {
+  const { contenders, tests, config, accrue, shouldAbort } = opts;
+  if (contenders.length < 2 || tests.length === 0) return null;
+
+  const adapter = getProviderAdapter(config.serviceModel.provider);
+  const maxTokens = config.serviceModelMaxTokens || 20000;
+  const template = getPairwiseTemplate();
+  const points: Record<UUID, number> = Object.fromEntries(contenders.map(c => [c.id, 0]));
+  let matches = 0;
+
+  const judge = async (test: TestCase, first: string, second: string): Promise<'A' | 'B' | 'tie'> => {
+    const expectedBlock = test.expected ? `EXPECTED (reference): <<<\n${test.expected}\n>>>\n` : '';
+    const prompt = template
+      .replace(/\$\{testPrompt\}/g, test.prompt)
+      .replace(/\$\{expectedBlock\}/g, expectedBlock)
+      .replace(/\$\{outputA\}/g, first)
+      .replace(/\$\{outputB\}/g, second);
+    try {
+      const result = await adapter.call({ model: config.serviceModel.model, prompt, temperature: 0.3, maxTokens });
+      matches++;
+      accrue(result.usd || 0, result.promptTokens || 0, result.completionTokens || 0);
+      return parseVerdict(result.output);
+    } catch (error) {
+      matches++;
+      console.error('[Playoff] Judge call failed, counting as tie:', error instanceof Error ? error.message : error);
+      return 'tie';
+    }
+  };
+
+  outer:
+  for (let i = 0; i < contenders.length; i++) {
+    for (let j = i + 1; j < contenders.length; j++) {
+      if (shouldAbort?.()) {
+        console.warn('[Playoff] Aborted between pairs (budget) — ranking from completed matches');
+        break outer;
+      }
+      const a = contenders[i];
+      const b = contenders[j];
+      for (const test of tests) {
+        const outA = outputFor(a, test.id);
+        const outB = outputFor(b, test.id);
+        if (!outA || !outB) continue;
+
+        // Order 1: a first. Order 2: b first — map verdicts back to nodes.
+        const v1 = await judge(test, outA, outB); // 'A' -> a, 'B' -> b
+        const v2 = await judge(test, outB, outA); // 'A' -> b, 'B' -> a
+        const w1 = v1 === 'A' ? a.id : v1 === 'B' ? b.id : null;
+        const w2 = v2 === 'A' ? b.id : v2 === 'B' ? a.id : null;
+
+        if (w1 && w1 === w2) {
+          points[w1] += 1; // both orders agree
+        } else {
+          points[a.id] += 0.5;
+          points[b.id] += 0.5;
+        }
+      }
+    }
+  }
+
+  const ranking = [...contenders]
+    .sort((x, y) =>
+      (points[y.id] - points[x.id]) ||
+      ((y.metrics?.fitness ?? 0) - (x.metrics?.fitness ?? 0)))
+    .map(c => c.id);
+
+  return { ranking, points, matches };
+}
