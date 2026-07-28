@@ -35,6 +35,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
         generationConfig: {
           temperature: opts.temperature,
           maxOutputTokens: opts.maxTokens ?? 4096,
+          ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
         },
       };
       if (opts.system) {
