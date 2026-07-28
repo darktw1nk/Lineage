@@ -301,26 +301,34 @@ function createTables(db: SqlJsWrapper): void {
 }
 
 function insertDefaultModelCosts(db: SqlJsWrapper): void {
+  // Catalog refreshed 2026-07-28. Pricing sourced from OpenRouter's public
+  // model list; Gemini model availability verified against the live
+  // generateContent API (listed-but-retired models like gemini-2.0-flash
+  // are excluded on purpose).
   const defaults = [
     // OpenAI (prices per million tokens)
-    { provider: 'openai', model: 'gpt-5', promptUSD: 1.25, completionUSD: 10.00 },
+    { provider: 'openai', model: 'gpt-5.4', promptUSD: 2.50, completionUSD: 15.00 },
+    { provider: 'openai', model: 'gpt-5.4-mini', promptUSD: 0.75, completionUSD: 4.50 },
+    { provider: 'openai', model: 'gpt-5.4-nano', promptUSD: 0.20, completionUSD: 1.25 },
+    { provider: 'openai', model: 'gpt-5.1', promptUSD: 1.25, completionUSD: 10.00 },
     { provider: 'openai', model: 'gpt-5-mini', promptUSD: 0.25, completionUSD: 2.00 },
     { provider: 'openai', model: 'gpt-5-nano', promptUSD: 0.05, completionUSD: 0.40 },
-    { provider: 'openai', model: 'gpt-4.1', promptUSD: 2.00, completionUSD: 8.00 },
     { provider: 'openai', model: 'gpt-4.1-mini', promptUSD: 0.40, completionUSD: 1.60 },
     { provider: 'openai', model: 'gpt-4.1-nano', promptUSD: 0.10, completionUSD: 0.40 },
-    { provider: 'openai', model: 'gpt-4o', promptUSD: 2.50, completionUSD: 10.00 },
     { provider: 'openai', model: 'gpt-4o-mini', promptUSD: 0.15, completionUSD: 0.60 },
     // Anthropic (prices per million tokens)
-    { provider: 'anthropic', model: 'claude-opus', promptUSD: 15.00, completionUSD: 75.00 },
-    { provider: 'anthropic', model: 'claude-sonnet-4.5', promptUSD: 3.00, completionUSD: 15.00 },
+    { provider: 'anthropic', model: 'claude-opus-5', promptUSD: 5.00, completionUSD: 25.00 },
+    { provider: 'anthropic', model: 'claude-sonnet-5', promptUSD: 2.00, completionUSD: 10.00 },
+    { provider: 'anthropic', model: 'claude-sonnet-4.6', promptUSD: 3.00, completionUSD: 15.00 },
     { provider: 'anthropic', model: 'claude-haiku-4.5', promptUSD: 1.00, completionUSD: 5.00 },
-    // Gemini (prices per million tokens)
+    // Gemini (prices per million tokens; all verified callable 2026-07-28)
+    { provider: 'gemini', model: 'gemini-3.6-flash', promptUSD: 1.50, completionUSD: 7.50 },
+    { provider: 'gemini', model: 'gemini-3.5-flash', promptUSD: 1.50, completionUSD: 9.00 },
+    { provider: 'gemini', model: 'gemini-3.5-flash-lite', promptUSD: 0.30, completionUSD: 2.50 },
+    { provider: 'gemini', model: 'gemini-3.1-flash-lite', promptUSD: 0.25, completionUSD: 1.50 },
     { provider: 'gemini', model: 'gemini-2.5-pro', promptUSD: 1.25, completionUSD: 10.00 },
     { provider: 'gemini', model: 'gemini-2.5-flash', promptUSD: 0.30, completionUSD: 2.50 },
     { provider: 'gemini', model: 'gemini-2.5-flash-lite', promptUSD: 0.10, completionUSD: 0.40 },
-    { provider: 'gemini', model: 'gemini-2.0-flash', promptUSD: 0.10, completionUSD: 0.40 },
-    { provider: 'gemini', model: 'gemini-2.0-flash-lite', promptUSD: 0.075, completionUSD: 0.30 },
   ];
 
   const insert = db.prepare(`
@@ -342,23 +350,38 @@ function runMigrations(db: SqlJsWrapper): void {
   const currentVersion = versionRow?.version ?? 0;
 
   if (currentVersion === 0) {
-    // Fresh install - set up with latest schema (version 2) and models
+    // Fresh install - set up with latest schema (version 3) and models
     insertDefaultModelCosts(db);
-    db.prepare('INSERT INTO schema_version (version) VALUES (2)').run();
-    console.log('Fresh install: Initialized with models (schema v2)');
+    db.prepare('INSERT INTO schema_version (version) VALUES (3)').run();
+    console.log('Fresh install: Initialized with models (schema v3)');
     return; // No need to run migrations for fresh install
   }
 
+  let version = currentVersion;
+
   // Migration 2: Update existing users from old model list to new one
-  if (currentVersion === 1) {
+  if (version === 1) {
     console.log('Running migration 2: Updating model costs to new models...');
     // Clear old models and insert new ones
     db.prepare('DELETE FROM model_costs').run();
     insertDefaultModelCosts(db);
     db.prepare('UPDATE schema_version SET version = 2').run();
     console.log('Migration 2 completed - new models loaded');
+    version = 2;
+  }
+
+  // Migration 3: Refresh the direct-provider model catalog (2026-07 pricing;
+  // removes retired models like gemini-2.0-flash). Preserves rows synced from
+  // OpenRouter or added for other providers.
+  if (version === 2) {
+    console.log('Running migration 3: Refreshing default model catalog...');
+    db.prepare("DELETE FROM model_costs WHERE provider IN ('openai', 'anthropic', 'gemini')").run();
+    insertDefaultModelCosts(db);
+    db.prepare('UPDATE schema_version SET version = 3').run();
+    console.log('Migration 3 completed - model catalog refreshed');
+    version = 3;
   }
 
   // Future migrations go here
-  // if (currentVersion === 3) { ... }
+  // if (version === 3) { ... }
 }

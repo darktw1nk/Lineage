@@ -8,6 +8,7 @@
 import type { EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
+import { stripPromptDelimiters } from '../utils/text.js';
 
 /**
  * Default Mutation Strategy Catalog
@@ -253,7 +254,7 @@ export async function mutateNode(
     throw new Error('Empty response from service model (apply step)');
   }
   
-  const newPrompt = applyResult.output.trim();
+  const newPrompt = stripPromptDelimiters(applyResult.output);
   
   // Build changelog
   const changeLog: ChangeLogLine[] = edits!.map(e => ({

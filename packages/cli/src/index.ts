@@ -319,6 +319,12 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
 
   const { closeDatabase } = await import('@promptengine/core');
   closeDatabase();
+
+  // Agents rely on exit codes: no usable best prompt means the run failed.
+  if (!result.best) {
+    process.stderr.write(`\nEvolution produced no usable result${result.error ? `: ${result.error}` : ''}\n`);
+    process.exitCode = 1;
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@
 import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
+import { stripPromptDelimiters } from '../utils/text.js';
 
 const DEFAULT_CROSSOVER_PROMPT = `SYSTEM: Merge best parts of A and B into a coherent prompt without redundancy.
 USER: A: <<<
@@ -66,7 +67,7 @@ export async function crossoverNodes(
   }
   
   return {
-    prompt: result.output.trim(),
+    prompt: stripPromptDelimiters(result.output),
     changeLog: [{
       label: 'CROSSOVER' as const,
       text: `Merged ${parentA.id.slice(0, 8)} + ${parentB.id.slice(0, 8)}`,

@@ -8,6 +8,7 @@
 import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
+import { stripPromptDelimiters } from '../utils/text.js';
 
 const DEFAULT_METAPROMPT_WITH_FAILURES = `SYSTEM: You are a prompt surgeon. You analyze concrete test failures to suggest targeted fixes. You can ADD, REMOVE, or REWRITE any part of the prompt — including removing instructions that conflict with what the tests require.
 USER: Parent Prompt: <<<
@@ -231,7 +232,7 @@ export async function metaPromptNode(
   }
   
   return {
-    prompt: applyResult.output.trim(),
+    prompt: stripPromptDelimiters(applyResult.output),
     changeLog: edits.map(e => ({
       label: 'META' as const,
       text: e.edit || 'Unknown meta-edit',
