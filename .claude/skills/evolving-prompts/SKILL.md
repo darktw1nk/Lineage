@@ -54,7 +54,7 @@ Progress/logs → stderr. `--output` (and stdout) → pure JSON. Exit 0 = usable
 - **Multiple `models` entries** let evolution discover that a different model beats prompt rewording.
 - **Trust the holdout number**: mark 1-2 tests `"holdout": true` (or set `holdoutShare`) and use `samplesPerTest: 2-3` with llm_grade when budget allows — the final `seed → champion` score on unseen tests (results `holdout` field) is the claim worth reporting, not the fitness on training tests.
 - Pass `--seed 42` (or `"seed"` in config) when comparing configurations — engine decisions reproduce exactly, so differences come from your change, not the shuffle. LLM outputs stay best-effort.
-- Interrupted run (crash/Ctrl+C)? `--resume <runId>` continues from the checkpoint with spend intact — pass the original `--config` too if the run used config-file keys or plugins.
+- Interrupted run (crash/Ctrl+C/timeout)? `--resume <runId>` continues from the checkpoint with spend intact — the run id is the `Run ID:` line printed to stderr at start, so capture stderr to a file for long runs. Pass the original `--config` too if the run used config-file keys or plugins; keep the same `--db`.
 - Enable `"pairwise": { "enabled": true }` when llm_grade scores cluster (several candidates within ~0.5 of each other) — top contenders are re-ranked by head-to-head judging (both orders, position bias cancels); the champion is the playoff winner, not the noisiest 9.9. Playoff quality is judge-limited: use the strongest `serviceModel` you can afford. Judge calls count toward the budget (contender pairs × llm_grade tests × 2 orders per playoff).
 
 ## Reading results

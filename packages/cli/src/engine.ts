@@ -336,6 +336,8 @@ export async function runEvolution(
     ).run(run.id, run.configId, run.startedAt, JSON.stringify(run), run.version);
 
     process.stderr.write(`Starting evolution: "${config.name}"\n`);
+    // Full id up front: if this process dies, the log holds the --resume handle
+    process.stderr.write(`Run ID: ${run.id}\n`);
     process.stderr.write(
       `Models: ${config.enabledModels.map((m) => `${m.provider}/${m.model}`).join(', ')}\n`,
     );
