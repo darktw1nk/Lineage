@@ -88,6 +88,7 @@ OPTIONS:
   --seed <n>                   Reproducibility seed (overrides config "seed")
   --resume <runId>             Resume an interrupted run from its checkpoint
   --report <path|none>         Markdown report destination, or 'none' to skip
+  --estimate                   Print the cost estimate for --config and exit (no run)
   --sync-models                Sync available models from OpenRouter
   --list-models                List all models in the database with pricing
   --set-key <provider> <key>   Save an API key (shared with desktop app)
@@ -138,6 +139,7 @@ function parseArgs(argv: string[]): {
   seed?: number;
   resume?: string;
   report?: string;
+  estimate: boolean;
 } {
   const args = argv.slice(2);
   const result = {
@@ -152,6 +154,7 @@ function parseArgs(argv: string[]): {
     seed: undefined as number | undefined,
     resume: undefined as string | undefined,
     report: undefined as string | undefined,
+    estimate: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -181,6 +184,9 @@ function parseArgs(argv: string[]): {
           console.error("--report requires a path or 'none'");
           process.exit(1);
         }
+        break;
+      case '--estimate':
+        result.estimate = true;
         break;
       case '--seed': {
         const parsed = parseInt(args[++i], 10);
@@ -413,6 +419,28 @@ async function emitOutputs(
   }
 }
 
+async function handleEstimate(configPath: string, dbPath?: string): Promise<void> {
+  const cliConfig = loadCliConfig(configPath);
+  installStoreShim(extractConfigKeys(cliConfig), cliConfig.systemPrompts);
+  await initCliDatabase(dbPath);
+  const pathMod = await import('path');
+  const configDir = pathMod.dirname(pathMod.resolve(configPath));
+  const evalConfig = toEvaluationConfig(cliConfig, configDir);
+  const { estimateRunCost, getModelCost, closeDatabase } = await import('@promptengine/core');
+  const est = await estimateRunCost(evalConfig, getModelCost);
+
+  // Human breakdown to stderr, machine JSON to stdout (CLI contract)
+  const scope = est.perGeneration ? ' per generation' : '';
+  process.stderr.write(`Estimated cost${scope}: $${est.low.toFixed(4)} – $${est.high.toFixed(4)} (~${est.calls} calls)\n`);
+  for (const b of est.breakdown) {
+    process.stderr.write(`  ${b.label.padEnd(28)} ${String(b.calls).padStart(5)} calls  $${b.low.toFixed(4)} – $${b.high.toFixed(4)}\n`);
+  }
+  for (const w of est.warnings) process.stderr.write(`  note: ${w}\n`);
+  // console.log is redirected to stderr in this CLI — write the JSON contract directly
+  process.stdout.write(JSON.stringify(est, null, 2) + '\n');
+  closeDatabase();
+}
+
 async function handleResumeRun(runId: string, configPath?: string, outputPath?: string, dbPath?: string, pluginDirs: string[] = [], reportArg?: string): Promise<void> {
   // Optional --config re-supplies file-based extras: keys, systemPrompts, plugins
   const cliConfig = configPath ? loadCliConfig(configPath) : undefined;
@@ -497,6 +525,15 @@ async function main(): Promise<void> {
 
   if (args.listModels) {
     await handleListModels(args.db);
+    return;
+  }
+
+  if (args.estimate) {
+    if (!args.config) {
+      console.error('--estimate requires --config');
+      process.exit(1);
+    }
+    await handleEstimate(args.config, args.db);
     return;
   }
 

@@ -346,6 +346,15 @@ export async function runEvolution(
     );
     if (config.targets.budgetUSD)
       process.stderr.write(`Budget: $${config.targets.budgetUSD}\n`);
+    try {
+      const { estimateRunCost, getModelCost } = await import('@promptengine/core');
+      const est = await estimateRunCost(config, getModelCost);
+      const scope = est.perGeneration ? ' per generation' : '';
+      process.stderr.write(`Estimated cost${scope}: $${est.low.toFixed(4)} – $${est.high.toFixed(4)} (~${est.calls} calls)\n`);
+      for (const w of est.warnings) process.stderr.write(`  note: ${w}\n`);
+    } catch (err: any) {
+      process.stderr.write(`Cost estimate unavailable: ${err.message}\n`);
+    }
     process.stderr.write('\n');
   } else {
     const finishedCount = run.generations.flat().filter((n) => n.status === 'finished').length;
