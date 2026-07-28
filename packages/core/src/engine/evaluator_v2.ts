@@ -146,6 +146,12 @@ export async function startEvaluation(
   if (activeEvaluations.has(runId)) {
     throw new Error('Evaluation already running');
   }
+
+  // A loaded run with generations is a checkpoint — resume it instead of starting fresh
+  const isResume = run.generations.length > 0;
+  if (isResume && run.status === 'finished') {
+    throw new Error(`Run ${runId} is already finished`);
+  }
   
   // Initialize global semaphore
   const globalLimit = config.parallelLimit || 5;
@@ -178,7 +184,7 @@ export async function startEvaluation(
   const state: EvaluationState = {
     run: {
       ...run,
-      generations: [[]],
+      generations: isResume ? run.generations : [[]],
       status: 'running',
     },
     config,
@@ -201,11 +207,55 @@ export async function startEvaluation(
   };
 
   activeEvaluations.set(runId, state);
-  
+
   // Send running status
   sendUpdate(runId, { type: 'status', status: 'running' });
   console.log(`[Evaluator] Status sent: running`);
-  
+
+  if (isResume) {
+    state.currentGeneration = state.run.generations.length - 1;
+    state.run.stopReason = undefined;
+    const TERMINAL = new Set(['finished', 'failed', 'skipped']);
+    let kept = 0, requeued = 0, refill = 0;
+    for (const gen of state.run.generations) {
+      for (const node of gen) {
+        if (TERMINAL.has(node.status)) {
+          if (node.status === 'finished' && node.tests?.length) {
+            state.cache.set(computeCacheKey(node, state), node.tests);
+          }
+          kept++;
+        } else if (node.generation === 0 && node.changeLog?.[0]?.text === 'Waiting for mutation...') {
+          node.status = 'pending';
+          node.tests = undefined; node.metrics = undefined; node.error = undefined;
+          refill++;
+        } else {
+          node.status = 'awaiting';
+          node.tests = undefined; node.metrics = undefined; node.error = undefined;
+          requeued++;
+        }
+      }
+    }
+    console.log(`[Evaluator] Resuming from generation ${state.currentGeneration}: ${kept} kept, ${requeued} re-queued, ${refill} pending fill, $${state.run.totals.usd.toFixed(4)} already spent`);
+
+    // Replay existing state to the host (rebuilds CLI collector / desktop UI)
+    for (const gen of state.run.generations) {
+      for (const node of gen) sendUpdate(runId, { type: 'node_created', node });
+    }
+    sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+
+    if (state.run.generations[0].some(n => n.status === 'pending')) {
+      // Interrupted during initial fill — the fill path re-mutates pending nodes,
+      // then queues gen 0 and starts the loop
+      mutatePopulationInBackground(runId, state);
+    } else {
+      state.queue = state.run.generations[state.currentGeneration].filter(n => n.status === 'awaiting');
+      console.log(`[Evaluator] Resume queue: ${state.queue.length} nodes`);
+      evaluationLoop(runId);
+    }
+    console.log(`[Evaluator] startEvaluation returning (resume)`);
+    return;
+  }
+
   // Create shell population (synchronous, fast)
   console.log(`[Evaluator] Creating shell population...`);
   const shellNodes = createShellPopulation(config);
@@ -270,16 +320,19 @@ async function mutatePopulationInBackground(
     return;
   }
   
-  const nodesToMutate = shellNodes.filter((_, i) => i > 0); // Skip first (baseline)
-  
+  // Status-based (not index-based): fresh shell nodes 1..N-1 are 'pending'; on
+  // resume only the nodes whose fill never completed are still 'pending'.
+  const nodesToMutate = shellNodes.filter(n => n.status === 'pending');
+
   console.log(`[Evaluator] Mutating ${nodesToMutate.length} nodes in parallel...`);
-  
-  const mutationPromises = nodesToMutate.map(async (node, k) => {
+
+  const mutationPromises = nodesToMutate.map(async (node) => {
     try {
       console.log(`[Evaluator] Mutating node ${node.id.slice(0, 8)}...`);
 
-      // k+1 = the node's index in generation 0 (baseline is index 0) — stable label
-      const result = await mutateNode(shellNodes[0].prompt, state.config, rngFor(state.config.seed, 'fill', k + 1));
+      // Stable label: the node's index in generation 0 — identical streams across resume
+      const gen0Index = shellNodes.indexOf(node);
+      const result = await mutateNode(shellNodes[0].prompt, state.config, rngFor(state.config.seed, 'fill', gen0Index));
       
       // Update node
       node.prompt = result.prompt;
