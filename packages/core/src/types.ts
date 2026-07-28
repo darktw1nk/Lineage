@@ -13,7 +13,7 @@ export type NodeStatus = 'awaiting' | 'pending' | 'in_progress' | 'finished' | '
 export interface TestCase {
   id: UUID;
   name: string;
-  mode: 'llm_grade' | 'exact_match';
+  mode: 'llm_grade' | 'exact_match' | 'json_schema' | 'tool_call';
   prompt: string;
   expected?: string; // for exact_match; may be number/JSON as string
   image?: string; // absolute path to image file for vision-enabled tests
@@ -22,6 +22,9 @@ export interface TestCase {
     strictZeroOnDeviation?: boolean; // if true, non-equal => 0 else distance-graded
     distanceMetric?: 'levenshtein' | 'json_diff' | 'numeric_abs';
   };
+  schema?: object; // json_schema mode: JSON Schema the output must conform to
+  tools?: ToolDef[]; // tool_call mode: tools offered to the candidate model
+  expectedTool?: { name: string; args?: Record<string, unknown>; argsMode?: 'subset' | 'exact' }; // tool_call mode
 }
 
 export interface TestResult {
@@ -201,6 +204,13 @@ export interface AppSettings {
 }
 
 // Provider Adapter Interface
+// Canonical tool definition (OpenAI function shape); adapters translate per provider
+export interface ToolDef {
+  name: string;
+  description?: string;
+  parameters?: object;
+}
+
 export interface ProviderAdapter {
   name: Provider;
   estimateTokens(input: string): { prompt: number; completion?: number };
