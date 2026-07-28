@@ -22,7 +22,10 @@ export interface PlayoffResult {
   matches: number;
 }
 
-const DEFAULT_PAIRWISE_JUDGING_PROMPT = `SYSTEM: You compare two candidate outputs for the same task. Return ONLY a JSON object.
+// Anti-verbosity rules are load-bearing: A/B testing (2026-07-28) showed pairwise
+// judges systematically prefer longer outputs with extra options/explanations,
+// which order-swapping cannot cancel (both orders share the bias).
+const DEFAULT_PAIRWISE_JUDGING_PROMPT = `SYSTEM: You compare two candidate outputs for the same task. Judge ONLY how well each fulfils the task as stated. Return ONLY a JSON object.
 USER: TASK INPUT: <<<
 \${testPrompt}
 >>>
@@ -33,7 +36,11 @@ OUTPUT B: <<<
 \${outputB}
 >>>
 
-Which output better fulfils the task (accuracy, format, faithfulness to any reference, clarity)?
+Which output better fulfils the task EXACTLY as stated (accuracy, required format, faithfulness to any reference)?
+Rules:
+- Judge task fulfilment only. Do NOT prefer an output for being longer, offering multiple options or alternatives, adding explanations, or including commentary — material the task did not ask for is a FLAW, not a bonus.
+- If the task implies a single result, an output delivering exactly that beats one that adds alternatives or meta-text.
+- If both fulfil the task equally well, answer "tie".
 Return: {"winner": "A" | "B" | "tie", "reason": "<one sentence>"}`;
 
 function getPairwiseTemplate(): string {
