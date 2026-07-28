@@ -10,11 +10,7 @@
  */
 import type { OperatorPlugin, ProviderPlugin, ProviderAdapter, ModelCostEntry } from './types.js';
 import type { SqlJsWrapper } from './database/init.js';
-import { mutateNode } from './engine/mutations.js';
-import { crossoverNodes } from './engine/crossover.js';
-import { metaPromptNode } from './engine/metaprompting.js';
-import { varyParameters } from './engine/paramvariation.js';
-import { varyModel } from './engine/modelvariation.js';
+import { mutateNode, crossoverNodes, metaPromptNode, varyParameters, varyModel } from './engine/operators_v2.js';
 
 const ZERO_COST = { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 };
 const BUILTIN_PROVIDER_IDS = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq'];

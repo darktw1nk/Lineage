@@ -36,14 +36,7 @@ interface EvaluationState {
   inProgress: Set<UUID>;
   cache: Map<string, TestResult[]>;
   lineageHistory: Map<UUID, { bestFitness: number; stagnantGenerations: number }>;
-  operatorEffectiveness: {
-    mutation: { totalDelta: number; count: number };
-    crossover: { totalDelta: number; count: number };
-    meta: { totalDelta: number; count: number };
-    param: { totalDelta: number; count: number };
-    model: { totalDelta: number; count: number };
-    elite: { totalDelta: number; count: number };
-  };
+  operatorEffectiveness: Record<string, { totalDelta: number; count: number }>;
   pausedAt?: number; // Timestamp when paused (if currently paused)
   totalPausedMs: number; // Total time spent paused
   gradingTotal: number; // Total grading calls completed
@@ -162,14 +155,7 @@ export async function startEvaluation(
     inProgress: new Set(),
     cache: new Map(),
     lineageHistory: new Map(),
-    operatorEffectiveness: {
-      mutation: { totalDelta: 0, count: 0 },
-      crossover: { totalDelta: 0, count: 0 },
-      meta: { totalDelta: 0, count: 0 },
-      param: { totalDelta: 0, count: 0 },
-      model: { totalDelta: 0, count: 0 },
-      elite: { totalDelta: 0, count: 0 },
-    },
+    operatorEffectiveness: {},
     totalPausedMs: 0,
     gradingTotal: 0,
     gradingFailures: 0,
@@ -607,18 +593,17 @@ async function processNode(
     const operatorType = (node as any)._operatorType;
     const parentFitness = (node as any)._parentFitness;
     if (operatorType && parentFitness !== undefined && node.metrics?.fitness !== undefined) {
-      // Check if this operator type is tracked
-      const opKey = operatorType as keyof typeof state.operatorEffectiveness;
-      if (state.operatorEffectiveness[opKey]) {
-        const fitnessDelta = node.metrics.fitness - parentFitness;
-        state.operatorEffectiveness[opKey].totalDelta += fitnessDelta;
-        state.operatorEffectiveness[opKey].count++;
-
-        const avgDelta = state.operatorEffectiveness[opKey].totalDelta / state.operatorEffectiveness[opKey].count;
-        console.log(`[Evaluator] Operator effectiveness [${operatorType}]: avgΔ=${avgDelta.toFixed(3)} (count=${state.operatorEffectiveness[opKey].count})`);
-      } else {
-        console.warn(`[Evaluator] Unknown operator type: ${operatorType} (skipping effectiveness tracking)`);
+      // Any operator name (built-in or plugin) is trackable — create lazily
+      const opKey = String(operatorType);
+      if (!state.operatorEffectiveness[opKey]) {
+        state.operatorEffectiveness[opKey] = { totalDelta: 0, count: 0 };
       }
+      const bucket = state.operatorEffectiveness[opKey];
+      const fitnessDelta = node.metrics.fitness - parentFitness;
+      bucket.totalDelta += fitnessDelta;
+      bucket.count++;
+      const avgDelta = bucket.totalDelta / bucket.count;
+      console.log(`[Evaluator] Operator effectiveness [${opKey}]: avgΔ=${avgDelta.toFixed(3)} (count=${bucket.count})`);
     }
   } catch (error) {
     console.error(`[Evaluator] Node ${node.id.slice(0, 8)} failed:`, error);

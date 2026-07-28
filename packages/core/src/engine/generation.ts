@@ -52,9 +52,7 @@ import type {
   CandidateNode,
   ChangeLogLine,
 } from '../types.js';
-import { mutateNode, crossoverNodes, metaPromptNode } from './operators_v2.js';
-import { varyParameters } from './paramvariation.js';
-import { varyModel } from './modelvariation.js';
+import { getOperator } from '../registry.js';
 
 export interface GenerationResult {
   newNodes: CandidateNode[];
@@ -283,64 +281,55 @@ export async function createNextGeneration(
   const remainingChildren = targetPopSize - numElite;
   console.log(`[Generation] Creating ${remainingChildren} new children via genetic operators (${numElite} elites already added)`);
   
-  // Step 1: Collect operator shares (all treated equally)
-  const shareMutation = config.operators.mutationShare || 0;
-  const shareCrossover = config.operators.crossoverShare || 0;
-  const shareMeta = config.operators.metaPrompting?.enabled ? (config.operators.metaPrompting.share || 0) : 0;
-  const shareParam = config.operators.paramVariation?.enabled ? (config.operators.paramVariation.share || 0) : 0;
-  const shareModel = config.operators.modelVariation?.enabled ? (config.operators.modelVariation.share || 0) : 0;
-  
-  const totalShare = shareMutation + shareCrossover + shareMeta + shareParam + shareModel;
-  
+  // Step 1: Collect shares for every referenced operator (built-ins from the
+  // legacy fields; plugin operators from operators.custom, which also overrides
+  // legacy fields when it names a built-in).
+  const shares = new Map<string, number>();
+  shares.set('mutation', config.operators.mutationShare || 0);
+  shares.set('crossover', config.operators.crossoverShare || 0);
+  shares.set('meta', config.operators.metaPrompting?.enabled ? (config.operators.metaPrompting.share || 0) : 0);
+  shares.set('param', config.operators.paramVariation?.enabled ? (config.operators.paramVariation.share || 0) : 0);
+  shares.set('model', config.operators.modelVariation?.enabled ? (config.operators.modelVariation.share || 0) : 0);
+
+  for (const [name, entry] of Object.entries(config.operators.custom ?? {})) {
+    if (!getOperator(name)) {
+      console.warn(`[Generation] Unknown operator '${name}' in operators.custom — is its plugin loaded? Ignoring.`);
+      continue;
+    }
+    shares.set(name, entry.enabled === false ? 0 : (entry.share || 0));
+  }
+
+  const totalShare = [...shares.values()].reduce((a, b) => a + b, 0);
   if (totalShare === 0) {
     console.warn(`[Generation] All operator shares are 0, using pure carry-forward`);
-    // Fall back to carrying forward all parents
   }
-  
-  // Step 2: Normalize shares and calculate exact counts
-  const wMutation = totalShare > 0 ? shareMutation / totalShare : 0;
-  const wCrossover = totalShare > 0 ? shareCrossover / totalShare : 0;
-  const wMeta = totalShare > 0 ? shareMeta / totalShare : 0;
-  const wParam = totalShare > 0 ? shareParam / totalShare : 0;
-  const wModel = totalShare > 0 ? shareModel / totalShare : 0;
-  
-  const qMutation = wMutation * remainingChildren;
-  const qCrossover = wCrossover * remainingChildren;
-  const qMeta = wMeta * remainingChildren;
-  const qParam = wParam * remainingChildren;
-  const qModel = wModel * remainingChildren;
-  
-  let numMutation = Math.floor(qMutation);
-  let numCrossover = Math.floor(qCrossover);
-  let numMeta = Math.floor(qMeta);
-  let numParam = Math.floor(qParam);
-  let numModel = Math.floor(qModel);
-  
-  // Step 3: Distribute remainder using largest fractional parts
-  const remainders = [
-    { op: 'mutation', remainder: qMutation - numMutation, count: () => numMutation++, },
-    { op: 'crossover', remainder: qCrossover - numCrossover, count: () => numCrossover++, },
-    { op: 'meta', remainder: qMeta - numMeta, count: () => numMeta++, },
-    { op: 'param', remainder: qParam - numParam, count: () => numParam++, },
-    { op: 'model', remainder: qModel - numModel, count: () => numModel++, },
-  ];
-  
+
+  // Step 2-3: Normalize with the largest-remainder method
+  const counts = new Map<string, number>();
+  const remainders: Array<{ name: string; remainder: number }> = [];
+  let assigned = 0;
+  for (const [name, share] of shares) {
+    const quota = totalShare > 0 ? (share / totalShare) * remainingChildren : 0;
+    const base = Math.floor(quota);
+    counts.set(name, base);
+    assigned += base;
+    remainders.push({ name, remainder: quota - base });
+  }
   remainders.sort((a, b) => b.remainder - a.remainder);
-  
-  let slotsLeft = remainingChildren - (numMutation + numCrossover + numMeta + numParam + numModel);
-  for (let i = 0; i < slotsLeft && i < remainders.length; i++) {
-    remainders[i].count();
+  if (totalShare > 0) {
+    for (let i = 0; i < remainingChildren - assigned; i++) {
+      const r = remainders[i % remainders.length];
+      counts.set(r.name, (counts.get(r.name) || 0) + 1);
+    }
   }
-  
-  console.log(`[Generation] Operator counts (normalized): mutation=${numMutation}, crossover=${numCrossover}, meta=${numMeta}, param=${numParam}, model=${numModel}`);
-  
+
+  console.log(`[Generation] Operator counts (normalized):`, Object.fromEntries(counts));
+
   // Step 4: Build shuffled operator plan
-  const operatorPlan: Array<'mutation' | 'crossover' | 'meta' | 'param' | 'model'> = [];
-  for (let i = 0; i < numMutation; i++) operatorPlan.push('mutation');
-  for (let i = 0; i < numCrossover; i++) operatorPlan.push('crossover');
-  for (let i = 0; i < numMeta; i++) operatorPlan.push('meta');
-  for (let i = 0; i < numParam; i++) operatorPlan.push('param');
-  for (let i = 0; i < numModel; i++) operatorPlan.push('model');
+  const operatorPlan: string[] = [];
+  for (const [name, n] of counts) {
+    for (let i = 0; i < n; i++) operatorPlan.push(name);
+  }
   
   // Step 5: Shuffle operator plan for fairness across time
   for (let i = operatorPlan.length - 1; i > 0; i--) {
@@ -370,164 +359,48 @@ export async function createNextGeneration(
   const childCreationPromises = [];
   
   for (let i = 0; i < remainingChildren; i++) {
-    const operator = operatorPlan[i];
+    const operatorName = operatorPlan[i];
     const parent = nextParent();
     const parentFitness = parent.metrics?.fitness || 0;
-    
-    // Create a promise for each child creation
+
     const childPromise = (async () => {
-      let prompt = parent.prompt;
-      let changeLog: ChangeLogLine[] = [];
-      let lineageParents: string[] = [parent.id];
-      let temperature = parent.params.temperature || 0.7;
-      let model = parent.params.model;
-      let operatorType: 'mutation' | 'crossover' | 'meta' | 'param' | 'model' | null = null;
-      
-      try {
-        if (operator === 'mutation') {
-          // MUTATE: apply mutation to prompt
-          const result = await mutateNode(parent.prompt, config);
-          prompt = result.prompt;
-          changeLog = result.changeLog;
-          operatorType = 'mutation';
-          
-          console.log(`[Generation] Child ${i}: MUTATION from parent ${parent.id.slice(0, 8)}`);
-          
-          return {
-            prompt,
-            changeLog,
-            lineageParents,
-            temperature,
-            model,
-            operatorType,
-            cost: result.cost,
-          };
-          
-        } else if (operator === 'crossover') {
-          // CROSSOVER: merge two distinct parents
-          const parentB = nextParent();
-          
-          const result = await crossoverNodes(parent, parentB, config);
-          prompt = result.prompt;
-          changeLog = result.changeLog;
-          lineageParents = [parent.id, parentB.id]; // Track BOTH parents
-          operatorType = 'crossover';
-          
-          console.log(`[Generation] Child ${i}: CROSSOVER from ${parent.id.slice(0, 8)} × ${parentB.id.slice(0, 8)}`);
-          
-          return {
-            prompt,
-            changeLog,
-            lineageParents,
-            temperature,
-            model,
-            operatorType,
-            cost: result.cost,
-          };
-          
-        } else if (operator === 'meta') {
-          // META: targeted mutation from failure summary
-          const result = await metaPromptNode(parent, config, currentGeneration);
-          prompt = result.prompt;
-          changeLog = result.changeLog;
-          operatorType = 'meta';
-          
-          console.log(`[Generation] Child ${i}: META from parent ${parent.id.slice(0, 8)}`);
-          
-          return {
-            prompt,
-            changeLog,
-            lineageParents,
-            temperature,
-            model,
-            operatorType,
-            cost: result.cost,
-          };
-          
-        } else if (operator === 'param') {
-          // PARAM: apply parameter variation using dedicated function
-          const paramVariation = varyParameters(
-            temperature,
-            config,
-            true // Force variation since we're in param slot
-          );
-          
-          temperature = paramVariation.temperature;
-          changeLog = paramVariation.changeLog;
-          operatorType = 'param';
-          
-          console.log(`[Generation] Child ${i}: PARAM from parent ${parent.id.slice(0, 8)} (temp ${temperature.toFixed(2)})`);
-          
-          return {
-            prompt,
-            changeLog,
-            lineageParents,
-            temperature,
-            model,
-            operatorType,
-            cost: { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 },
-          };
-          
-        } else if (operator === 'model') {
-          // MODEL: apply model variation using dedicated function
-          const modelVariation = varyModel(
-            model,
-            config,
-            true, // Force variation since we're in model slot
-            config.enabledModels
-          );
-          
-          if (modelVariation.changeLog.length > 0) {
-            model = modelVariation.model;
-            changeLog = modelVariation.changeLog;
-            operatorType = 'model';
-            
-            console.log(`[Generation] Child ${i}: MODEL from parent ${parent.id.slice(0, 8)} (${model.provider}/${model.model})`);
-          } else {
-            // Shouldn't happen since we force variation, but safety fallback
-            changeLog = [{ label: 'CARRY', text: 'Model variation skipped (no other models available)' }];
-            console.log(`[Generation] Child ${i}: MODEL skipped (no alternatives)`);
-          }
-          
-          return {
-            prompt,
-            changeLog,
-            lineageParents,
-            temperature,
-            model,
-            operatorType,
-            cost: { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 },
-          };
-        }
-      } catch (error) {
-        console.error(`[Generation] Operator '${operator}' failed for child ${i}:`, error);
-        // Fallback to parent
-        prompt = parent.prompt;
-        changeLog = [{ label: 'ERROR', text: `Operator '${operator}' failed, using parent` }];
-        
-        return {
-          prompt,
-          changeLog,
-          lineageParents,
-          temperature,
-          model,
-          operatorType,
-          cost: { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 },
-        };
-      }
-      
-      // Should never reach here, but TypeScript needs it
-      return {
-        prompt,
-        changeLog,
-        lineageParents,
-        temperature,
-        model,
-        operatorType,
+      const carry = (label: 'CARRY' | 'ERROR', text: string) => ({
+        prompt: parent.prompt,
+        changeLog: [{ label, text }] as ChangeLogLine[],
+        lineageParents: [parent.id],
+        params: { ...parent.params },
+        operatorType: null as string | null,
         cost: { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 },
-      };
+      });
+
+      if (!operatorName) {
+        return carry('CARRY', 'No operator assigned (all shares 0)');
+      }
+      const op = getOperator(operatorName);
+      if (!op) {
+        return carry('CARRY', `Operator '${operatorName}' not registered`);
+      }
+
+      try {
+        const parentB = op.parents === 2 ? nextParent() : undefined;
+        const result = await op.apply({ parent, parentB, config, generation: currentGeneration });
+
+        console.log(`[Generation] Child ${i}: ${operatorName.toUpperCase()} from parent ${parent.id.slice(0, 8)}`);
+
+        return {
+          prompt: result.prompt,
+          changeLog: result.changeLog,
+          lineageParents: parentB ? [parent.id, parentB.id] : [parent.id],
+          params: { ...parent.params, ...result.params },
+          operatorType: operatorName as string | null,
+          cost: result.cost,
+        };
+      } catch (error) {
+        console.error(`[Generation] Operator '${operatorName}' failed for child ${i}:`, error);
+        return carry('ERROR', `Operator '${operatorName}' failed, using parent`);
+      }
     })().then(result => ({ index: i, parent, parentFitness, result }));
-    
+
     childCreationPromises.push(childPromise);
   }
   
@@ -541,19 +414,19 @@ export async function createNextGeneration(
     totalCompletionTokens += result.cost.completionTokens;
     totalUsd += result.cost.usd;
     totalCalls += result.cost.calls;
-    
+
     const newNode: CandidateNode = {
       id: uuidv4(),
       generation: nextGenerationNumber,
       lineageParents: result.lineageParents,
       status: 'awaiting',
       prompt: result.prompt,
-      params: { model: result.model, temperature: result.temperature },
+      params: { ...result.params, temperature: result.params.temperature ?? 0.7 },
       changeLog: result.changeLog,
     };
-    
+
     newGenNodes.push(newNode);
-    
+
     // Track operator effectiveness (will update after this node is evaluated)
     // Store parent fitness and operator type for later delta calculation
     (newNode as any)._operatorType = result.operatorType;
