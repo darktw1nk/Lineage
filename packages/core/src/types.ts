@@ -118,6 +118,7 @@ export interface EvaluationConfig {
   holdoutShare?: number;            // default 0: seeded share of non-flagged tests held out
   holdoutSeed?: number;             // default 42: PRNG seed for the share split
   pairwise?: { enabled: boolean; contenders?: number }; // opt-in playoff; contenders default 4, clamped 2..8
+  seed?: number; // run-level reproducibility seed (engine decisions + derived candidate seeds)
 }
 
 export interface EvaluationRun {
@@ -159,6 +160,7 @@ export interface OperatorContext {
   parentB?: CandidateNode;          // present when the operator declares parents: 2
   config: EvaluationConfig;
   generation: CandidateNode[];      // current generation snapshot
+  rng?: () => number;               // deterministic when the run is seeded; use instead of Math.random
 }
 
 export interface OperatorResult {

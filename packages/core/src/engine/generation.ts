@@ -53,6 +53,7 @@ import type {
   ChangeLogLine,
 } from '../types.js';
 import { getOperator } from '../registry.js';
+import { rngFor } from './rng.js';
 
 export interface GenerationResult {
   newNodes: CandidateNode[];
@@ -121,8 +122,9 @@ export function selectTopPerformers(
  * Assumes parents are sorted best→worst (weights = [N, N-1, ..., 1])
  */
 function assignParentsToChildren(
-  parents: CandidateNode[], 
-  targetPopSize: number
+  parents: CandidateNode[],
+  targetPopSize: number,
+  rng: () => number = Math.random
 ): CandidateNode[] {
   const numParents = parents.length;
   
@@ -205,7 +207,7 @@ function assignParentsToChildren(
   
   // Shuffle for randomness while preserving counts
   for (let i = assignments.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [assignments[i], assignments[j]] = [assignments[j], assignments[i]];
   }
   
@@ -347,13 +349,18 @@ export async function createNextGeneration(
   }
   
   // Step 5: Shuffle operator plan for fairness across time
+  const planRng = rngFor(config.seed, 'operator-plan', nextGenerationNumber);
   for (let i = operatorPlan.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(planRng() * (i + 1));
     [operatorPlan[i], operatorPlan[j]] = [operatorPlan[j], operatorPlan[i]];
   }
-  
+
   // Step 6: Create parent stream (weighted cycling with fair distribution)
-  const parentAssignments = assignParentsToChildren(topPerformers, remainingChildren);
+  const parentAssignments = assignParentsToChildren(
+    topPerformers,
+    remainingChildren,
+    rngFor(config.seed, 'parent-assign', nextGenerationNumber)
+  );
   let parentIndex = 0;
   const nextParent = () => {
     const parent = parentAssignments[parentIndex % parentAssignments.length];
@@ -398,7 +405,8 @@ export async function createNextGeneration(
 
       try {
         const parentB = op.parents === 2 ? nextParent() : undefined;
-        const result = await op.apply({ parent, parentB, config, generation: currentGeneration });
+        const childRng = rngFor(config.seed, 'operator', nextGenerationNumber, i);
+        const result = await op.apply({ parent, parentB, config, generation: currentGeneration, rng: childRng });
 
         console.log(`[Generation] Child ${i}: ${operatorName.toUpperCase()} from parent ${parent.id.slice(0, 8)}`);
 
@@ -423,7 +431,7 @@ export async function createNextGeneration(
   const childResults = await Promise.all(childCreationPromises);
   
   // Process results in order and create nodes
-  for (const { parentFitness, result } of childResults) {
+  for (const { index, parentFitness, result } of childResults) {
     // Accumulate costs
     totalPromptTokens += result.cost.promptTokens;
     totalCompletionTokens += result.cost.completionTokens;
@@ -439,6 +447,11 @@ export async function createNextGeneration(
       params: { ...result.params, temperature: result.params.temperature ?? 0.7 },
       changeLog: result.changeLog,
     };
+
+    // Seeded runs: derive a stable per-node provider seed unless inherited from the parent
+    if (config.seed !== undefined && newNode.params.seed === undefined) {
+      newNode.params.seed = Math.floor(rngFor(config.seed, 'node-seed', nextGenerationNumber, index)() * 2 ** 31);
+    }
 
     newGenNodes.push(newNode);
 
