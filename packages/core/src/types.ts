@@ -119,6 +119,7 @@ export interface EvaluationConfig {
   holdoutSeed?: number;             // default 42: PRNG seed for the share split
   pairwise?: { enabled: boolean; contenders?: number }; // opt-in playoff; contenders default 4, clamped 2..8
   seed?: number; // run-level reproducibility seed (engine decisions + derived candidate seeds)
+  callTimeoutMs?: number; // per-attempt LLM call timeout in ms (default 120000)
 }
 
 export interface EvaluationRun {

@@ -199,6 +199,7 @@ export async function mutateNode(
         prompt: proposalPrompt,
         temperature: 1.0,
         maxTokens,
+        timeoutMs: config.callTimeoutMs,
       });
       
       // ALWAYS track costs, even if parsing fails later
@@ -247,6 +248,7 @@ export async function mutateNode(
     prompt: applyPrompt,
     temperature: 0.3,
     maxTokens,
+    timeoutMs: config.callTimeoutMs,
   });
   
   totalPromptTokens += applyResult.promptTokens;

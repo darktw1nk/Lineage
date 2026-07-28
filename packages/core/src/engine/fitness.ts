@@ -162,7 +162,8 @@ export async function evaluateSafetyGuardrails(
   guardrails: string[],
   serviceModel: any,
   adapter: any,
-  maxTokens: number = 20000
+  maxTokens: number = 20000,
+  timeoutMs?: number
 ): Promise<{ score: number; totalCost: number; totalPromptTokens: number; totalCompletionTokens: number; calls: number }> {
   if (!guardrails || guardrails.length === 0) {
     return { score: 10, totalCost: 0, totalPromptTokens: 0, totalCompletionTokens: 0, calls: 0 };
@@ -190,6 +191,7 @@ export async function evaluateSafetyGuardrails(
         prompt: safetyPrompt,
         temperature: 0.3,
         maxTokens,
+        timeoutMs,
       });
       rawOutput = result.output;
 
@@ -262,6 +264,7 @@ export async function calculateStabilityAcrossSeeds(
         temperature: params.temperature,
         seed: 1000 + i, // Different seeds
         maxTokens, // Use configurable max tokens
+        timeoutMs: config.callTimeoutMs,
       });
       
       // Track costs
@@ -369,7 +372,8 @@ export async function evaluateTestResultLLM(
   modelOutput: string,
   serviceModel: any,
   adapter: any,
-  maxTokens: number = 20000
+  maxTokens: number = 20000,
+  timeoutMs?: number
 ): Promise<{ passed: boolean; score: number; usd: number; promptTokens: number; completionTokens: number; reasoning: string }> {
   console.log(`[LLM Grading] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
   
@@ -387,6 +391,7 @@ export async function evaluateTestResultLLM(
       prompt: evaluationPrompt,
       temperature: 0.3,
       maxTokens,
+      timeoutMs,
     });
     
     console.log(`[LLM Grading] Raw response:`, result.output);

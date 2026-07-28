@@ -108,7 +108,7 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
       .replace(/\$\{outputA\}/g, first)
       .replace(/\$\{outputB\}/g, second);
     try {
-      const result = await adapter.call({ model: config.serviceModel.model, prompt, temperature: 0.3, maxTokens });
+      const result = await adapter.call({ model: config.serviceModel.model, prompt, temperature: 0.3, maxTokens, timeoutMs: config.callTimeoutMs });
       matches++;
       accrue(result.usd || 0, result.promptTokens || 0, result.completionTokens || 0);
       return parseVerdict(result.output);

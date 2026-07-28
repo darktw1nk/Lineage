@@ -606,7 +606,8 @@ async function processNode(
         state.config.fitness.guardrails,
         state.config.serviceModel,
         serviceAdapter,
-        maxTokens
+        maxTokens,
+        state.config.callTimeoutMs
       );
       
       safetyScore = safetyResult.score;
@@ -835,6 +836,7 @@ async function runSingleSample(
       temperature: params.temperature,
       seed: sampleSeed,
       maxTokens,
+      timeoutMs: state.config.callTimeoutMs,
       providerOptions: state.config.providerOptions,
       images,
     });
@@ -867,7 +869,8 @@ async function runSingleSample(
         result.output,
         state.config.serviceModel,
         serviceAdapter,
-        maxTokens
+        maxTokens,
+        state.config.callTimeoutMs
       );
       
       score = gradingResult.score;

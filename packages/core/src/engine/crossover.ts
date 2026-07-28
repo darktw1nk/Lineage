@@ -60,6 +60,7 @@ export async function crossoverNodes(
     prompt: crossoverPrompt,
     temperature: 0.7,
     maxTokens,
+    timeoutMs: config.callTimeoutMs,
   });
   
   if (!result.output || result.output.trim() === '') {

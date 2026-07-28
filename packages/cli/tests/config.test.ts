@@ -167,6 +167,13 @@ describe('CLI Config - toEvaluationConfig', () => {
     expect(toEvaluationConfig(MINIMAL_CONFIG).seed).toBeUndefined();
   });
 
+  it('passes callTimeoutMs through', () => {
+    const evalConfig = toEvaluationConfig({
+      seedPrompt: 'test', testSet: [{ prompt: 'x' }], callTimeoutMs: 30000,
+    } as CliConfig);
+    expect(evalConfig.callTimeoutMs).toBe(30000);
+  });
+
   it('passes pairwise config through', () => {
     const config: CliConfig = {
       seedPrompt: 'test',

@@ -35,6 +35,7 @@ export interface CliConfig {
   holdoutSeed?: number;       // default 42: PRNG seed for the share split
   pairwise?: { enabled: boolean; contenders?: number }; // opt-in playoff among top contenders
   seed?: number;              // run-level reproducibility seed
+  callTimeoutMs?: number;     // per-attempt LLM call timeout in ms (default 120000)
   populationSize?: number;
   generationSize?: number;
   maxGenerations?: number;
@@ -256,6 +257,7 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
     ...(config.holdoutSeed !== undefined ? { holdoutSeed: config.holdoutSeed } : {}),
     ...(config.pairwise ? { pairwise: config.pairwise } : {}),
     ...(config.seed !== undefined ? { seed: config.seed } : {}),
+    ...(config.callTimeoutMs !== undefined ? { callTimeoutMs: config.callTimeoutMs } : {}),
   };
 }
 

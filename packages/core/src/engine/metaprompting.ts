@@ -185,6 +185,7 @@ export async function metaPromptNode(
     prompt: metaPrompt,
     temperature: 0.8,
     maxTokens,
+    timeoutMs: config.callTimeoutMs,
   });
   
   totalPromptTokens += proposalResult.promptTokens;
@@ -218,6 +219,7 @@ export async function metaPromptNode(
     prompt: applyPrompt,
     temperature: 0.3,
     maxTokens,
+    timeoutMs: config.callTimeoutMs,
   });
   
   totalPromptTokens += applyResult.promptTokens;
