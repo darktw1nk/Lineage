@@ -1,14 +1,14 @@
 {
   "compilerOptions": {
-    "composite": true,
+    "noEmit": true,
+    "target": "ES2020",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "paths": {
-      "@promptengine/core": ["./packages/core/src/index.ts"]
+      "@promptengine/core": ["../../packages/core/src/index.ts"]
     }
   },
   "include": ["vite.config.ts", "electron"]
 }
-

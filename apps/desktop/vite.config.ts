@@ -13,7 +13,7 @@ export default defineConfig({
         vite: {
           resolve: {
             alias: {
-              '@promptengine/core': path.resolve(__dirname, './packages/core/src/index.ts')
+              '@promptengine/core': path.resolve(__dirname, '../../packages/core/src/index.ts')
             }
           },
           build: {
@@ -46,7 +46,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@promptengine/core': path.resolve(__dirname, './packages/core/src/index.ts')
+      '@promptengine/core': path.resolve(__dirname, '../../packages/core/src/index.ts')
     }
   },
   server: {

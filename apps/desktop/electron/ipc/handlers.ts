@@ -507,7 +507,7 @@ async function saveApiKey(provider: string, key: string): Promise<void> {
       store.set(`apiKey.${provider}`, key);
     } else {
       // Delete the key if empty
-      store.delete(`apiKey.${provider}`);
+      store.delete?.(`apiKey.${provider}`);
       console.log(`[Handlers] Deleted empty key for ${provider}`);
     }
     console.log(`[Handlers] All keys in store:`, Object.keys(store.store));

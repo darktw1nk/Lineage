@@ -10,6 +10,7 @@
 export interface StoreInterface {
   get(key: string, defaultValue?: any): any;
   set(key: string, value: any): void;
+  delete?(key: string): void;
   store: Record<string, any>;
 }
 

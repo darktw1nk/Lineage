@@ -5,11 +5,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@promptengine/core': path.resolve(__dirname, './packages/core/src/index.ts'),
+      '@promptengine/core': path.resolve(__dirname, '../../packages/core/src/index.ts'),
     },
   },
   test: {
-    name: 'legacy-root',
+    name: 'desktop',
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
