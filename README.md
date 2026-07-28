@@ -84,13 +84,17 @@ Two grading modes, mixable in one test set:
     "expected": "Refund request: order #4821, cracked jar, wants replacement." },
 
   { "name": "Chart reading", "mode": "llm_grade",
-    "prompt": "What was Q3 revenue?", "image": "charts/q3.png" }
+    "prompt": "What was Q3 revenue?", "image": "charts/q3.png" },
+
+  { "name": "Unseen case", "mode": "llm_grade",
+    "prompt": "<held-back input>", "expected": "<reference>", "holdout": true }
 ]
 ```
 
 - **`exact_match`** scores with distance metrics — `levenshtein` (text), `json_diff` (structure-aware for JSON outputs), `numeric_abs` (numbers) — as partial credit on 0–10, or `strictZeroOnDeviation` for all-or-nothing.
 - **`llm_grade`** uses a judge model with a rubric (task completion, format compliance, hallucination avoidance, brevity) plus your `expected` as a reference answer — content *and* format consistency are graded. The judge's one-sentence justification is stored per test, per node, so you can read *why* a candidate lost points.
 - **`image`** attaches a file for vision-enabled tests — evolve prompts for chart reading, document extraction, UI screenshots.
+- **`holdout` tests are invisible to evolution** — the run ends by scoring both the seed and the champion on them, a generalization number that *can't* be overfit. Add `samplesPerTest` to average away judge noise, and prompts evaluate as real **system messages** by default (the way you'll actually deploy them).
 - Every meta-level prompt is overridable via `systemPrompts` — the judge's rubric, the mutation strategy catalog, the crossover and meta-prompting instructions. **The evolution itself is promptable.**
 
 ## Dials worth knowing

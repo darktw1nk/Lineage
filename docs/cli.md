@@ -23,6 +23,12 @@ Progress and all engine logs go to stderr; stdout carries exactly the JSON resul
 
 **`llm_grade` + `expected`**: when a test case has an `expected` value, the default LLM judge receives it as a reference answer and grades consistency with it (content and format). For strict formatting requirements, you can still override `systemPrompts.llmGradingPrompt` with a custom rubric.
 
+## Evaluation fidelity
+
+- `"promptMode": "system"` (default) sends the candidate prompt as a real system message and the test prompt as the user message — matching production deployment. `"inline"` restores single-message concatenation (for evolving user-message prompts).
+- `"samplesPerTest": 3` runs every test 3× per candidate and scores the mean (`samples` array in results). Damps judge/sampling noise; multiplies evaluation cost. If the candidate has a seed, samples use seed+i; temperature 0 with a fixed seed makes samples redundant.
+- Holdout: mark tests `"holdout": true` and/or set `"holdoutShare": 0.3` (+ optional `"holdoutSeed"`, default 42) to reserve tests evolution never sees. After the run, the seed prompt AND the champion are scored on them — results.json's `holdout` field and the report's "Generalization" section show `seed X → champion Y`. That number is the honest one: it can't be overfit.
+
 ## Plugins
 
 Extend the engine with custom operators and providers (author guide: [plugins.md](plugins.md)).

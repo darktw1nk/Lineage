@@ -259,6 +259,30 @@ export function generateReport(
     lines.push('');
   }
 
+  // ---- Generalization (holdout) ----
+  if (result.holdout && (result.holdout.seed || result.holdout.champion || result.holdout.skipped)) {
+    lines.push('## Generalization (holdout tests)');
+    lines.push('');
+    if (result.holdout.skipped) {
+      lines.push(`Holdout evaluation skipped: ${result.holdout.skipped}`);
+      lines.push('');
+    } else if (result.holdout.seed && result.holdout.champion) {
+      lines.push(`Scores on ${result.holdout.testIds.length} test(s) evolution never saw (${result.holdout.samplesPerTest} sample(s)/test):`);
+      lines.push('');
+      lines.push('| Test | Seed | Champion |');
+      lines.push('|------|------|----------|');
+      const testName = (id: string) => config.testSet.find(t => t.id === id)?.name ?? id.slice(0, 8);
+      for (let i = 0; i < result.holdout.testIds.length; i++) {
+        const tid = result.holdout.testIds[i];
+        const s = result.holdout.seed.perTest.find(p => p.testId === tid)?.score ?? 0;
+        const c = result.holdout.champion.perTest.find(p => p.testId === tid)?.score ?? 0;
+        lines.push(`| ${escapeMarkdown(testName(tid))} | ${s.toFixed(1)} | ${c.toFixed(1)} |`);
+      }
+      lines.push(`| **Average** | **${result.holdout.seed.score.toFixed(2)}** | **${result.holdout.champion.score.toFixed(2)}** |`);
+      lines.push('');
+    }
+  }
+
   // ---- Analysis: Wins, Losses & Why ----
   if (seedNode?.tests && bestNode?.tests && seedNode.tests.length > 0) {
     lines.push('## Analysis');

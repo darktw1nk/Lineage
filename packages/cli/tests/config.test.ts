@@ -298,3 +298,25 @@ describe('CLI Config - loadCliConfig', () => {
     expect(() => loadCliConfig(configPath)).toThrow('seedPrompt');
   });
 });
+
+describe('evaluation fidelity fields', () => {
+  it('passes promptMode, samplesPerTest, holdoutShare, holdoutSeed through', () => {
+    const cfg = toEvaluationConfig({
+      seedPrompt: 's', testSet: [{ prompt: 'p' }],
+      promptMode: 'inline', samplesPerTest: 3, holdoutShare: 0.25, holdoutSeed: 7,
+    } as any, '.');
+    expect(cfg.promptMode).toBe('inline');
+    expect(cfg.samplesPerTest).toBe(3);
+    expect(cfg.holdoutShare).toBe(0.25);
+    expect(cfg.holdoutSeed).toBe(7);
+  });
+
+  it('passes per-test holdout flags through', () => {
+    const cfg = toEvaluationConfig({
+      seedPrompt: 's',
+      testSet: [{ prompt: 'a' }, { prompt: 'b', holdout: true }],
+    } as any, '.');
+    expect(cfg.testSet[0].holdout).toBeUndefined();
+    expect(cfg.testSet[1].holdout).toBe(true);
+  });
+});

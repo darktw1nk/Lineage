@@ -52,6 +52,7 @@ Progress/logs → stderr. `--output` (and stdout) → pure JSON. Exit 0 = usable
 - **Iterate by reseeding**: take `best.prompt` from `results.json` as the next run's `seedPrompt`, optionally add `targetFitness` to stop early. Two small runs beat one big one.
 - **`targetFitness` ceiling**: fitness is quality diluted by the other weights — with weights `{quality: 1.0, cost: 0.1, latency: 0.1}` and no cost/latency norms configured, the maximum is 10 × 1.0/1.2 ≈ **8.33**, so `targetFitness: 9` would never trigger. Compute the ceiling as `10 × qualityWeight / sum(weights)` (or use quality-only weights when you want targetFitness on a 0–10 scale).
 - **Multiple `models` entries** let evolution discover that a different model beats prompt rewording.
+- **Trust the holdout number**: mark 1-2 tests `"holdout": true` (or set `holdoutShare`) and use `samplesPerTest: 2-3` with llm_grade when budget allows — the final `seed → champion` score on unseen tests (results `holdout` field) is the claim worth reporting, not the fitness on training tests.
 
 ## Reading results
 

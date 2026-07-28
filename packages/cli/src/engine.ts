@@ -16,6 +16,8 @@ import type {
   UUID,
   CandidateNode,
 } from '@promptengine/core';
+
+type HoldoutResult = NonNullable<EvaluationRun['holdout']>;
 import { createCliStore } from './store.js';
 import { setStore } from '@promptengine/core';
 import * as display from './display.js';
@@ -60,6 +62,7 @@ export interface EvolutionResult {
     nodeId: UUID;
     generation: number;
   } | null;
+  holdout?: HoldoutResult;
   generations: EvolutionResultGeneration[];
 }
 
@@ -74,6 +77,7 @@ interface RunCollector {
   bestNode: CandidateNode | null;
   error: string | null;
   stopReason: string | null;
+  holdout: HoldoutResult | null;
 }
 
 function createCollector(): RunCollector {
@@ -84,6 +88,7 @@ function createCollector(): RunCollector {
     bestNode: null,
     error: null,
     stopReason: null,
+    holdout: null,
   };
 }
 
@@ -146,6 +151,7 @@ function buildResult(
     error: collector.error ?? undefined,
     totals: { ...collector.totals },
     cacheHits: collector.cacheHits,
+    holdout: collector.holdout ?? undefined,
     best: best
       ? {
           prompt: best.prompt,
@@ -259,6 +265,9 @@ export async function runEvolution(
       case 'stop':
         collector.stopReason = data.reason ?? 'unknown';
         break;
+      case 'holdout_result':
+        collector.holdout = data.holdout;
+        break;
       case 'error':
         collector.error = data.message;
         display.onError(data.message);
@@ -333,6 +342,10 @@ export async function runEvolution(
 
   const finishedAt = Date.now();
   const result = buildResult(config, run, collector, finishedAt);
+
+  if (result.holdout?.seed && result.holdout?.champion) {
+    process.stderr.write(`Generalization (unseen tests): seed ${result.holdout.seed.score.toFixed(2)} → champion ${result.holdout.champion.score.toFixed(2)}\n`);
+  }
 
   // Write JSON result to stdout for piping
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');

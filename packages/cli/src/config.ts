@@ -20,6 +20,7 @@ export interface CliConfig {
     prompt: string;
     expected?: string;
     image?: string; // path to image file (relative to config or absolute)
+    holdout?: boolean; // excluded from evolution; used for the generalization report
     grading?: {
       strictZeroOnDeviation?: boolean;
       distanceMetric?: 'levenshtein' | 'json_diff' | 'numeric_abs';
@@ -28,6 +29,10 @@ export interface CliConfig {
   models?: string[];          // e.g. ["openai/gpt-4o", "anthropic/claude-sonnet-4.5"]
   serviceModel?: string;      // e.g. "openai/gpt-4o-mini"
   plugins?: string[];         // plugin file/dir paths, resolved relative to the config file
+  promptMode?: 'system' | 'inline'; // default 'system': candidate prompt as system message
+  samplesPerTest?: number;    // default 1: samples averaged per test
+  holdoutShare?: number;      // default 0: seeded share of non-flagged tests held out
+  holdoutSeed?: number;       // default 42: PRNG seed for the share split
   populationSize?: number;
   generationSize?: number;
   maxGenerations?: number;
@@ -172,6 +177,7 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
       prompt: t.prompt,
       expected: t.expected,
       image: imagePath,
+      ...(t.holdout ? { holdout: true } : {}),
       grading: t.grading,
     };
   });
@@ -242,6 +248,10 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
     serviceModelMaxTokens: config.serviceModelMaxTokens ?? 20000,
     retries: config.retries ?? 3,
     providerOptions: config.providerOptions,
+    ...(config.promptMode ? { promptMode: config.promptMode } : {}),
+    ...(config.samplesPerTest !== undefined ? { samplesPerTest: config.samplesPerTest } : {}),
+    ...(config.holdoutShare !== undefined ? { holdoutShare: config.holdoutShare } : {}),
+    ...(config.holdoutSeed !== undefined ? { holdoutSeed: config.holdoutSeed } : {}),
   };
 }
 
