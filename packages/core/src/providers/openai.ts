@@ -133,8 +133,7 @@ export class OpenAIAdapter extends BaseProviderAdapter {
   
   protected async getApiKey(): Promise<string | null> {
     const key = store.get(`apiKey.${this.name}`) as string | null;
-    console.log(`[OpenAI] Looking for key: apiKey.${this.name}, found: ${key ? 'YES (length: ' + key.length + ')' : 'NO'}`);
-    console.log(`[OpenAI] All store keys:`, store.store);
+    console.log(`[OpenAI] API key for ${this.name}: ${key ? 'found' : 'NOT FOUND'}`);
     return key;
   }
 }
