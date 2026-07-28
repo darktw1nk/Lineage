@@ -354,6 +354,8 @@ function formatCost(cost: number): string {
 }
 
 function FitnessBreakdown({ node, config, evaluation }: { node: CandidateNode; config: EvaluationConfig; evaluation: EvaluationRun | null }) {
+  if (!node.metrics) return null;
+
   // Calculate normalized weights
   const weights = config.fitness.weights;
   const sum = (weights.quality || 0) + (weights.safety || 0) + (weights.cost || 0) + (weights.latency || 0) + (weights.stability || 0);
@@ -489,12 +491,13 @@ function FitnessBreakdown({ node, config, evaluation }: { node: CandidateNode; c
   }
 
   // Stability
-  if (node.metrics.stability !== undefined && normalizedWeights.stability > 0) {
+  const stabilityValue = node.metrics?.stability;
+  if (stabilityValue !== undefined && normalizedWeights.stability > 0) {
     components.push({
       label: 'Stability',
-      value: node.metrics.stability,
+      value: stabilityValue,
       weight: normalizedWeights.stability,
-      contribution: normalizedWeights.stability * node.metrics.stability,
+      contribution: normalizedWeights.stability * stabilityValue,
     });
   }
 

@@ -22,7 +22,6 @@ export function useEvaluation(evaluationId: UUID | null): {
   const setEvaluation = useEvaluationStore((state) => state.setEvaluation);
   const setLoading = useEvaluationStore((state) => state.setLoading);
   const subscribe = useEvaluationStore((state) => state.subscribe);
-  const unsubscribe = useEvaluationStore((state) => state.unsubscribe);
   
   useEffect(() => {
     if (!evaluationId) return;

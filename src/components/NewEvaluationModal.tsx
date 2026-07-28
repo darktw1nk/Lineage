@@ -23,12 +23,6 @@ interface NewEvaluationModalProps {
 }
 
 export function NewEvaluationModal({ onClose, onCreated, initialConfig }: NewEvaluationModalProps) {
-  const [activeTab, setActiveTab] = useState('main');
-  const [isSimpleMode, setIsSimpleMode] = useState(true);
-  
-  // Generate new ID each time modal is opened to avoid conflicts
-  const [configId] = useState(() => uuidv4());
-  
   // Load settings synchronously from cache or fetch (blocks until ready)
   const { data: settings, isLoading } = useQuery({
     queryKey: ['settings'],
@@ -168,7 +162,7 @@ Here is the bug report:
           latencyNorm: { ...defaultConfig.fitness?.latencyNorm, ...initialConfig.fitness?.latencyNorm },
         },
         targets: { ...defaultConfig.targets, ...initialConfig.targets },
-      };
+      } as Partial<EvaluationConfig>;
     }
     return defaultConfig;
   });
@@ -1522,7 +1516,7 @@ function VariationsTab({ config, setConfig }: TabProps) {
 
 // Fitness Tab
 function FitnessTab({ config, setConfig }: TabProps) {
-  const weights = config.fitness?.weights || {};
+  const weights: EvaluationConfig['fitness']['weights'] = config.fitness?.weights ?? { quality: 0 };
 
   const setWeight = (key: string, value: number) => {
     setConfig({
