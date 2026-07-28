@@ -2233,6 +2233,24 @@ function AdvancedTab({ config, setConfig }: TabProps) {
           />
         </div>
 
+        <div>
+          <LabelWithTooltip
+            htmlFor="callTimeout"
+            label="Call Timeout (seconds)"
+            tooltip="Hard abort for any single LLM HTTP attempt. Timed-out calls are retried with a fresh budget; repeated timeouts fail the node and the run continues. Default 120s — raise for slow reasoning models."
+          />
+          <Input
+            id="callTimeout"
+            type="number"
+            min="1"
+            value={(config.callTimeoutMs ?? 120000) / 1000}
+            onChange={(e) => {
+              const s = parseInt(e.target.value, 10);
+              setConfig({ ...config, callTimeoutMs: Number.isNaN(s) ? undefined : s * 1000 });
+            }}
+          />
+        </div>
+
         <div className="flex items-center space-x-2">
           <Switch
             id="pairwiseEnabled"
