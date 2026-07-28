@@ -95,3 +95,30 @@ export async function withRetry<T>(
   throw lastError!;
 }
 
+export const DEFAULT_CALL_TIMEOUT_MS = 120_000;
+
+/**
+ * fetch with a hard per-attempt timeout. A hung request is aborted and rethrown
+ * as RetryableError(408) so withRetry gives it a fresh attempt (and a fresh
+ * timeout budget); repeated timeouts exhaust retries and fail the call, freeing
+ * the global semaphore slot instead of pinning it forever.
+ */
+export async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error: any) {
+    if (controller.signal.aborted || error?.name === 'AbortError') {
+      throw new RetryableError(`Request timed out after ${timeoutMs}ms`, 408);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
