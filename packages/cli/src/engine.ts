@@ -63,6 +63,7 @@ export interface EvolutionResult {
     generation: number;
   } | null;
   holdout?: HoldoutResult;
+  seed?: number;
   playoffs?: Array<{ generation: number; ranking: string[] }>;
   generations: EvolutionResultGeneration[];
 }
@@ -163,6 +164,7 @@ function buildResult(
     totals: { ...collector.totals },
     cacheHits: collector.cacheHits,
     holdout: collector.holdout ?? undefined,
+    ...(config.seed !== undefined ? { seed: config.seed } : {}),
     ...(collector.playoffs.length ? { playoffs: collector.playoffs } : {}),
     best: best
       ? {

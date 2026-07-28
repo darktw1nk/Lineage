@@ -28,7 +28,7 @@ Plugins are authored in plain JavaScript (ESM). TypeScript authors precompile â€
   label: 'Section Shuffle',      // UI display name
   description: '...',
   parents: 1,                    // 1 = unary (gets `parent`), 2 = binary (also gets `parentB`)
-  async apply({ parent, parentB, config, generation }) {
+  async apply({ parent, parentB, config, generation, rng }) {
     return {
       prompt: '...',                                    // the child's prompt (required)
       params: { temperature: 1.2 },                     // optional patch: temperature, seed, model
@@ -42,6 +42,7 @@ Plugins are authored in plain JavaScript (ESM). TypeScript authors precompile â€
 - Give users a share via `operators.custom` in the evaluation config: `{ "custom": { "section-shuffle": { "share": 0.3 } } }`. Shares are normalized together with the built-in operators. In the desktop app, plugin operators appear automatically in New Evaluation â†’ Variations (Advanced mode).
 - Need an LLM inside your operator? `import { getProviderAdapter } from '@promptengine/core'` and call the service model from `config.serviceModel` â€” report the spend in `cost` so budget enforcement stays accurate.
 - Throwing from `apply()` is safe: the engine falls back to carrying the parent forward with an `ERROR` changelog entry.
+- Need randomness? Use `ctx.rng()` instead of `Math.random()` â€” it's a deterministic stream when the run is seeded (`"seed"` / `--seed`), so your operator stays reproducible for free.
 
 ## Providers
 

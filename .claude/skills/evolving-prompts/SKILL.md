@@ -53,6 +53,7 @@ Progress/logs → stderr. `--output` (and stdout) → pure JSON. Exit 0 = usable
 - **`targetFitness` ceiling**: fitness is quality diluted by the other weights — with weights `{quality: 1.0, cost: 0.1, latency: 0.1}` and no cost/latency norms configured, the maximum is 10 × 1.0/1.2 ≈ **8.33**, so `targetFitness: 9` would never trigger. Compute the ceiling as `10 × qualityWeight / sum(weights)` (or use quality-only weights when you want targetFitness on a 0–10 scale).
 - **Multiple `models` entries** let evolution discover that a different model beats prompt rewording.
 - **Trust the holdout number**: mark 1-2 tests `"holdout": true` (or set `holdoutShare`) and use `samplesPerTest: 2-3` with llm_grade when budget allows — the final `seed → champion` score on unseen tests (results `holdout` field) is the claim worth reporting, not the fitness on training tests.
+- Pass `--seed 42` (or `"seed"` in config) when comparing configurations — engine decisions reproduce exactly, so differences come from your change, not the shuffle. LLM outputs stay best-effort.
 - Enable `"pairwise": { "enabled": true }` when llm_grade scores cluster (several candidates within ~0.5 of each other) — top contenders are re-ranked by head-to-head judging (both orders, position bias cancels); the champion is the playoff winner, not the noisiest 9.9. Playoff quality is judge-limited: use the strongest `serviceModel` you can afford. Judge calls count toward the budget (contender pairs × llm_grade tests × 2 orders per playoff).
 
 ## Reading results

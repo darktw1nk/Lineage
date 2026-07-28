@@ -106,6 +106,7 @@ Two grading modes, mixable in one test set:
 | `operators.*.share` | The breeding mix — crank `metaPrompting` when you have failing tests to learn from, `modelVariation` when hunting cheaper models |
 | `paramVariation.temperature.{min,max}` | The temperature range evolution may explore |
 | `pairwise.enabled` | Head-to-head playoff among each generation's top contenders — the champion is picked by "which output is better?" comparisons (both orders, position bias cancels), not by a noisy 9.87-vs-9.89 absolute score. Judge-limited: pair it with a strong `serviceModel` |
+| `seed` | Reruns become reproducible — same seed, same evolution decisions (operator plan, parents, temperatures, splits). `--seed 42` on the CLI |
 | `targets` | Four independent stop conditions: `maxGenerations`, `budgetUSD` (hard spend cap), `targetFitness` (stop early on success), `timeLimitMs` |
 | `serviceModel` | The model that powers mutation/crossover/judging — cheap models work remarkably well here |
 | `providerOptions` | Passed through to candidate calls (e.g. `reasoning_effort`) |

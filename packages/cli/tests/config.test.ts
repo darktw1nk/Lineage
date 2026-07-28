@@ -156,6 +156,17 @@ describe('CLI Config - toEvaluationConfig', () => {
     expect(evalConfig.serviceModel).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4.5' });
   });
 
+  it('passes seed through', () => {
+    const evalConfig = toEvaluationConfig({
+      seedPrompt: 'test', testSet: [{ prompt: 'x' }], seed: 42,
+    } as CliConfig);
+    expect(evalConfig.seed).toBe(42);
+  });
+
+  it('omits seed when not configured', () => {
+    expect(toEvaluationConfig(MINIMAL_CONFIG).seed).toBeUndefined();
+  });
+
   it('passes pairwise config through', () => {
     const config: CliConfig = {
       seedPrompt: 'test',

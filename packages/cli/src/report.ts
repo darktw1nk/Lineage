@@ -111,6 +111,9 @@ export function generateReport(
   lines.push(`**Run:** ${config.name}`);
   lines.push(`**Date:** ${formatDate(result.startedAt)}`);
   lines.push(`**Run ID:** \`${result.runId}\``);
+  if (result.seed !== undefined) {
+    lines.push(`**Seed:** ${result.seed}`);
+  }
   lines.push('');
 
   // ---- Run Configuration ----

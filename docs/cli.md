@@ -11,6 +11,7 @@
 npm run cli -- --config <path>              # Run evolution from JSON config
 npm run cli -- --output <path>              # Write JSON results to file (default: stdout)
 npm run cli -- --db <path>                  # Use a specific database file
+npm run cli -- --seed <n>                   # Reproducibility seed (overrides config "seed")
 npm run cli -- --sync-models                # Sync models from OpenRouter
 npm run cli -- --list-models                # List all models with pricing
 npm run cli -- --set-key <provider> <key>   # Save API key (shared with desktop app)
@@ -28,6 +29,7 @@ Progress and all engine logs go to stderr; stdout carries exactly the JSON resul
 - `"promptMode": "system"` (default) sends the candidate prompt as a real system message and the test prompt as the user message — matching production deployment. `"inline"` restores single-message concatenation (for evolving user-message prompts).
 - `"samplesPerTest": 3` runs every test 3× per candidate and scores the mean (`samples` array in results). Damps judge/sampling noise; multiplies evaluation cost. If the candidate has a seed, samples use seed+i; temperature 0 with a fixed seed makes samples redundant.
 - Holdout: mark tests `"holdout": true` and/or set `"holdoutShare": 0.3` (+ optional `"holdoutSeed"`, default 42) to reserve tests evolution never sees. After the run, the seed prompt AND the champion are scored on them — results.json's `holdout` field and the report's "Generalization" section show `seed X → champion Y`. That number is the honest one: it can't be overfit.
+- `"seed": 42` (or `--seed 42`) makes the run reproducible: same seed + same config ⇒ identical operator plans, parent assignments, mutation strategies, temperatures, model hops, holdout splits, and candidate seeds. LLM outputs remain best-effort (Anthropic has no seed parameter) — the seed reproduces the experimental protocol, not the weather. Explicit `holdoutSeed` still wins over `seed` for the split. The effective seed is echoed in results.json and the report.
 - `"pairwise": { "enabled": true, "contenders": 4 }` runs a pairwise playoff among each generation's top candidates: their stored outputs are compared head-to-head by the judge in BOTH orders (position bias cancels), and the resulting rank decides selection, the elite, and the champion. Applies to `llm_grade` tests; judge calls count toward totals and the budget (`playoff_result` events carry the call count). Sharpens selection exactly where absolute 0-10 scores cluster — a 9.87-vs-9.89 distinction is noise, "which output is better?" is not. Contenders clamp to 2..8 (default 4); results.json gains a `playoffs` array and ranked nodes carry `metrics.playoffRank`. Playoff quality is judge-limited: use the strongest `serviceModel` you can afford — the default judging prompt guards against verbosity bias (preferring longer outputs), but a weak judge weakens the ranking.
 
 ## Plugins

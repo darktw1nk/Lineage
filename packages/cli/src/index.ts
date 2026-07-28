@@ -84,6 +84,7 @@ OPTIONS:
   --output <path>              Write JSON results to file (default: stdout)
   --db <path>                  Use a specific database file
   --plugins <dir>              Load plugins from a directory (repeatable)
+  --seed <n>                   Reproducibility seed (overrides config "seed")
   --sync-models                Sync available models from OpenRouter
   --list-models                List all models in the database with pricing
   --set-key <provider> <key>   Save an API key (shared with desktop app)
@@ -142,6 +143,7 @@ function parseArgs(argv: string[]): {
     setKey: undefined as { provider: Provider; key: string } | undefined,
     help: false,
     pluginDirs: [] as string[],
+    seed: undefined as number | undefined,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -158,6 +160,15 @@ function parseArgs(argv: string[]): {
       case '--plugins':
         result.pluginDirs.push(args[++i]);
         break;
+      case '--seed': {
+        const parsed = parseInt(args[++i], 10);
+        if (Number.isNaN(parsed)) {
+          console.error('--seed requires an integer');
+          process.exit(1);
+        }
+        result.seed = parsed;
+        break;
+      }
       case '--sync-models':
         result.syncModels = true;
         break;
@@ -279,7 +290,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
   closeDatabase();
 }
 
-async function handleRunEvolution(configPath: string, outputPath?: string, dbPath?: string, pluginDirs: string[] = []): Promise<void> {
+async function handleRunEvolution(configPath: string, outputPath?: string, dbPath?: string, pluginDirs: string[] = [], seedOverride?: number): Promise<void> {
   // Load and validate config
   const cliConfig = loadCliConfig(configPath);
   const configKeys = extractConfigKeys(cliConfig);
@@ -301,6 +312,9 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
 
   // Verify we have API keys for all required providers
   const evalConfig = toEvaluationConfig(cliConfig, configDir);
+  if (seedOverride !== undefined) {
+    evalConfig.seed = seedOverride;
+  }
   const requiredProviders = new Set<Provider>();
   for (const model of evalConfig.enabledModels) {
     requiredProviders.add(model.provider);
@@ -384,7 +398,7 @@ async function main(): Promise<void> {
   }
 
   if (args.config) {
-    await handleRunEvolution(args.config, args.output, args.db, args.pluginDirs);
+    await handleRunEvolution(args.config, args.output, args.db, args.pluginDirs, args.seed);
     return;
   }
 
