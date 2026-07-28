@@ -15,6 +15,9 @@ export interface CostEstimate {
   warnings: string[];
 }
 
+// Completion-token assumptions (low side calibrated 2026-07-29 against a real
+// flash-lite run: terse tasks emit ~10-50 tokens, so low assumes near-minimal
+// outputs — candidate 30, judge 60, prompt-emitting service calls 100).
 const tok = (s: string | undefined) => Math.ceil((s?.length ?? 0) / 4);
 
 interface Price { promptUSDper1k: number; completionUSDper1k: number }
@@ -73,16 +76,16 @@ export async function estimateRunCost(
     if (calls > 0) breakdown.push({ label, calls, low: calls * lowPer, high: calls * highPer });
   };
 
-  if (N0 > 1) add('Population fill (mutations)', (N0 - 1) * 2, per(svc, svcPromptTok, 200), per(svc, svcPromptTok, maxOut));
-  add('Candidate evaluations', nodes * F * S, per(cand, candPromptTok, 100), per(cand, candPromptTok, maxOut));
-  add('LLM grading', nodes * L * S, per(svc, judgePromptTok, 80), per(svc, judgePromptTok, 250));
+  if (N0 > 1) add('Population fill (mutations)', (N0 - 1) * 2, per(svc, svcPromptTok, 100), per(svc, svcPromptTok, maxOut));
+  add('Candidate evaluations', nodes * F * S, per(cand, candPromptTok, 30), per(cand, candPromptTok, maxOut));
+  add('LLM grading', nodes * L * S, per(svc, judgePromptTok, 60), per(svc, judgePromptTok, 250));
 
   const guardrails = config.fitness.guardrails ?? [];
   if (config.fitness.weights.safety && guardrails.length > 0) {
-    add('Safety guardrails', nodes * guardrails.length, per(svc, judgePromptTok, 80), per(svc, judgePromptTok, 250));
+    add('Safety guardrails', nodes * guardrails.length, per(svc, judgePromptTok, 60), per(svc, judgePromptTok, 250));
   }
   if (config.fitness.weights.stability) {
-    add('Stability re-runs', nodes * 3, per(cand, candPromptTok, 100), per(cand, candPromptTok, maxOut));
+    add('Stability re-runs', nodes * 3, per(cand, candPromptTok, 30), per(cand, candPromptTok, maxOut));
   }
 
   // Operator service calls per transition: children split by normalized shares
@@ -110,18 +113,18 @@ export async function estimateRunCost(
     }
     operatorCalls *= transitions;
   }
-  add('Genetic operators', operatorCalls, per(svc, svcPromptTok, 200), per(svc, svcPromptTok, maxOut));
+  add('Genetic operators', operatorCalls, per(svc, svcPromptTok, 100), per(svc, svcPromptTok, maxOut));
 
   if (config.pairwise?.enabled && L > 0) {
     const c = Math.min(Math.max(Math.floor(config.pairwise.contenders ?? 4), 2), 8);
     const contenders = Math.min(c, N);
     const pairs = (contenders * (contenders - 1)) / 2;
-    add('Pairwise playoffs', G * pairs * L * 2, per(svc, judgePromptTok, 80), per(svc, judgePromptTok, 250));
+    add('Pairwise playoffs', G * pairs * L * 2, per(svc, judgePromptTok, 60), per(svc, judgePromptTok, 250));
   }
 
   if (H > 0) {
-    add('Holdout evaluation', 2 * H * S, per(cand, candPromptTok, 100), per(cand, candPromptTok, maxOut));
-    if (Hllm > 0) add('Holdout grading', 2 * Hllm * S, per(svc, judgePromptTok, 80), per(svc, judgePromptTok, 250));
+    add('Holdout evaluation', 2 * H * S, per(cand, candPromptTok, 30), per(cand, candPromptTok, maxOut));
+    if (Hllm > 0) add('Holdout grading', 2 * Hllm * S, per(svc, judgePromptTok, 60), per(svc, judgePromptTok, 250));
   }
 
   const calls = breakdown.reduce((a, b) => a + b.calls, 0);
