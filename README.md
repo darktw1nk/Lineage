@@ -109,24 +109,15 @@ Everything is tracked: token counts, per-node cost, cache hits (identical prompt
 
 Both drive the same engine (`@promptengine/core`).
 
-### CLI (agents, CI)
-
 ```bash
 npm install
-npm run cli -- --list-models --db ./run.db     # catalogued models + live pricing
-npm run cli -- --config evolve.json --db ./run.db --output results.json
+npm run cli -- --config evolve.json --output results.json   # agents: JSON in, JSON out
+npm run electron:dev                                         # humans: watch it evolve
 ```
 
-Keys come from env vars (`GEMINI_API_KEY`, `OPENAI_API_KEY`, …). `results.json` has the best prompt, full lineage with per-test judge reasoning, and cost totals; exit code 0 ⇔ a usable best prompt exists. A small run costs **under a cent**. Full reference: [docs/cli.md](docs/cli.md). Using Claude Code? The repo ships an [`evolving-prompts` skill](.claude/skills/evolving-prompts/SKILL.md) that teaches agents the whole workflow.
+That's the whole idea — everything else (keys, model discovery, installers, packages, troubleshooting) lives in **[docs/install.md](docs/install.md)**, and the full config reference in **[docs/cli.md](docs/cli.md)**. A small run costs **under a cent**. Using Claude Code? The repo ships an [`evolving-prompts` skill](.claude/skills/evolving-prompts/SKILL.md) that teaches agents the whole workflow.
 
-### Desktop (humans)
-
-```bash
-npm run electron:dev      # dev mode
-npm run build             # NSIS installer + portable .exe
-```
-
-Configure in the UI — models load from the catalog with live pricing:
+In the desktop app, models load from the catalog with live pricing:
 
 ![New evaluation](docs/assets/new-evaluation.png)
 
