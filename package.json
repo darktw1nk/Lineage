@@ -5,6 +5,7 @@
   "author": "",
   "main": "dist-electron/main.js",
   "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "dev": "vite",
     "build": "vite build && electron-builder",

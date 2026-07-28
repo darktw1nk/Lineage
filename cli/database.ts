@@ -57,6 +57,6 @@ export async function initCliDatabase(explicitPath?: string): Promise<void> {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   // Import the engine's database init — it accepts an optional dbPath
-  const { initializeDatabase } = await import('../electron/database/init.js');
+  const { initializeDatabase } = await import('@promptengine/core');
   await initializeDatabase(dbPath);
 }

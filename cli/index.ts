@@ -15,7 +15,7 @@ import { loadCliConfig, toEvaluationConfig, extractConfigKeys } from './config.j
 import { installStoreShim } from './engine.js';
 import { resolveApiKey, saveApiKey } from './store.js';
 import { initCliDatabase } from './database.js';
-import type { Provider } from '../src/types/index.js';
+import type { Provider } from '@promptengine/core';
 
 const VALID_PROVIDERS: Provider[] = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq'];
 
@@ -33,13 +33,13 @@ async function cleanup(signal: string): Promise<void> {
 
   if (activeRunId) {
     try {
-      const { stopEvaluation } = await import('../electron/engine/evaluator_v2.js');
+      const { stopEvaluation } = await import('@promptengine/core');
       stopEvaluation(activeRunId);
     } catch { /* best-effort */ }
   }
 
   try {
-    const { closeDatabase } = await import('../electron/database/init.js');
+    const { closeDatabase } = await import('@promptengine/core');
     closeDatabase();
   } catch { /* best-effort */ }
 
@@ -199,11 +199,11 @@ async function handleSyncModels(dbPath?: string): Promise<void> {
 
   console.log('Fetching models from OpenRouter...');
 
-  const { OpenRouterAdapter } = await import('../electron/providers/openrouter.js');
+  const { OpenRouterAdapter } = await import('@promptengine/core');
   const models = await OpenRouterAdapter.fetchModels(apiKey);
 
   // Upsert into database
-  const { getDatabase } = await import('../electron/database/init.js');
+  const { getDatabase } = await import('@promptengine/core');
   const db = getDatabase();
 
   const upsert = db.prepare(`
@@ -220,14 +220,14 @@ async function handleSyncModels(dbPath?: string): Promise<void> {
 
   console.log(`Synced ${models.length} models from OpenRouter`);
 
-  const { closeDatabase } = await import('../electron/database/init.js');
+  const { closeDatabase } = await import('@promptengine/core');
   closeDatabase();
 }
 
 async function handleListModels(dbPath?: string): Promise<void> {
   await initCliDatabase(dbPath);
 
-  const { getDatabase } = await import('../electron/database/init.js');
+  const { getDatabase } = await import('@promptengine/core');
   const db = getDatabase();
 
   const rows = db.prepare(`
@@ -243,7 +243,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
 
   if (rows.length === 0) {
     console.log('No models found. Run --sync-models to fetch from OpenRouter.');
-    const { closeDatabase } = await import('../electron/database/init.js');
+    const { closeDatabase } = await import('@promptengine/core');
     closeDatabase();
     return;
   }
@@ -259,7 +259,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
 
   console.log(`\nTotal: ${rows.length} models`);
 
-  const { closeDatabase } = await import('../electron/database/init.js');
+  const { closeDatabase } = await import('@promptengine/core');
   closeDatabase();
 }
 
@@ -317,7 +317,7 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
   fs.writeFileSync(reportPath, generateReport(result, evalConfig, cliConfig));
   process.stderr.write(`\nReport written to ${reportPath}\n`);
 
-  const { closeDatabase } = await import('../electron/database/init.js');
+  const { closeDatabase } = await import('@promptengine/core');
   closeDatabase();
 }
 
@@ -362,7 +362,7 @@ async function main(): Promise<void> {
 main().catch((err) => {
   console.error('Fatal error:', err.message || err);
   // Best-effort cleanup on fatal error
-  import('../electron/database/init.js')
+  import('@promptengine/core')
     .then(({ closeDatabase }) => closeDatabase())
     .catch(() => {})
     .finally(() => process.exit(1));

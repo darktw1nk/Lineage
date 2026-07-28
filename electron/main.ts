@@ -2,9 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
-import { initializeDatabase, closeDatabase } from './database/init.js';
-import { setStore, type StoreInterface } from './store.js';
-import { setSendUpdate } from './engine/evaluator_v2.js';
+import { initializeDatabase, closeDatabase, setStore, setSendUpdate, type StoreInterface } from '@promptengine/core';
 import { registerIPCHandlers } from './ipc/handlers.js';
 import { initLogger, getLogBuffer } from './logger.js';
 

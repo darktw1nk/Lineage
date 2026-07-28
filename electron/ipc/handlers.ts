@@ -1,10 +1,8 @@
 import { IpcMain } from 'electron';
-import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from '../../src/types/index.js';
-import { getDatabase } from '../database/init.js';
+import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from '@promptengine/core';
+import { getDatabase, store, OpenRouterAdapter } from '@promptengine/core';
 import { v4 as uuidv4 } from 'uuid';
-import { store } from '../store.js';
 import { getLogBuffer } from '../logger.js';
-import { OpenRouterAdapter } from '../providers/openrouter.js';
 
 export function registerIPCHandlers(ipcMain: IpcMain): void {
   // Logger handler
@@ -212,7 +210,7 @@ async function startEvaluation(runId: string): Promise<void> {
     console.log('[IPC] Found config, importing evaluator_v2...');
     const config: EvaluationConfig = JSON.parse(configRow.config_json);
     
-    const { startEvaluation: startEval } = await import('../engine/evaluator_v2.js');
+    const { startEvaluation: startEval } = await import('@promptengine/core');
     console.log('[IPC] Calling engine startEvaluation (V2)...');
     await startEval(runId, config, run);
     console.log('[IPC] Engine startEvaluation (V2) completed');
@@ -223,17 +221,17 @@ async function startEvaluation(runId: string): Promise<void> {
 }
 
 async function pauseEvaluation(runId: string): Promise<void> {
-  const { pauseEvaluation: pauseEval } = await import('../engine/evaluator_v2.js');
+  const { pauseEvaluation: pauseEval } = await import('@promptengine/core');
   pauseEval(runId);
 }
 
 async function resumeEvaluation(runId: string): Promise<void> {
-  const { resumeEvaluation: resumeEval } = await import('../engine/evaluator_v2.js');
+  const { resumeEvaluation: resumeEval } = await import('@promptengine/core');
   resumeEval(runId);
 }
 
 async function stopEvaluation(runId: string): Promise<void> {
-  const { stopEvaluation: stopEval } = await import('../engine/evaluator_v2.js');
+  const { stopEvaluation: stopEval } = await import('@promptengine/core');
   stopEval(runId);
 }
 

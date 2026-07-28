@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import type { EvaluationConfig, ModelRef, TestCase, Provider } from '../src/types/index.js';
+import type { EvaluationConfig, ModelRef, TestCase, Provider } from '@promptengine/core';
 
 export interface CliConfig {
   name?: string;

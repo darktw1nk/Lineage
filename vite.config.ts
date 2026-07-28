@@ -11,6 +11,11 @@ export default defineConfig({
       {
         entry: 'electron/main.ts',
         vite: {
+          resolve: {
+            alias: {
+              '@promptengine/core': path.resolve(__dirname, './packages/core/src/index.ts')
+            }
+          },
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
@@ -40,11 +45,11 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
+      '@': path.resolve(__dirname, './src'),
+      '@promptengine/core': path.resolve(__dirname, './packages/core/src/index.ts')
     }
   },
   server: {
     port: 5173
   }
 });
-

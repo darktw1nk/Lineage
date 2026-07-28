@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { EvaluationConfig, CandidateNode, UUID } from '../../../src/types/index.js';
+import type { EvaluationConfig, CandidateNode, UUID } from '@promptengine/core';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -9,18 +9,15 @@ const mockStartEvaluation = vi.fn();
 const mockStopEvaluation = vi.fn();
 let capturedSendUpdate: ((runId: UUID, data: any) => void) | null = null;
 
-vi.mock('../../../electron/engine/evaluator_v2.js', () => ({
+const mockDbPrepare = vi.fn();
+const mockDbRun = vi.fn();
+
+vi.mock('@promptengine/core', () => ({
   setSendUpdate: (fn: (runId: UUID, data: any) => void) => {
     capturedSendUpdate = fn;
   },
   startEvaluation: (...args: any[]) => mockStartEvaluation(...args),
   stopEvaluation: (...args: any[]) => mockStopEvaluation(...args),
-}));
-
-const mockDbPrepare = vi.fn();
-const mockDbRun = vi.fn();
-
-vi.mock('../../../electron/database/init.js', () => ({
   getDatabase: () => ({
     prepare: (sql: string) => {
       mockDbPrepare(sql);
@@ -28,9 +25,6 @@ vi.mock('../../../electron/database/init.js', () => ({
     },
   }),
   closeDatabase: vi.fn(),
-}));
-
-vi.mock('../../../electron/store.js', () => ({
   setStore: vi.fn(),
 }));
 

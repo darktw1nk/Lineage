@@ -1,0 +1,31 @@
+{
+  "name": "@promptengine/core",
+  "version": "1.0.0",
+  "description": "Genetic-algorithm engine for LLM prompt optimization: operators, fitness, providers, persistence.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "sql.js": "^1.14.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/sql.js": "^1.4.9",
+    "@types/uuid": "^9.0.7",
+    "tsup": "^8.0.0"
+  }
+}

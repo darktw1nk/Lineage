@@ -4,7 +4,7 @@
  * Prints progress to stderr (so stdout can be piped for JSON output).
  */
 
-import type { CandidateNode } from '../src/types/index.js';
+import type { CandidateNode } from '@promptengine/core';
 
 export interface DisplayState {
   currentGeneration: number;

@@ -5,7 +5,7 @@
  * configuration, fitness progression, seed vs best prompt, and improvements.
  */
 
-import type { EvaluationConfig } from '../src/types/index.js';
+import type { EvaluationConfig } from '@promptengine/core';
 import type { EvolutionResult, EvolutionResultNode } from './engine.js';
 import type { CliConfig } from './config.js';
 

@@ -8,7 +8,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import type { Provider } from '../src/types/index.js';
+import type { Provider } from '@promptengine/core';
 
 const ENV_VAR_MAP: Record<Provider, string> = {
   openai: 'OPENAI_API_KEY',

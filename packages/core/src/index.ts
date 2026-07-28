@@ -1,0 +1,29 @@
+/**
+ * @promptengine/core — public API surface.
+ *
+ * The host application (Electron desktop, CLI, or an embedding program)
+ * injects platform services before starting an evaluation:
+ *   setStore(...)       — key/value settings + API key storage
+ *   setSendUpdate(...)  — engine event sink (IPC, collector, ...)
+ *   initializeDatabase(dbPath) — sql.js persistence location
+ */
+
+export type * from './types.js';
+export { store, setStore } from './store.js';
+export type { StoreInterface } from './store.js';
+export { SqlJsWrapper, getDatabase, initializeDatabase, closeDatabase } from './database/init.js';
+export {
+  setSendUpdate,
+  startEvaluation,
+  pauseEvaluation,
+  resumeEvaluation,
+  stopEvaluation,
+} from './engine/evaluator_v2.js';
+export { initGlobalSemaphore, updateGlobalSemaphoreLimit, withGlobalSemaphore } from './engine/semaphore.js';
+export { getProviderAdapter } from './providers/index.js';
+export { OpenRouterAdapter } from './providers/openrouter.js';
+export type { OpenRouterModel } from './providers/openrouter.js';
+export { getModelCost } from './providers/costs.js';
+export { withRetry, isRetryableError, RetryableError } from './providers/retry.js';
+export type { RetryOptions } from './providers/retry.js';
+export { levenshteinScore0to10, jsonDiffScore0to10, numericAbsScore0to10 } from './utils/distance.js';

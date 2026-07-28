@@ -15,9 +15,9 @@ import type {
   EvaluationRun,
   UUID,
   CandidateNode,
-} from '../src/types/index.js';
+} from '@promptengine/core';
 import { createCliStore } from './store.js';
-import { setStore } from '../electron/store.js';
+import { setStore } from '@promptengine/core';
 import * as display from './display.js';
 
 // ---------------------------------------------------------------------------
@@ -183,7 +183,7 @@ export async function runEvolution(
 
   // Set up the sendUpdate hook before importing the evaluator
   const { setSendUpdate, startEvaluation } = await import(
-    '../electron/engine/evaluator_v2.js'
+    '@promptengine/core'
   );
 
   const runId: UUID = uuidv4();
@@ -281,7 +281,7 @@ export async function runEvolution(
   };
 
   // Persist config + run to DB (matching electron/ipc/handlers.ts behavior)
-  const { getDatabase } = await import('../electron/database/init.js');
+  const { getDatabase } = await import('@promptengine/core');
   const db = getDatabase();
 
   // Retry loop for config INSERT — handles rare UUID collision (matches handlers.ts)
