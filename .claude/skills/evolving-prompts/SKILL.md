@@ -15,9 +15,11 @@ npm run cli -- --config cfg.json --db ./run.db --output results.json
 
 Progress/logs → stderr. `--output` (and stdout) → pure JSON. Exit 0 = usable best prompt; exit 1 = none. A markdown report lands in `testoutputs/` beside the output file (`--report none` to skip it when only results.json matters; `--report <path>` to choose the destination).
 
+Prefer `--output` over capturing stdout. If you do capture stdout, use `npm run --silent cli -- …` — plain `npm run` prepends its own banner to stdout and the captured file will not parse as JSON.
+
 ## Before the first run
 
-1. **Pick catalogued models**: `npm run cli -- --list-models --db ./throwaway.db` (the `--db` keeps even this read isolated from the shared desktop DB). Budget enforcement needs the model in the catalog; uncatalogued IDs get default pricing. Providers retire models — a 404 "model no longer available" means pick a newer one from the list.
+1. **Pick catalogued models**: `npm run --silent cli -- --list-models --db ./throwaway.db` (the `--db` keeps even this read isolated from the shared desktop DB). Budget enforcement needs the model in the catalog; uncatalogued IDs get default pricing. Providers retire models — a 404 "model no longer available" means pick a newer one from the list.
 2. **Keys**: env vars (`GEMINI_API_KEY`, `OPENAI_API_KEY`, …) win over stored keys. Cheap default when only Gemini is available: `gemini/gemini-2.5-flash-lite` for both `models` and `serviceModel`.
 3. **Isolate**: always pass `--db ./throwaway.db` — the default DB is shared with the desktop app.
 
