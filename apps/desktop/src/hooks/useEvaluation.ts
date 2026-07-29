@@ -20,8 +20,10 @@ export function useEvaluation(evaluationId: UUID | null): {
   );
   
   const setEvaluation = useEvaluationStore((state) => state.setEvaluation);
+  const hydrate = useEvaluationStore((state) => state.hydrate);
   const setLoading = useEvaluationStore((state) => state.setLoading);
   const subscribe = useEvaluationStore((state) => state.subscribe);
+  const releaseInactive = useEvaluationStore((state) => state.releaseInactive);
   
   useEffect(() => {
     if (!evaluationId) return;
@@ -48,7 +50,10 @@ export function useEvaluation(evaluationId: UUID | null): {
 
           if (eval_) {
             console.log(`[useEvaluation] Loaded eval ${evaluationId.slice(0, 8)} from DB, ${eval_.generations.length} generations`);
-            setEvaluation(evaluationId, eval_);
+            // hydrate, not setEvaluation: this read was issued BEFORE the
+            // subscription started delivering, so replacing wholesale rewound
+            // any node that arrived while it was in flight.
+            hydrate(evaluationId, eval_);
           } else {
             console.log(`[useEvaluation] Eval ${evaluationId.slice(0, 8)} not found, creating empty shell`);
             setEvaluation(evaluationId, {
@@ -77,12 +82,18 @@ export function useEvaluation(evaluationId: UUID | null): {
       console.log(`[useEvaluation] Using existing state (${existingEval.generations.length} generations), skipping DB load`);
     }
     
-    // Cleanup: DO NOT unsubscribe! Other components may still be using this evaluation
-    // Store manages subscription lifecycle
+    // Do NOT unsubscribe THIS evaluation on unmount — other components may
+    // still be reading it, and the store owns the subscription lifecycle.
+    // But do release the ones nobody is looking at any more: nothing else
+    // ever called unsubscribe outside delete, so every run the user clicked
+    // stayed resident with its IPC listener for the whole session.
+    // Live runs are never released.
+    releaseInactive(evaluationId);
+
     return () => {
       console.log(`[useEvaluation] Component unmounting for ${evaluationId.slice(0, 8)}, but keeping subscription alive`);
     };
-  }, [evaluationId, setEvaluation, setLoading, subscribe]);
+  }, [evaluationId, setEvaluation, hydrate, setLoading, subscribe, releaseInactive]);
   
   return { evaluation, isLoading };
 }

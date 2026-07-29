@@ -157,6 +157,18 @@ function escapeMarkdownProse(text: string): string {
     .replace(/\|/g, '\\|');     // no table rows
 }
 
+/**
+ * A test's `score` is the MEAN across samples, but `outputText` and the
+ * justification both come from samples[0]. With samples [10, 1, 1] the report
+ * printed 'Score: 4/10' directly above the one output that passed, and a
+ * 10/10 justification welded to a 4/10 score. Say which sample is on screen.
+ */
+function sampleNote(test: any): string {
+  const samples: number[] = Array.isArray(test?.samples) ? test.samples : [];
+  if (samples.length < 2) return '';
+  return ` *(sample 1 of ${samples.length}; sample scores ${samples.join(', ')} — the score above is their mean)*`;
+}
+
 function formatDuration(ms: number): string {
   const secs = Math.floor(ms / 1000);
   if (secs < 60) return `${secs}s`;
@@ -354,7 +366,7 @@ export function generateReport(
         const testName = testDef?.name ?? `Test ${t + 1}`;
         lines.push(`**Test ${t + 1}: ${escapeMarkdown(testName)}** — Score: **${test.score}**/10`);
         lines.push(`> Input: ${escapeMarkdown(truncate(testDef?.prompt, 200))}`);
-        lines.push(`> Output: ${escapeMarkdown(truncate(test.outputText, 300))}`);
+        lines.push(`> Output: ${escapeMarkdown(truncate(test.outputText, 300))}${sampleNote(test)}`);
         lines.push('');
       }
     }
@@ -411,7 +423,7 @@ export function generateReport(
         const testName = testDef?.name ?? `Test ${t + 1}`;
         lines.push(`**Test ${t + 1}: ${escapeMarkdown(testName)}** — Score: **${test.score}**/10`);
         lines.push(`> Input: ${escapeMarkdown(truncate(testDef?.prompt, 200))}`);
-        lines.push(`> Output: ${escapeMarkdown(truncate(test.outputText, 300))}`);
+        lines.push(`> Output: ${escapeMarkdown(truncate(test.outputText, 300))}${sampleNote(test)}`);
         lines.push('');
       }
     }

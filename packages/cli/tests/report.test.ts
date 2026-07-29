@@ -188,3 +188,26 @@ describe('model-written text cannot inject markdown into the report', () => {
     expect(md).toContain('X\\]');
   });
 });
+
+describe('a multi-sample test does not attribute one sample to the mean', () => {
+  it('labels the shown output as one sample and lists the sample scores', () => {
+    // score is the MEAN across samples but outputText and the justification
+    // come from samples[0]. With samples [10, 1, 1] the report printed
+    // 'Score: 4/10' directly above the one output that passed, and a 10/10
+    // justification welded to a 4/10 score.
+    const r = makeResult();
+    const best = r.generations[0].nodes[1] as any;
+    best.tests[0].score = 4;
+    best.tests[0].samples = [10, 1, 1];
+    best.tests[0].outputText = 'PARIS';
+    const md = generateReport(r, CONFIG);
+
+    expect(md).toMatch(/sample 1 of 3/);
+    expect(md).toContain('10, 1, 1');
+  });
+
+  it('says nothing extra for a single-sample test', () => {
+    const md = generateReport(makeResult(), CONFIG);
+    expect(md).not.toMatch(/sample 1 of/);
+  });
+});

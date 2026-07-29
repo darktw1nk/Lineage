@@ -21,6 +21,8 @@ interface EvaluationStore {
   
   // Actions
   setEvaluation: (evalId: UUID, evaluation: EvaluationRun) => void;
+  /** Apply a DB snapshot without discarding live events that beat it. */
+  hydrate: (evalId: UUID, snapshot: EvaluationRun) => void;
   updateNodeInEvaluation: (evalId: UUID, node: CandidateNode) => void;
   addNodeToEvaluation: (evalId: UUID, node: CandidateNode) => void;
   addGenerationToEvaluation: (evalId: UUID, generation: number, nodes: CandidateNode[]) => void;
@@ -34,6 +36,8 @@ interface EvaluationStore {
   // Subscription management
   subscribe: (evalId: UUID) => void;
   unsubscribe: (evalId: UUID) => void;
+  /** Release everything except `keepId` and any run still live. */
+  releaseInactive: (keepId: UUID | null) => void;
   cleanup: () => void;
 }
 
@@ -50,6 +54,42 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
     });
   },
   
+  /**
+   * Merge a DB snapshot into whatever the store already holds.
+   *
+   * useEvaluation subscribes FIRST and then awaits eval:get, so events can
+   * land while the read is in flight — and setEvaluation replaces the entry
+   * wholesale, so a snapshot taken BEFORE those events silently rewound
+   * them. Per generation, keep whichever side has more nodes, and prefer the
+   * live node when both have the same id: the snapshot is by definition the
+   * older view.
+   */
+  hydrate: (evalId, snapshot) => {
+    set((state) => {
+      const live = state.evaluations.get(evalId);
+      const newEvaluations = new Map(state.evaluations);
+      if (!live) {
+        newEvaluations.set(evalId, snapshot);
+        return { evaluations: newEvaluations };
+      }
+
+      const snapGens = snapshot.generations ?? [];
+      const liveGens = live.generations ?? [];
+      const merged: CandidateNode[][] = [];
+      for (let g = 0; g < Math.max(snapGens.length, liveGens.length); g++) {
+        const fromSnap = snapGens[g] ?? [];
+        const fromLive = liveGens[g] ?? [];
+        const byId = new Map<string, CandidateNode>();
+        for (const n of fromSnap) byId.set(n.id, n);
+        for (const n of fromLive) byId.set(n.id, n); // live wins
+        merged.push([...byId.values()]);
+      }
+
+      newEvaluations.set(evalId, { ...snapshot, ...live, generations: merged });
+      return { evaluations: newEvaluations };
+    });
+  },
+
   updateNodeInEvaluation: (evalId, node) => {
     set((state) => {
       const evaluation = state.evaluations.get(evalId);
@@ -358,6 +398,29 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
     });
   },
   
+  /**
+   * Drop runs the user is no longer looking at.
+   *
+   * useEvaluation deliberately never unsubscribes on unmount, and
+   * `unsubscribe` was called from exactly one place in the app (delete). So
+   * clicking through the sidebar accumulated one IPC listener AND one full
+   * run — every generation, every node output — per run visited: 13 runs
+   * measured 13 listeners and 13 resident runs. Since eval:get returns the
+   * whole run, that put back in the renderer exactly the memory the
+   * eval:list summary split had just removed from the poll.
+   *
+   * A LIVE run is never released: its events are the reason to hold it.
+   */
+  releaseInactive: (keepId) => {
+    const state = get();
+    const LIVE = new Set(['running', 'pausing', 'paused']);
+    for (const [id, evaluation] of state.evaluations) {
+      if (id === keepId) continue;
+      if (LIVE.has(String(evaluation.status))) continue;
+      get().unsubscribe(id as UUID);
+    }
+  },
+
   cleanup: () => {
     const state = get();
     state.subscriptions.forEach((unsubscribe) => unsubscribe());

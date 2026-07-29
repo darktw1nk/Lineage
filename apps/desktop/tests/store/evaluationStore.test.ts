@@ -276,3 +276,60 @@ describe('evaluationStore subscriptions', () => {
     expect(store().evaluations.get('run-1')!.totalPausedMs).toBe(500);
   });
 });
+
+describe('releaseInactive', () => {
+  beforeEach(() => store().cleanup());
+
+  it('drops runs the user is no longer viewing', () => {
+    // useEvaluation never unsubscribes on unmount and `unsubscribe` was called
+    // from exactly one place (delete), so clicking through the sidebar kept one
+    // IPC listener AND one full run per run visited — 13 runs measured 13 of
+    // each. eval:get returns the WHOLE run, so this put back in the renderer
+    // exactly the memory the eval:list summary split removed from the poll.
+    for (const id of ['a', 'b', 'c']) {
+      store().setEvaluation(id, { ...makeRun(id), status: 'finished' } as any);
+    }
+    store().releaseInactive('c');
+    expect([...store().evaluations.keys()]).toEqual(['c']);
+  });
+
+  it('never drops a run that is still live', () => {
+    store().setEvaluation('running', { ...makeRun('running'), status: 'running' } as any);
+    store().setEvaluation('paused', { ...makeRun('paused'), status: 'paused' } as any);
+    store().setEvaluation('done', { ...makeRun('done'), status: 'finished' } as any);
+    store().releaseInactive('done');
+
+    const kept = [...store().evaluations.keys()].sort();
+    expect(kept).toEqual(['done', 'paused', 'running']);
+  });
+});
+
+describe('hydrate does not discard events that beat the snapshot', () => {
+  beforeEach(() => store().cleanup());
+
+  it('keeps live nodes that arrived while eval:get was in flight', () => {
+    // useEvaluation subscribes first, then awaits eval:get and calls
+    // setEvaluation, which REPLACES wholesale. Every store action also bails
+    // with `if (!evaluation) return state`, so events landing in that window
+    // were dropped outright — and any that did land were then overwritten by a
+    // snapshot read BEFORE them. The resume path is the exposed one: it
+    // subscribes and immediately starts the run.
+    store().setEvaluation('run-1', { ...makeRun('run-1'), generations: [[]] } as any);
+    store().addNodeToEvaluation('run-1', makeNode('live', 0));
+
+    // A snapshot taken before that node existed.
+    store().hydrate('run-1', { ...makeRun('run-1'), generations: [[]] } as any);
+
+    const gens = store().evaluations.get('run-1')!.generations;
+    expect(gens[0].map(n => n.id)).toContain('live');
+  });
+
+  it('still fills an empty store entry from the snapshot', () => {
+    store().setEvaluation('run-2', { ...makeRun('run-2'), generations: [[]] } as any);
+    const snapshot = { ...makeRun('run-2'), generations: [[makeNode('fromDb', 0)]] } as any;
+    store().hydrate('run-2', snapshot);
+
+    const gens = store().evaluations.get('run-2')!.generations;
+    expect(gens[0].map(n => n.id)).toContain('fromDb');
+  });
+});

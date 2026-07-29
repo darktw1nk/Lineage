@@ -176,6 +176,25 @@ export function calculateFitness(
     );
   }
 
+  // Divisors that turn a per-CANDIDATE total into the per-CALL figure the
+  // norms are named for (`maxUSDPerCall`, `maxMs`).
+  //
+  // evaluator_v2 sums cost and latency across every test, so the same prompt on
+  // the same model scored differently purely because the test set was longer:
+  // 2 tests -> 9.5194 and stopReason "target"; 10 tests -> 8.9968, so
+  // targetFitness 9.0 was unreachable. Past saturation the dimension also
+  // carried no ranking signal at all — $0.06/6s and $6.00/600s both scored 8.
+  //
+  // The two need DIFFERENT divisors, because the engine aggregates them
+  // differently: a test's tokens are SUMMED across samples while its latency is
+  // the MEAN. So cost divides by the call count and latency by the test count.
+  const testResults = node.tests ?? [];
+  const testCountForNorm = Math.max(1, testResults.length);
+  const callCountForNorm = Math.max(1, testResults.reduce(
+    (n, t) => n + (Array.isArray((t as any).samples) && (t as any).samples.length > 0 ? (t as any).samples.length : 1),
+    0,
+  ));
+
   // Normalize weights
   const normalizedWeights = normalizeWeights(effectiveWeights);
   
@@ -210,7 +229,7 @@ export function calculateFitness(
     // (a bad price entry) drove costNorm arbitrarily negative and costScore
     // arbitrarily high — a 1/10 prompt reached fitness 84003 and won every
     // selection forever.
-    const costNorm = Math.max(0, Math.min(1, costUSD / maxCost));
+    const costNorm = Math.max(0, Math.min(1, (costUSD / callCountForNorm) / maxCost));
     const costScore = (1 - costNorm) * 10; // Scale to 0-10 range
     const costContribution = normalizedWeights.cost * costScore;
     fitness += costContribution;
@@ -228,7 +247,7 @@ export function calculateFitness(
     const maxLatency =
       (latencyNorm_?.mode === 'relative' && dynamicMaxLatency && dynamicMaxLatency > 0 ? dynamicMaxLatency : undefined) ??
       (typeof configuredMaxLatency === 'number' && Number.isFinite(configuredMaxLatency) && configuredMaxLatency > 0 ? configuredMaxLatency : 30000);
-    const latencyNorm = Math.max(0, Math.min(1, latencyMs / maxLatency)); // clamp both ends, as with cost
+    const latencyNorm = Math.max(0, Math.min(1, (latencyMs / testCountForNorm) / maxLatency)); // clamp both ends, as with cost
     const latencyScore = (1 - latencyNorm) * 10; // Scale to 0-10 range
     const latencyContribution = normalizedWeights.latency * latencyScore;
     fitness += latencyContribution;
