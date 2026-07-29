@@ -8,6 +8,7 @@
 import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
+import { withPartialCost } from './operator-cost.js';
 import { stripPromptDelimiters, extractJsonArray, fillTemplate } from '../utils/text.js';
 
 const DEFAULT_METAPROMPT_WITH_FAILURES = `SYSTEM: You are a prompt surgeon. You analyze concrete test failures to suggest targeted fixes. You can ADD, REMOVE, or REWRITE any part of the prompt — including removing instructions that conflict with what the tests require.
@@ -158,6 +159,8 @@ export async function metaPromptNode(
   let totalUsd = 0;
   let totalCalls = 0;
   
+  try {
+
   // Build rich failure details from the PARENT's own test results
   const failureDetails = buildFailureSummary(parent, config);
   const hasFailures = parent.tests ? parent.tests.some(t => !t.passed) : false;
@@ -239,5 +242,18 @@ export async function metaPromptNode(
       calls: totalCalls,
     },
   };
+
+  } catch (error) {
+    // Meta-prompting is enabled by default and makes TWO billed calls; the
+    // usual failure (service model returns prose instead of JSON) happened
+    // AFTER the first was billed. Discarding that spend under-counted run
+    // totals and the budget cap by exactly the amount already paid.
+    throw withPartialCost(error, {
+      promptTokens: totalPromptTokens,
+      completionTokens: totalCompletionTokens,
+      usd: totalUsd,
+      calls: totalCalls,
+    });
+  }
 }
 

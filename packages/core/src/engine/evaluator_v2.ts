@@ -251,7 +251,14 @@ export async function startEvaluation(
     loopRunning: false,
     // Restore accumulated paused time: hard-zeroing it on resume charges every
     // second the process was DEAD against targets.timeLimitMs.
-    totalPausedMs: run.totalPausedMs ?? 0,
+    //
+    // Restoring it is not enough on its own — the interval between the crash
+    // and the resume was never recorded anywhere, so timeLimitMs measured from
+    // the ORIGINAL startedAt and a run resumed the next morning stopped
+    // instantly with stopReason 'time' having done zero work. Credit that gap
+    // as paused time; `finishedAt ?? lastCheckpointAt` is the best evidence we
+    // have of when the process actually stopped.
+    totalPausedMs: (run.totalPausedMs ?? 0) + (isResume ? downtimeSinceCheckpoint(run) : 0),
     gradingTotal: 0,
     gradingFailures: 0,
   };
@@ -661,7 +668,7 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       }
 
       // Check if we would exceed maxGenerations by creating the next one
-      if (state.config.targets.maxGenerations) {
+      if (state.config.targets.maxGenerations !== undefined) {
         if (state.currentGeneration + 1 >= state.config.targets.maxGenerations) {
           console.log(`[Evaluator] Reached max generations (${state.config.targets.maxGenerations})`);
           state.run.stopReason = 'generations';
@@ -1183,7 +1190,7 @@ function shouldStop(state: EvaluationState): boolean {
   const run = state.run;
   
   // Time limit (excluding paused time)
-  if (config.targets.timeLimitMs) {
+  if (config.targets.timeLimitMs !== undefined) {
     const wallClockElapsed = Date.now() - run.startedAt;
     const activeElapsed = wallClockElapsed - state.totalPausedMs;
     if (activeElapsed >= config.targets.timeLimitMs) {
@@ -1203,7 +1210,7 @@ function shouldStop(state: EvaluationState): boolean {
   }
   
   // Target fitness
-  if (config.targets.targetFitness) {
+  if (config.targets.targetFitness !== undefined) {
     const bestFitness = Math.max(
       ...state.run.generations[state.currentGeneration]
         .filter(n => n.metrics?.fitness !== undefined)
@@ -1217,7 +1224,7 @@ function shouldStop(state: EvaluationState): boolean {
   }
   
   // Max generations (counting from 0, so if maxGenerations=3, we want gen 0, 1, 2 only)
-  if (config.targets.maxGenerations) {
+  if (config.targets.maxGenerations !== undefined) {
     if (state.currentGeneration >= config.targets.maxGenerations) {
       // 'generations', NOT 'target': running out of generations is the ordinary
       // end of every run, while 'target' means the quality bar was actually
@@ -1504,8 +1511,24 @@ function accrueCost(
 }
 
 /** Checkpoint the run so an interrupted process loses nothing. Never throws. */
+/**
+ * How long this run was NOT running, measured from its last checkpoint.
+ *
+ * timeLimitMs is measured from run.startedAt minus paused time, and the gap
+ * between a crash and a --resume was recorded nowhere — so a run resumed the
+ * next morning stopped instantly with stopReason 'time' having done no work.
+ * Runs checkpointed before lastCheckpointAt existed fall back to startedAt,
+ * which credits the whole elapsed span: over-generous, but it errs toward
+ * letting the user's resumed run proceed rather than killing it on arrival.
+ */
+function downtimeSinceCheckpoint(run: EvaluationRun): number {
+  const lastAlive = run.lastCheckpointAt ?? run.startedAt;
+  return Math.max(0, Date.now() - lastAlive);
+}
+
 function persistRun(state: EvaluationState): void {
   try {
+    state.run.lastCheckpointAt = Date.now();
     const db = getDatabase();
     db.prepare(`
       UPDATE evaluation_runs

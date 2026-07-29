@@ -120,17 +120,34 @@ function validateOperatorResult(
 }
 
 /**
+ * How many provider calls an operator may make before we consider it hung.
+ *
+ * The timeout is a LIVENESS check for a plugin whose apply() never resolves —
+ * not a latency budget. Bounding the whole operator by a single call's timeout
+ * was wrong: mutation makes up to retries+1 proposal calls plus an apply call,
+ * and meta-prompting makes two, each legitimately entitled to callTimeoutMs. At
+ * the 120s default, a service model taking >60s a call turned EVERY mutation
+ * into a carry-forward — evolution silently stopped while the spend stayed
+ * invisible. Anyone lowering callTimeoutMs to fail fast disabled all operators.
+ */
+const OPERATOR_CALL_BUDGET = 6;
+
+/**
  * `callTimeoutMs` bounds provider calls but never bounded the operator itself,
  * so a plugin whose apply() never resolved hung the whole run forever.
  */
-function withOperatorTimeout<T>(work: Promise<T>, timeoutMs: number, operatorName: string): Promise<T> {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return work;
+function withOperatorTimeout<T>(work: Promise<T>, callTimeoutMs: number, operatorName: string): Promise<T> {
+  if (!Number.isFinite(callTimeoutMs) || callTimeoutMs <= 0) return work;
+  const timeoutMs = callTimeoutMs * OPERATOR_CALL_BUDGET;
   let timer: NodeJS.Timeout;
   return Promise.race([
     work,
     new Promise<never>((_resolve, reject) => {
       timer = setTimeout(
-        () => reject(new Error(`Operator '${operatorName}' did not finish within ${timeoutMs}ms`)),
+        () => reject(new Error(
+          `Operator '${operatorName}' did not finish within ${timeoutMs}ms ` +
+          `(${OPERATOR_CALL_BUDGET} x callTimeoutMs) — treating it as hung`,
+        )),
         timeoutMs,
       );
     }),

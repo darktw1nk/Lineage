@@ -162,9 +162,27 @@ export function validateCliConfig(config: CliConfig): void {
     throw new Error('Config must have a non-empty "testSet" array');
   }
   const VALID_MODES = ['llm_grade', 'exact_match', 'json_schema', 'tool_call'];
+  const seenTestIds = new Set<string>();
   for (const [i, test] of config.testSet.entries()) {
     if (!test.prompt || typeof test.prompt !== 'string') {
       throw new Error(`testSet[${i}] must have a "prompt" string`);
+    }
+    // Duplicate ids silently corrupt everything keyed by test id: the holdout
+    // split reserves the wrong number of tests, and the report resolves both
+    // rows to the first match and invents an improvement that never happened.
+    if (test.id !== undefined) {
+      if (typeof test.id !== 'string' || test.id === '') {
+        throw new Error(`testSet[${i}].id must be a non-empty string`);
+      }
+      if (seenTestIds.has(test.id)) {
+        throw new Error(`testSet[${i}] reuses id "${test.id}" — test ids must be unique`);
+      }
+      seenTestIds.add(test.id);
+    }
+    // exact_match against nothing scores 0 for every candidate in every
+    // generation: the run pays in full and produces no gradient at all.
+    if (test.mode === 'exact_match' && (test.expected === undefined || test.expected === null)) {
+      throw new Error(`testSet[${i}] uses mode "exact_match" but has no "expected" value to compare against`);
     }
     if (test.mode !== undefined && !VALID_MODES.includes(test.mode)) {
       throw new Error(`testSet[${i}] has unknown mode "${test.mode}" (valid: ${VALID_MODES.join(', ')})`);
@@ -181,11 +199,57 @@ export function validateCliConfig(config: CliConfig): void {
       }
     }
   }
+  // `models: []` is truthy, so the documented default never applied and
+  // serviceModel became enabledModels[0] === undefined — surfacing as
+  // "Cannot read properties of undefined (reading 'provider')".
+  if (config.models !== undefined) {
+    if (!Array.isArray(config.models)) {
+      throw new Error('"models" must be an array of "provider/model" strings');
+    }
+    if (config.models.length === 0) {
+      throw new Error('"models" is empty — remove it to use the defaults, or list at least one "provider/model"');
+    }
+  }
   // Format only — plugins haven't loaded yet, so provider names are checked
   // later in toEvaluationConfig (see parseModelRef's checkProvider param).
   if (config.models) {
     for (const m of config.models) {
       parseModelRef(m, false);
+    }
+  }
+
+  // Numeric sanity. None of these were checked, and the engine treats a
+  // falsy/NaN target as "no limit": `maxGenerations: 0` and `maxGenerations:
+  // "two"` both ran unbounded while the startup banner quoted a finite cost.
+  const positiveInt = (value: unknown, field: string, min = 1) => {
+    if (value === undefined) return;
+    if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value) || value < min) {
+      throw new Error(`"${field}" must be an integer >= ${min} (got ${JSON.stringify(value)})`);
+    }
+  };
+  const nonNegativeNumber = (value: unknown, field: string) => {
+    if (value === undefined) return;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new Error(`"${field}" must be a number >= 0 (got ${JSON.stringify(value)})`);
+    }
+  };
+  positiveInt(config.populationSize, 'populationSize');
+  positiveInt(config.generationSize, 'generationSize');
+  positiveInt(config.maxGenerations, 'maxGenerations');
+  positiveInt(config.parallelLimit, 'parallelLimit');
+  positiveInt(config.serviceModelMaxTokens, 'serviceModelMaxTokens');
+  positiveInt(config.samplesPerTest, 'samplesPerTest');
+  positiveInt(config.callTimeoutMs, 'callTimeoutMs');
+  positiveInt(config.timeLimitMs, 'timeLimitMs');
+  nonNegativeNumber(config.budget, 'budget');
+  nonNegativeNumber(config.targetFitness, 'targetFitness');
+  positiveInt(config.retries, 'retries', 0);
+  if (config.seed !== undefined && (typeof config.seed !== 'number' || !Number.isFinite(config.seed))) {
+    throw new Error(`"seed" must be a number (got ${JSON.stringify(config.seed)})`);
+  }
+  if (config.holdoutShare !== undefined) {
+    if (typeof config.holdoutShare !== 'number' || !(config.holdoutShare >= 0 && config.holdoutShare < 1)) {
+      throw new Error(`"holdoutShare" must be a number in [0, 1) (got ${JSON.stringify(config.holdoutShare)})`);
     }
   }
   if (config.serviceModel) {
@@ -209,6 +273,32 @@ export function validateCliConfig(config: CliConfig): void {
       process.stderr.write(`warning: unknown config key "${key}" — ignored (typo?)\n`);
     }
   }
+
+  // The same protection one level down. Warning only at the top level meant
+  // `operators.mutationshare` or `testSet[0].expcted` produced NO warning at
+  // all: the run used defaults, scored zero, and still cost full price.
+  const warnUnknown = (obj: unknown, known: string[], path: string) => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+    const allowed = new Set(known);
+    for (const key of Object.keys(obj)) {
+      if (!allowed.has(key)) {
+        process.stderr.write(`warning: unknown config key "${path}.${key}" — ignored (typo?)\n`);
+      }
+    }
+  };
+  warnUnknown(config.operators, [
+    'mutationShare', 'crossoverShare', 'metaPrompting', 'paramVariation', 'modelVariation', 'custom',
+  ], 'operators');
+  warnUnknown(config.selection, ['policy', 'topK', 'topP', 'eliteShare'], 'selection');
+  warnUnknown(config.fitnessWeights, ['quality', 'safety', 'cost', 'latency', 'stability'], 'fitnessWeights');
+  warnUnknown(config.costNorm, ['mode', 'maxUSDPerCall'], 'costNorm');
+  warnUnknown(config.latencyNorm, ['mode', 'maxMs'], 'latencyNorm');
+  warnUnknown(config.pairwise, ['enabled', 'contenders'], 'pairwise');
+  const TEST_KEYS = [
+    'id', 'name', 'prompt', 'expected', 'mode', 'holdout', 'schema', 'tools',
+    'expectedTool', 'grading', 'image', 'weight',
+  ];
+  config.testSet.forEach((test, i) => warnUnknown(test, TEST_KEYS, `testSet[${i}]`));
 }
 
 export function toEvaluationConfig(config: CliConfig, configDir?: string): EvaluationConfig {

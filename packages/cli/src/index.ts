@@ -169,18 +169,31 @@ function parseArgs(argv: string[]): {
   };
 
   for (let i = 0; i < args.length; i++) {
+    // A flag whose value is missing or empty must be an error, never a silent
+    // default. `--db "$RUN_DB"` with an unset variable expanded to an empty
+    // string and fell back to the SHARED DESKTOP DATABASE, writing a full run
+    // into the user's real history.
+    const requireValue = (flag: string): string => {
+      const value = args[++i];
+      if (value === undefined || value === '') {
+        console.error(`${flag} requires a value`);
+        process.exit(1);
+      }
+      return value;
+    };
+
     switch (args[i]) {
       case '--config':
-        result.config = args[++i];
+        result.config = requireValue('--config');
         break;
       case '--output':
-        result.output = args[++i];
+        result.output = requireValue('--output');
         break;
       case '--db':
-        result.db = args[++i];
+        result.db = requireValue('--db');
         break;
       case '--plugins':
-        result.pluginDirs.push(args[++i]);
+        result.pluginDirs.push(requireValue('--plugins'));
         break;
       case '--resume':
         result.resume = args[++i];

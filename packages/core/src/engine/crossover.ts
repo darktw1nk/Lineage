@@ -8,6 +8,7 @@
 import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
+import { withPartialCost } from './operator-cost.js';
 import { stripPromptDelimiters, fillTemplate } from '../utils/text.js';
 
 const DEFAULT_CROSSOVER_PROMPT = `SYSTEM: Merge best parts of A and B into a coherent prompt without redundancy.
@@ -65,7 +66,14 @@ export async function crossoverNodes(
   });
   
   if (!result.output || result.output.trim() === '') {
-    throw new Error('Empty response from crossover');
+    // The call was made and billed even though its output is unusable — hand
+    // the spend to the caller instead of discarding it with the exception.
+    throw withPartialCost(new Error('Empty response from crossover'), {
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens,
+      usd: result.usd,
+      calls: 1,
+    });
   }
   
   return {

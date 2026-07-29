@@ -130,6 +130,8 @@ export interface EvaluationRun {
   configId: UUID;
   startedAt: number;
   finishedAt?: number;
+  /** When the run was last checkpointed. Used to credit process downtime against timeLimitMs on resume. */
+  lastCheckpointAt?: number;
   stopReason?: 'time' | 'budget' | 'target' | 'generations' | 'manual' | 'exhausted' | 'error';
   status?: 'running' | 'paused' | 'stopped' | 'pausing' | 'finished';
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
