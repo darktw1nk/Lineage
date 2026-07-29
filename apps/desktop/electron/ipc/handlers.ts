@@ -275,7 +275,6 @@ async function deleteEvaluation(runId: string): Promise<void> {
     // Delete child tables first (all tables with FOREIGN KEY to evaluation_runs)
     db.prepare('DELETE FROM candidate_nodes WHERE run_id = ?').run(runId);
     db.prepare('DELETE FROM raw_blobs WHERE run_id = ?').run(runId);
-    db.prepare('DELETE FROM cost_ledger WHERE run_id = ?').run(runId);
     
     // Now delete the run itself
     db.prepare('DELETE FROM evaluation_runs WHERE id = ?').run(runId);

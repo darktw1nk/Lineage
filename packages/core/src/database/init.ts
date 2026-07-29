@@ -272,22 +272,6 @@ function createTables(db: SqlJsWrapper): void {
     );
   `);
 
-  // Cost ledger
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS cost_ledger (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      provider TEXT NOT NULL,
-      model TEXT NOT NULL,
-      prompt_tokens INTEGER NOT NULL,
-      completion_tokens INTEGER NOT NULL,
-      usd REAL NOT NULL,
-      timestamp INTEGER NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES evaluation_runs(id)
-    );
-  `);
-
   // Raw response blobs
   db.exec(`
     CREATE TABLE IF NOT EXISTS raw_blobs (
@@ -356,10 +340,10 @@ function runMigrations(db: SqlJsWrapper): void {
   const currentVersion = versionRow?.version ?? 0;
 
   if (currentVersion === 0) {
-    // Fresh install - set up with latest schema (version 3) and models
+    // Fresh install - set up with latest schema (version 4) and models
     insertDefaultModelCosts(db);
-    db.prepare('INSERT INTO schema_version (version) VALUES (3)').run();
-    console.log('Fresh install: Initialized with models (schema v3)');
+    db.prepare('INSERT INTO schema_version (version) VALUES (4)').run();
+    console.log('Fresh install: Initialized with models (schema v4)');
     return; // No need to run migrations for fresh install
   }
 
@@ -396,6 +380,16 @@ function runMigrations(db: SqlJsWrapper): void {
     version = 3;
   }
 
+  // Migration 4: Drop the never-written cost_ledger table (cost accounting
+  // now lives on run_json as costBreakdown)
+  if (version === 3) {
+    console.log('Running migration 4: Dropping legacy cost_ledger table...');
+    db.exec('DROP TABLE IF EXISTS cost_ledger');
+    setVersion(4);
+    console.log('Migration 4 completed');
+    version = 4;
+  }
+
   // Future migrations go here
-  // if (version === 3) { ... }
+  // if (version === 4) { ... }
 }
