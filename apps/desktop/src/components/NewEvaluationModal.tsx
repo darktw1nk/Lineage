@@ -216,7 +216,8 @@ Here is the bug report:
     },
   });
 
-  const validate = (): boolean => {
+  /** Returns the errors it found, so the caller does not have to read stale state. */
+  const validate = (): Record<string, string> => {
     const newErrors: Record<string, string> = {};
 
     if (!config.name) newErrors.main = 'Name is required';
@@ -249,27 +250,71 @@ Here is the bug report:
     }
     if (!config.testSet || config.testSet.length === 0) {
       newErrors.testset = 'At least one test is required';
+    } else {
+      // Per-test checks. Without these the run started, paid in full, and
+      // scored 0 for every candidate in every generation — silently, because
+      // the scorers return 0 with a detail string rather than failing loudly.
+      // That is a run with no gradient at all.
+      const seenIds = new Set<string>();
+      for (const [i, test] of config.testSet.entries()) {
+        const label = test.name?.trim() || `Test ${i + 1}`;
+        if (!test.prompt?.trim()) {
+          newErrors.testset = `${label} has no input prompt`;
+          break;
+        }
+        if (test.id && seenIds.has(test.id)) {
+          newErrors.testset = `${label} reuses another test's id — ids must be unique`;
+          break;
+        }
+        if (test.id) seenIds.add(test.id);
+        if (test.mode === 'json_schema' && !test.schema) {
+          newErrors.testset = `${label} uses JSON Schema mode but has no schema — every candidate would score 0`;
+          break;
+        }
+        if (test.mode === 'tool_call' && !test.expectedTool?.name) {
+          newErrors.testset = `${label} uses tool-call mode but no expected tool is set — every candidate would score 0`;
+          break;
+        }
+        if (test.mode === 'exact_match' && !test.expected) {
+          newErrors.testset = `${label} uses exact-match mode but has no expected output — every candidate would score 0`;
+          break;
+        }
+      }
     }
     if (!config.targets?.timeLimitMs && !config.targets?.budgetUSD && !config.targets?.targetFitness && !config.targets?.maxGenerations) {
       newErrors.targets = 'At least one target must be set';
     }
 
+    // A population of 0 or 1 cannot evolve, and all-zero fitness weights make
+    // every candidate score identically — the run costs full price and ranks
+    // nothing.
+    const popSize = config.population?.initialSize;
+    if (popSize !== undefined && (!Number.isInteger(popSize) || popSize < 2)) {
+      newErrors.population = 'Population size must be at least 2 for evolution to have anything to select between';
+    }
+    const weights = config.fitness?.weights;
+    if (weights && !Object.values(weights).some(w => typeof w === 'number' && w > 0)) {
+      newErrors.fitness = 'At least one fitness weight must be greater than 0, or every candidate scores the same';
+    }
+
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    return newErrors;
   };
 
   const handleStart = () => {
     console.log('[NewEval] Start button clicked');
-    console.log('[NewEval] Config:', config);
-    const isValid = validate();
-    console.log('[NewEval] Validation result:', isValid);
-    console.log('[NewEval] Errors:', errors);
-    if (isValid) {
+    // Report the errors validate() JUST computed, not the `errors` state.
+    // setErrors does not update the render-scope const synchronously, so the
+    // alert always showed the PREVIOUS click's errors — and on the first failed
+    // click it showed an empty list under "Please fix the errors".
+    const found = validate();
+    const messages = Object.entries(found);
+    if (messages.length === 0) {
       console.log('[NewEval] Starting evaluation...');
       createEvaluation.mutate(config as EvaluationConfig);
     } else {
-      console.error('[NewEval] Validation failed:', errors);
-      alert('Please fix the errors highlighted in red tabs: ' + Object.entries(errors).map(([k, v]) => `${k}: ${v}`).join(', '));
+      console.error('[NewEval] Validation failed:', found);
+      alert('Please fix the errors highlighted in red tabs:\n\n' + messages.map(([k, v]) => `• ${k}: ${v}`).join('\n'));
     }
   };
 

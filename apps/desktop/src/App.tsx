@@ -10,6 +10,7 @@ import { SystemPromptsModal } from './components/SystemPromptsModal';
 import { NewEvaluationModal } from './components/NewEvaluationModal';
 import { EvaluationConfigPanel } from './components/EvaluationConfigPanel';
 import { LogsPanel } from './components/LogsPanel';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import type { UUID, EvaluationConfig } from './types';
 
 const queryClient = new QueryClient();
@@ -76,34 +77,44 @@ function App() {
         {/* Main Content */}
         <div className="flex flex-1 flex-col overflow-hidden" style={{ height: '100vh' }}>
           <div className="flex-1 relative">
-            <CenterView
-              evaluationId={selectedEvaluationId}
-              selectedNodeId={selectedNodeId}
-              onSelectNode={setSelectedNodeId}
-            />
+            {/* Each panel fails independently: one malformed node must not
+                blank the whole window with no way to select another run. */}
+            <ErrorBoundary label="the lineage graph" resetKey={selectedEvaluationId}>
+              <CenterView
+                evaluationId={selectedEvaluationId}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={setSelectedNodeId}
+              />
+            </ErrorBoundary>
           </div>
           {showLogs && <LogsPanel onClose={() => setShowLogs(false)} />}
-          <Footer 
-            evaluationId={selectedEvaluationId} 
-            onShowConfig={selectedEvaluationId ? () => setShowConfig(true) : undefined}
-          />
+          <ErrorBoundary label="the status bar" resetKey={selectedEvaluationId}>
+            <Footer
+              evaluationId={selectedEvaluationId}
+              onShowConfig={selectedEvaluationId ? () => setShowConfig(true) : undefined}
+            />
+          </ErrorBoundary>
         </div>
 
         {/* Right Panel - Node Details */}
         {selectedNodeId && !showConfig && (
-          <RightPanel
-            evaluationId={selectedEvaluationId}
-            nodeId={selectedNodeId}
-            onClose={() => setSelectedNodeId(null)}
-          />
+          <ErrorBoundary label="this candidate's details" resetKey={selectedNodeId}>
+            <RightPanel
+              evaluationId={selectedEvaluationId}
+              nodeId={selectedNodeId}
+              onClose={() => setSelectedNodeId(null)}
+            />
+          </ErrorBoundary>
         )}
-        
+
         {/* Right Panel - Evaluation Config */}
         {showConfig && selectedEvaluationId && (
-          <EvaluationConfigPanel
-            evaluationId={selectedEvaluationId}
-            onClose={() => setShowConfig(false)}
-          />
+          <ErrorBoundary label="the run configuration" resetKey={selectedEvaluationId}>
+            <EvaluationConfigPanel
+              evaluationId={selectedEvaluationId}
+              onClose={() => setShowConfig(false)}
+            />
+          </ErrorBoundary>
         )}
 
         {/* Modals */}
