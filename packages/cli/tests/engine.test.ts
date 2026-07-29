@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { EvaluationConfig, CandidateNode, UUID } from '@promptengine/core';
+import { selectChampion as realSelectChampion } from '../../core/src/engine/champion.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -11,6 +12,7 @@ let capturedSendUpdate: ((runId: UUID, data: any) => void) | null = null;
 
 const mockDbPrepare = vi.fn();
 const mockDbRun = vi.fn();
+const mockDbFlush = vi.fn();
 
 vi.mock('@promptengine/core', () => ({
   setSendUpdate: (fn: (runId: UUID, data: any) => void) => {
@@ -23,11 +25,17 @@ vi.mock('@promptengine/core', () => ({
       mockDbPrepare(sql);
       return { run: (...args: any[]) => mockDbRun(sql, ...args) };
     },
+    flush: () => mockDbFlush(),
   }),
   closeDatabase: vi.fn(),
   setStore: vi.fn(),
   estimateRunCost: vi.fn(async () => ({ calls: 10, low: 0.001, high: 0.01, perGeneration: false, breakdown: [], warnings: [] })),
   getModelCost: vi.fn(async () => null),
+  // The REAL implementation, not a copy: champion selection is behaviour under
+  // test here, and a stand-in would let the CLI drift from the engine's own
+  // holdout-champion rule — the exact bug this helper was extracted to fix.
+  // champion.ts has no side effects, so importing its source directly is safe.
+  selectChampion: realSelectChampion,
 }));
 
 let stderrSpy: ReturnType<typeof vi.spyOn>;

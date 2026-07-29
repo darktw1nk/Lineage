@@ -1,5 +1,34 @@
 import { describe, it, expect } from 'vitest';
-import { stripPromptDelimiters, extractJsonArray } from '../../src/utils/text.js';
+import { stripPromptDelimiters, extractJsonArray, fillTemplate } from '../../src/utils/text.js';
+
+describe('fillTemplate', () => {
+  // Every one of these was silently rewritten before any model saw it, because
+  // a STRING replacement makes JS read $$, $&, $` and $' in the VALUE as
+  // special replacement patterns.
+  const cases: Array<[string, string]> = [
+    ['Cheap = $, mid = $$, expensive = $$$', 'price tiers'],
+    ['Math: $$E = mc^2$$', 'LaTeX'],
+    ['In sed, $& refers to the whole match.', 'sed whole-match'],
+    ["Bash: $` is not a thing, but $' is ANSI-C quoting.", 'shell quoting'],
+  ];
+  for (const [value, label] of cases) {
+    it(`passes ${label} through untouched`, () => {
+      expect(fillTemplate('BEFORE ${p} AFTER', { p: value })).toBe(`BEFORE ${value} AFTER`);
+    });
+  }
+
+  it('does not re-scan a substituted value for the next placeholder', () => {
+    // A parent prompt containing "${parentB}" used to get B's whole prompt
+    // inlined; a model output containing "${expectedOutput}" used to get the
+    // reference answer pasted into the answer being graded.
+    const out = fillTemplate('A=${a} B=${b}', { a: 'contains ${b} literally', b: 'SECRET' });
+    expect(out).toBe('A=contains ${b} literally B=SECRET');
+  });
+
+  it('leaves unknown placeholders verbatim', () => {
+    expect(fillTemplate('${known} and ${unknown}', { known: 'x' })).toBe('x and ${unknown}');
+  });
+});
 
 describe('stripPromptDelimiters', () => {
   it('strips a single <<< >>> wrapper with newlines', () => {
@@ -8,6 +37,14 @@ describe('stripPromptDelimiters', () => {
 
   it('strips nested wrappers from compounding operator steps', () => {
     expect(stripPromptDelimiters('<<<\n<<<\nExtract severity.\n>>>\n>>>')).toBe('Extract severity.');
+  });
+
+  it('leaves a prompt written in <<<SECTION>>> style alone', () => {
+    // The leading <<< and trailing >>> are not a matched pair here — they open
+    // and close DIFFERENT blocks. The old both-ends-anchored lazy match ate
+    // the first and last marker and left the middle ones dangling.
+    const prompt = '<<<SYSTEM>>>\nYou are a careful assistant.\n<<<USER>>>\n{{input}}\n<<<END>>>';
+    expect(stripPromptDelimiters(prompt)).toBe(prompt);
   });
 
   it('strips a single-line wrapper', () => {

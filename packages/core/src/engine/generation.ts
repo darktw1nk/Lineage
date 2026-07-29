@@ -66,6 +66,77 @@ export interface GenerationResult {
   };
 }
 
+type OperatorCost = { promptTokens: number; completionTokens: number; usd: number; calls: number };
+
+/** A defensive copy handed to operators so a plugin cannot mutate live state. */
+function snapshot<T>(value: T): T {
+  return structuredClone(value);
+}
+
+function finite(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Operators are a plugin surface: `docs/plugins.md` promises a bad plugin
+ * "contributes nothing" and the host keeps running. Nothing enforced that.
+ * A result missing `cost` threw a TypeError *outside* the per-child catch,
+ * which escaped createNextGeneration into an unawaited evaluationLoop and
+ * killed the process; a result missing `prompt` was accepted and the child
+ * was silently evaluated with no system prompt at all; a NaN `usd` poisoned
+ * run totals and disabled budget enforcement (NaN > limit is never true).
+ *
+ * Throwing here routes every one of those onto the existing carry-forward
+ * path, exactly like an operator that threw.
+ */
+function validateOperatorResult(
+  result: any,
+  operatorName: string,
+): { prompt: string; changeLog: ChangeLogLine[]; params: Record<string, any>; cost: OperatorCost } {
+  if (!result || typeof result !== 'object') {
+    throw new Error(`Operator '${operatorName}' returned ${result === undefined ? 'undefined' : typeof result}, expected an OperatorResult object`);
+  }
+  if (typeof result.prompt !== 'string' || result.prompt.trim() === '') {
+    throw new Error(`Operator '${operatorName}' returned a ${typeof result.prompt} prompt, expected a non-empty string`);
+  }
+  const changeLog: ChangeLogLine[] = Array.isArray(result.changeLog)
+    ? result.changeLog.filter((line: any) => line && typeof line === 'object')
+    : [];
+  const params = result.params && typeof result.params === 'object' && !Array.isArray(result.params)
+    ? result.params
+    : {};
+  const rawCost = result.cost && typeof result.cost === 'object' ? result.cost : {};
+  return {
+    prompt: result.prompt,
+    changeLog,
+    params,
+    cost: {
+      promptTokens: finite(rawCost.promptTokens),
+      completionTokens: finite(rawCost.completionTokens),
+      usd: finite(rawCost.usd),
+      calls: finite(rawCost.calls),
+    },
+  };
+}
+
+/**
+ * `callTimeoutMs` bounds provider calls but never bounded the operator itself,
+ * so a plugin whose apply() never resolved hung the whole run forever.
+ */
+function withOperatorTimeout<T>(work: Promise<T>, timeoutMs: number, operatorName: string): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return work;
+  let timer: NodeJS.Timeout;
+  return Promise.race([
+    work,
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Operator '${operatorName}' did not finish within ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /**
  * Select top performers from current generation
  */
@@ -382,6 +453,20 @@ export async function createNextGeneration(
     parentIndex++;
     return parent;
   };
+
+  // Binary operators need two DIFFERENT parents. Cycling the assignment list
+  // blindly handed crossover the same node twice whenever one performer
+  // dominated (topK: 1, or only one node finishing a generation), which spent
+  // a full service-model call merging a prompt with itself.
+  const distinctParents = topPerformers.length > 1;
+  const pickSecondParent = (first: CandidateNode) => {
+    let candidate = nextParent();
+    if (!distinctParents) return candidate;
+    for (let tries = 0; candidate.id === first.id && tries < parentAssignments.length; tries++) {
+      candidate = nextParent();
+    }
+    return candidate;
+  };
   
   // Cost tracking
   let totalPromptTokens = 0;
@@ -426,19 +511,35 @@ export async function createNextGeneration(
       }
 
       try {
-        const parentB = op.parents === 2 ? nextParent() : undefined;
+        const parentB = op.parents === 2 ? pickSecondParent(parent) : undefined;
         const childRng = rngFor(config.seed, 'operator', nextGenerationNumber, i);
-        const result = await op.apply({ parent, parentB, config, generation: currentGeneration, rng: childRng });
+        // Operators — including third-party plugins — receive snapshots. A
+        // plugin that mutated the live parent rewrote the already-scored
+        // parent node in place and every sibling saw the damage, because the
+        // same object was handed to all of them.
+        const result = await withOperatorTimeout(
+          op.apply({
+            parent: snapshot(parent),
+            parentB: parentB && snapshot(parentB),
+            config,
+            generation: currentGeneration.map(snapshot),
+            rng: childRng,
+          }),
+          config.callTimeoutMs ?? 120_000,
+          operatorName,
+        );
+
+        const validated = validateOperatorResult(result, operatorName);
 
         console.log(`[Generation] Child ${i}: ${operatorName.toUpperCase()} from parent ${parent.id.slice(0, 8)}`);
 
         return {
-          prompt: result.prompt,
-          changeLog: result.changeLog,
+          prompt: validated.prompt,
+          changeLog: validated.changeLog,
           lineageParents: parentB ? [parent.id, parentB.id] : [parent.id],
-          params: { ...parent.params, ...result.params },
+          params: { ...parent.params, ...validated.params },
           operatorType: operatorName as string | null,
-          cost: result.cost,
+          cost: validated.cost,
         };
       } catch (error) {
         console.error(`[Generation] Operator '${operatorName}' failed for child ${i}:`, error);
@@ -459,10 +560,10 @@ export async function createNextGeneration(
   // Process results in order and create nodes
   for (const { index, parentFitness, result } of childResults) {
     // Accumulate costs
-    totalPromptTokens += result.cost.promptTokens;
-    totalCompletionTokens += result.cost.completionTokens;
-    totalUsd += result.cost.usd;
-    totalCalls += result.cost.calls;
+    totalPromptTokens += finite(result.cost.promptTokens);
+    totalCompletionTokens += finite(result.cost.completionTokens);
+    totalUsd += finite(result.cost.usd);
+    totalCalls += finite(result.cost.calls);
 
     const newNode: CandidateNode = {
       id: uuidv4(),

@@ -14,10 +14,36 @@ import type { CliConfig } from './config.js';
 // ---------------------------------------------------------------------------
 
 export function slugify(name: string): string {
-  return name
+  const slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+  // An all-non-ASCII name (e.g. "日本語") reduces to '', so every such run wrote
+  // to the same output-.md and clobbered the previous one.
+  return slug || 'run';
+}
+
+/**
+ * Look up a test definition by id.
+ *
+ * node.tests holds only the FITNESS tests — holdout tests are removed before
+ * evaluation — so pairing it positionally with config.testSet shifted every
+ * name, input and output as soon as anything was held out, and silently
+ * attributed one test's scores to another.
+ */
+function findTestDef(config: EvaluationConfig, testId: string | undefined) {
+  return testId ? config.testSet.find(t => t.id === testId) : undefined;
+}
+
+/**
+ * Fence content with enough backticks to survive fences inside it. Prompts that
+ * contain a ```json example — the everyday case for this tool — terminated the
+ * block early and let the rest of the prompt render as prose.
+ */
+function fenced(content: string): string[] {
+  const longestRun = (content.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0);
+  const fence = '`'.repeat(Math.max(3, longestRun + 1));
+  return [fence, content, fence];
 }
 
 function findNodeById(result: EvolutionResult, nodeId: string): EvolutionResultNode | null {
@@ -29,21 +55,35 @@ function findNodeById(result: EvolutionResult, nodeId: string): EvolutionResultN
   return null;
 }
 
-function computeGenStats(nodes: EvolutionResultNode[]): { avg: number; best: number; worst: number } {
+function computeGenStats(nodes: EvolutionResultNode[]): { avg: number; best: number; worst: number; scored: number; failed: number } {
   const fitnesses: number[] = [];
+  let failed = 0;
   for (const n of nodes) {
+    if (n.status === 'failed') failed++;
     if (n.metrics?.fitness !== undefined) {
       fitnesses.push(n.metrics.fitness);
     }
   }
-  if (fitnesses.length === 0) return { avg: 0, best: 0, worst: 0 };
+  if (fitnesses.length === 0) return { avg: 0, best: 0, worst: 0, scored: 0, failed };
   const sum = fitnesses.reduce((a, b) => a + b, 0);
   return {
     avg: sum / fitnesses.length,
     best: Math.max(...fitnesses),
     worst: Math.min(...fitnesses),
+    scored: fitnesses.length,
+    failed,
   };
 }
+
+const STOP_REASON_TEXT: Record<string, string> = {
+  target: 'target fitness reached',
+  generations: 'ran out of generations (maxGenerations)',
+  budget: 'budget limit reached — the run was cut short',
+  time: 'time limit reached — the run was cut short',
+  manual: 'stopped manually',
+  exhausted: 'no candidates left to evaluate',
+  error: 'stopped by an error',
+};
 
 function formatWeights(config: EvaluationConfig): string {
   const w = config.fitness.weights;
@@ -75,7 +115,9 @@ function truncate(text: string | undefined, maxLen: number): string {
 }
 
 function escapeMarkdown(text: string): string {
-  return text.replace(/\|/g, '\\|');
+  // A newline inside a table cell ends the table: the row splits, and every
+  // following row (including Average) renders as plain prose.
+  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
 function formatDuration(ms: number): string {
@@ -138,7 +180,14 @@ export function generateReport(
   }
 
   lines.push(`| Custom grading prompt | ${cliConfig?.systemPrompts?.llmGradingPrompt ? 'Yes' : 'No'} |`);
-  lines.push(`| Duration | ${formatDuration(result.durationMs)} |`);
+  // On a resumed run the wall-clock span from the ORIGINAL start includes the
+  // downtime, so an overnight gap read as "8h 40m" for ten minutes of work.
+  const resumed = result.activeDurationMs !== undefined && result.durationMs - result.activeDurationMs > 60_000;
+  lines.push(
+    resumed
+      ? `| Duration | ${formatDuration(result.activeDurationMs)} working (${formatDuration(result.durationMs)} wall clock, resumed) |`
+      : `| Duration | ${formatDuration(result.durationMs)} |`,
+  );
   lines.push(`| Cost | $${result.totals.usd.toFixed(4)} |`);
   lines.push(`| API calls | ${result.totals.calls} |`);
   lines.push('');
@@ -175,19 +224,51 @@ export function generateReport(
     lines.push('');
   }
 
+  // ---- Outcome ----
+  // The report used to say nothing about why the run ended or whether it failed,
+  // so a run truncated by the budget cap read exactly like one that finished.
+  lines.push('## Outcome');
+  lines.push('');
+  if (result.error) {
+    lines.push(`❌ **The run did not complete:** ${escapeMarkdown(result.error)}`);
+  } else if (result.stopReason) {
+    const cut = result.stopReason === 'budget' || result.stopReason === 'time' || result.stopReason === 'manual';
+    lines.push(`${cut ? '⚠️' : '✅'} **Stopped because:** ${STOP_REASON_TEXT[result.stopReason] ?? result.stopReason}`);
+  } else {
+    lines.push('**Stopped because:** (not recorded)');
+  }
+  const totalFailed = result.generations.reduce((sum, g) => sum + g.nodes.filter(n => n.status === 'failed').length, 0);
+  const totalNodes = result.generations.reduce((sum, g) => sum + g.nodes.length, 0);
+  if (totalFailed > 0) {
+    lines.push('');
+    lines.push(`⚠️ **${totalFailed} of ${totalNodes} candidates failed** — the numbers below describe only the ones that completed.`);
+  }
+  if (result.holdout?.skipped) {
+    lines.push('');
+    lines.push(`⚠️ **Holdout evaluation was skipped** (${result.holdout.skipped}) — no generalization check was run.`);
+  }
+  lines.push('');
+
   // ---- Fitness Progression ----
   lines.push('## Fitness Progression');
   lines.push('');
   lines.push('| Gen | Avg Fitness | Best Fitness | Worst Fitness |');
   lines.push('|-----|------------|-------------|--------------|');
 
+  if (result.generations.length === 0) {
+    lines.push('| — | — | — | — |');
+  }
   for (let i = 0; i < result.generations.length; i++) {
     const gen = result.generations[i];
     const stats = computeGenStats(gen.nodes);
     const isFinal = i === result.generations.length - 1;
     const prefix = isFinal ? '**' : '';
     const suffix = isFinal ? '**' : '';
-    lines.push(`| ${prefix}${gen.generation}${suffix} | ${prefix}${stats.avg.toFixed(3)}${suffix} | ${prefix}${stats.best.toFixed(3)}${suffix} | ${prefix}${stats.worst.toFixed(3)}${suffix} |`);
+    // A generation with no fitness at all rendered as 0.000, which reads as
+    // "everything scored zero" rather than "nothing was scored".
+    const cell = (value: number) => (stats.scored === 0 ? '—' : value.toFixed(3));
+    const note = stats.failed > 0 ? ` ⚠️ ${stats.failed}/${gen.nodes.length} failed` : '';
+    lines.push(`| ${prefix}${gen.generation}${suffix} | ${prefix}${cell(stats.avg)}${suffix} | ${prefix}${cell(stats.best)}${suffix} | ${prefix}${cell(stats.worst)}${suffix}${note} |`);
   }
   lines.push('');
 
@@ -203,9 +284,7 @@ export function generateReport(
     lines.push(`**Model:** ${seedNode.params.model.provider}/${seedNode.params.model.model}  `);
     lines.push(`**Temperature:** ${seedNode.params.temperature}  `);
     lines.push('');
-    lines.push('```');
-    lines.push(seedNode.prompt);
-    lines.push('```');
+    lines.push(...fenced(seedNode.prompt));
     lines.push('');
 
     if (seedNode.tests && seedNode.tests.length > 0) {
@@ -213,9 +292,9 @@ export function generateReport(
       lines.push('');
       for (let t = 0; t < seedNode.tests.length; t++) {
         const test = seedNode.tests[t];
-        const testDef = config.testSet[t];
+        const testDef = findTestDef(config, test.testId);
         const testName = testDef?.name ?? `Test ${t + 1}`;
-        lines.push(`**Test ${t + 1}: ${testName}** — Score: **${test.score}**/10`);
+        lines.push(`**Test ${t + 1}: ${escapeMarkdown(testName)}** — Score: **${test.score}**/10`);
         lines.push(`> Input: ${escapeMarkdown(truncate(testDef?.prompt, 200))}`);
         lines.push(`> Output: ${escapeMarkdown(truncate(test.outputText, 300))}`);
         lines.push('');
@@ -234,7 +313,16 @@ export function generateReport(
 
   if (result.playoffs && result.playoffs.length > 0) {
     const lastPlayoff = result.playoffs[result.playoffs.length - 1];
-    lines.push(`*Champion selected by pairwise playoff (${lastPlayoff.ranking.length} contenders, both-orders judging).*`);
+    const newestGeneration = result.generations
+      .filter(g => g.nodes.some(n => n.status === 'finished' && n.metrics?.fitness !== undefined))
+      .reduce((max, g) => Math.max(max, g.generation), -1);
+    if (lastPlayoff.generation === newestGeneration) {
+      lines.push(`*Champion selected by pairwise playoff (${lastPlayoff.ranking.length} contenders, both-orders judging).*`);
+    } else {
+      // Claiming a playoff picked the champion when the final generation never
+      // held one is exactly backwards: that generation was ranked by fitness.
+      lines.push(`*The last playoff covered generation ${lastPlayoff.generation}, not the final generation ${newestGeneration} — the champion below was selected by fitness.*`);
+    }
     lines.push('');
   }
 
@@ -245,9 +333,7 @@ export function generateReport(
     lines.push(`**Temperature:** ${bestNode.params.temperature}  `);
     lines.push(`**Model:** ${result.best.model}  `);
     lines.push('');
-    lines.push('```');
-    lines.push(bestNode.prompt);
-    lines.push('```');
+    lines.push(...fenced(bestNode.prompt));
     lines.push('');
 
     if (bestNode.tests && bestNode.tests.length > 0) {
@@ -255,9 +341,9 @@ export function generateReport(
       lines.push('');
       for (let t = 0; t < bestNode.tests.length; t++) {
         const test = bestNode.tests[t];
-        const testDef = config.testSet[t];
+        const testDef = findTestDef(config, test.testId);
         const testName = testDef?.name ?? `Test ${t + 1}`;
-        lines.push(`**Test ${t + 1}: ${testName}** — Score: **${test.score}**/10`);
+        lines.push(`**Test ${t + 1}: ${escapeMarkdown(testName)}** — Score: **${test.score}**/10`);
         lines.push(`> Input: ${escapeMarkdown(truncate(testDef?.prompt, 200))}`);
         lines.push(`> Output: ${escapeMarkdown(truncate(test.outputText, 300))}`);
         lines.push('');
@@ -278,21 +364,28 @@ export function generateReport(
 
     let seedTotal = 0;
     let bestTotal = 0;
+    let count = 0;
 
-    for (let t = 0; t < config.testSet.length; t++) {
-      const testName = config.testSet[t]?.name ?? `Test ${t + 1}`;
-      const seedScore = seedNode.tests[t]?.score ?? 0;
-      const bestScore = bestNode.tests[t]?.score ?? 0;
+    // Iterate the tests that were actually RUN, matching seed to best by id.
+    // Iterating config.testSet instead invented a 0.0/0.0 row for every
+    // held-out test and dragged the average down with it.
+    for (let t = 0; t < seedNode.tests.length; t++) {
+      const seedTest = seedNode.tests[t];
+      const bestTest = bestNode.tests.find(x => x.testId === seedTest.testId);
+      if (!bestTest) continue;
+      const testName = findTestDef(config, seedTest.testId)?.name ?? `Test ${t + 1}`;
+      const seedScore = seedTest.score ?? 0;
+      const bestScore = bestTest.score ?? 0;
       const delta = bestScore - seedScore;
       const deltaStr = delta > 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1);
       seedTotal += seedScore;
       bestTotal += bestScore;
-      lines.push(`| ${t + 1} | ${escapeMarkdown(testName)} | ${seedScore.toFixed(1)} | ${bestScore.toFixed(1)} | ${deltaStr} |`);
+      count++;
+      lines.push(`| ${count} | ${escapeMarkdown(testName)} | ${seedScore.toFixed(1)} | ${bestScore.toFixed(1)} | ${deltaStr} |`);
     }
 
-    const count = config.testSet.length;
-    const seedAvg = seedTotal / count;
-    const bestAvg = bestTotal / count;
+    const seedAvg = count > 0 ? seedTotal / count : 0;
+    const bestAvg = count > 0 ? bestTotal / count : 0;
     const avgDelta = bestAvg - seedAvg;
     const avgDeltaStr = avgDelta > 0 ? `+${avgDelta.toFixed(1)}` : avgDelta.toFixed(1);
     lines.push(`| | **Average** | **${seedAvg.toFixed(1)}** | **${bestAvg.toFixed(1)}** | **${avgDeltaStr}** |`);
@@ -335,13 +428,16 @@ export function generateReport(
     const losses: string[] = [];
     const unchanged: string[] = [];
 
-    for (let t = 0; t < config.testSet.length; t++) {
-      const testName = config.testSet[t]?.name ?? `Test ${t + 1}`;
-      const seedScore = seedNode.tests[t]?.score ?? 0;
-      const bestScore = bestNode.tests[t]?.score ?? 0;
+    for (let t = 0; t < seedNode.tests.length; t++) {
+      const seedTest = seedNode.tests[t];
+      const bestTest = bestNode.tests.find(x => x.testId === seedTest.testId);
+      if (!bestTest) continue;
+      const testName = findTestDef(config, seedTest.testId)?.name ?? `Test ${t + 1}`;
+      const seedScore = seedTest.score ?? 0;
+      const bestScore = bestTest.score ?? 0;
       const delta = bestScore - seedScore;
-      const seedReason = extractJustification(seedNode.tests[t]?.llmGradeReasoning);
-      const bestReason = extractJustification(bestNode.tests[t]?.llmGradeReasoning);
+      const seedReason = extractJustification(seedTest.llmGradeReasoning);
+      const bestReason = extractJustification(bestTest.llmGradeReasoning);
 
       if (delta > 0) {
         wins.push(`- **${testName}** (+${delta.toFixed(0)}): Seed scored ${seedScore}${seedReason ? ` — ${seedReason}` : ''}. Best scored ${bestScore}${bestReason ? ` — ${bestReason}` : ''}.`);

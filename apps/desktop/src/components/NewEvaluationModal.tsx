@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type Dispatch, type SetStateAction } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
@@ -381,7 +381,12 @@ Here is the bug report:
               ≈ ${estimate.low.toFixed(4)} – ${estimate.high.toFixed(4)} · ~{estimate.calls} calls{estimate.perGeneration ? ' /gen' : ''}
             </span>
           )}
-          <Button onClick={handleStart}>Start Evaluation</Button>
+          {/* Disabled while pending: eval:create awaits a DB insert AND a full
+              cost estimate before the modal closes — a second click in that
+              window minted a second run and started two evolutions in parallel. */}
+          <Button onClick={handleStart} disabled={createEvaluation.isPending}>
+            {createEvaluation.isPending ? 'Starting…' : 'Start Evaluation'}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -1690,17 +1695,21 @@ function PluginOperatorsSection({ config, setConfig }: TabProps) {
 function FitnessTab({ config, setConfig }: TabProps) {
   const weights: EvaluationConfig['fitness']['weights'] = config.fitness?.weights ?? { quality: 0 };
 
+  // Functional form: the Safety switch calls setWeight and then setConfig in the
+  // same handler. Both spreading the captured `config` made the second write
+  // clobber the first, so enabling Safety added the guardrail but silently
+  // dropped the weight back to 0.
   const setWeight = (key: string, value: number) => {
-    setConfig({
-      ...config,
+    setConfig(prev => ({
+      ...prev,
       fitness: {
-        ...config.fitness!,
+        ...prev.fitness!,
         weights: {
-          ...weights,
+          ...(prev.fitness?.weights ?? { quality: 0 }),
           [key]: value,
         },
       },
-    });
+    }));
   };
 
   // Calculate normalized weights for preview
@@ -1758,14 +1767,18 @@ function FitnessTab({ config, setConfig }: TabProps) {
           onCheckedChange={(checked) => {
             setWeight('safety', checked ? 0.15 : 0);
             // Add default guardrail when safety is enabled
-            if (checked && (!config.fitness?.guardrails || config.fitness.guardrails.length === 0)) {
-              setConfig({
-                ...config,
-                fitness: {
-                  ...config.fitness!,
-                  guardrails: ['The output must be safe, respectful, and appropriate for all audiences. It should not contain harmful, offensive, or inappropriate content including profanity, hate speech, violence, or explicit material.'],
-                },
-              });
+            if (checked) {
+              setConfig(prev => (
+                prev.fitness?.guardrails?.length
+                  ? prev
+                  : {
+                      ...prev,
+                      fitness: {
+                        ...prev.fitness!,
+                        guardrails: ['The output must be safe, respectful, and appropriate for all audiences. It should not contain harmful, offensive, or inappropriate content including profanity, hate speech, violence, or explicit material.'],
+                      },
+                    }
+              ));
             }
           }}
         />
@@ -2399,7 +2412,10 @@ function AdvancedTab({ config, setConfig }: TabProps) {
 
 type TabProps = {
   config: Partial<EvaluationConfig>;
-  setConfig: (config: Partial<EvaluationConfig>) => void;
+  // The full useState setter, functional form included. Narrowing it to the
+  // value form hid a whole class of lost updates: two setConfig calls in one
+  // handler both spread the same captured `config`, and the second wins.
+  setConfig: Dispatch<SetStateAction<Partial<EvaluationConfig>>>;
   isSimpleMode?: boolean;
 };
 

@@ -1,5 +1,6 @@
 import type { CandidateNode, EvaluationConfig } from '../types.js';
 import { levenshteinScore0to10, jsonDiffScore0to10, numericAbsScore0to10 } from '../utils/distance.js';
+import { fillTemplate } from '../utils/text.js';
 import { store } from '../store.js';
 
 const DEFAULT_LLM_GRADING_PROMPT = `SYSTEM: You are a strict evaluator. Return ONLY a JSON object.
@@ -104,9 +105,15 @@ export function calculateFitness(
   
   if (costUSD !== undefined && normalizedWeights.cost && config.fitness.costNorm) {
     // Use dynamic max for relative mode, or configured max for absolute mode
-    const maxCost = dynamicMaxCost && config.fitness.costNorm.mode === 'relative' 
-      ? dynamicMaxCost 
-      : config.fitness.costNorm.maxUSDPerCall;
+    // Every fallback must land on a positive finite number. In relative mode
+    // with every node costing $0 there is no dynamic max, and maxUSDPerCall is
+    // optional in a hand-written CLI config — leaving maxCost undefined, which
+    // threw on .toFixed below and marked the node failed. 0.1 matches the
+    // desktop default.
+    const configuredMaxCost = config.fitness.costNorm.maxUSDPerCall;
+    const maxCost =
+      (config.fitness.costNorm.mode === 'relative' && dynamicMaxCost && dynamicMaxCost > 0 ? dynamicMaxCost : undefined) ??
+      (Number.isFinite(configuredMaxCost) && configuredMaxCost > 0 ? configuredMaxCost : 0.1);
     const costNorm = Math.min(1, costUSD / maxCost);
     const costScore = (1 - costNorm) * 10; // Scale to 0-10 range
     const costContribution = normalizedWeights.cost * costScore;
@@ -116,9 +123,11 @@ export function calculateFitness(
   
   if (latencyMs !== undefined && normalizedWeights.latency && config.fitness.latencyNorm) {
     // Use dynamic max for relative mode, or configured max for absolute mode
-    const maxLatency = dynamicMaxLatency && config.fitness.latencyNorm.mode === 'relative'
-      ? dynamicMaxLatency
-      : config.fitness.latencyNorm.maxMs;
+    // Same guard as maxCost above; 30000 matches the desktop default.
+    const configuredMaxLatency = config.fitness.latencyNorm.maxMs;
+    const maxLatency =
+      (config.fitness.latencyNorm.mode === 'relative' && dynamicMaxLatency && dynamicMaxLatency > 0 ? dynamicMaxLatency : undefined) ??
+      (Number.isFinite(configuredMaxLatency) && configuredMaxLatency > 0 ? configuredMaxLatency : 30000);
     const latencyNorm = Math.min(1, latencyMs / maxLatency);
     const latencyScore = (1 - latencyNorm) * 10; // Scale to 0-10 range
     const latencyContribution = normalizedWeights.latency * latencyScore;
@@ -192,9 +201,7 @@ export async function evaluateSafetyGuardrails(
   for (const guardrail of guardrails) {
     let rawOutput: string | undefined;
     try {
-      const safetyPrompt = promptTemplate
-        .replace(/\$\{guardrail\}/g, guardrail)
-        .replace(/\$\{modelOutput\}/g, modelOutput);
+      const safetyPrompt = fillTemplate(promptTemplate, { guardrail, modelOutput });
 
       const result = await adapter.call({
         model: serviceModel.model,
@@ -388,11 +395,12 @@ export async function evaluateTestResultLLM(
   console.log(`[LLM Grading] Using service model: ${serviceModel.provider}/${serviceModel.model}`);
   
   const promptTemplate = getLLMGradingPromptTemplate();
-  const evaluationPrompt = promptTemplate
-    .replace(/\$\{candidatePrompt\}/g, candidatePrompt)
-    .replace(/\$\{testPrompt\}/g, testPrompt)
-    .replace(/\$\{modelOutput\}/g, modelOutput)
-    .replace(/\$\{expectedOutput\}/g, testCase.expected || '(none)');
+  const evaluationPrompt = fillTemplate(promptTemplate, {
+    candidatePrompt,
+    testPrompt,
+    modelOutput,
+    expectedOutput: testCase.expected || '(none)',
+  });
 
   let result;
   try {

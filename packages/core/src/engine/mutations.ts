@@ -8,7 +8,7 @@
 import type { EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
-import { stripPromptDelimiters, extractJsonArray } from '../utils/text.js';
+import { stripPromptDelimiters, extractJsonArray, fillTemplate } from '../utils/text.js';
 import { withPartialCost } from './operator-cost.js';
 
 /**
@@ -165,7 +165,10 @@ export async function mutateNode(
 ): Promise<{ prompt: string; changeLog: ChangeLogLine[]; cost: { promptTokens: number; completionTokens: number; usd: number; calls: number } }> {
   const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
-  const maxRetries = config.retries ?? 3;
+  // At least one attempt: retries: 0 made the proposal loop body never run, so
+  // the apply step billed a call for a prompt reading "Edits: undefined" and
+  // then threw a TypeError on edits.map.
+  const maxRetries = Math.max(1, config.retries ?? 3);
   
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
@@ -183,9 +186,7 @@ export async function mutateNode(
   
   // Load proposal prompt template and substitute variables
   const proposalPromptTemplate = getProposalPromptTemplate();
-  const proposalPrompt = proposalPromptTemplate
-    .replace(/\$\{strategiesList\}/g, strategiesList)
-    .replace(/\$\{basePrompt\}/g, basePrompt);
+  const proposalPrompt = fillTemplate(proposalPromptTemplate, { strategiesList, basePrompt });
 
   // Step 1: Propose edits with retry for JSON parsing
   let edits!: any[];
@@ -242,9 +243,10 @@ export async function mutateNode(
   
   // Step 2: Apply edits (no retry needed here, simpler operation)
   const applyPromptTemplate = getApplyPromptTemplate();
-  const applyPrompt = applyPromptTemplate
-    .replace(/\$\{basePrompt\}/g, basePrompt)
-    .replace(/\$\{edits\}/g, JSON.stringify(edits));
+  const applyPrompt = fillTemplate(applyPromptTemplate, {
+    basePrompt,
+    edits: JSON.stringify(edits),
+  });
   
   const applyResult = await serviceAdapter.call({
     model: config.serviceModel.model,

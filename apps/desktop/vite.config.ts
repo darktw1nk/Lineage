@@ -4,12 +4,21 @@ import electron from 'vite-plugin-electron';
 import renderer from 'vite-plugin-electron-renderer';
 import path from 'path';
 
-export default defineConfig({
+// `--mode renderer-only` serves the renderer WITHOUT launching Electron, which
+// is what `npm run dev` is documented to do. Without it the plugin starts
+// Electron itself, so `npm run electron:dev` (vite + a separate `electron .`)
+// launched TWO instances against one database — whole-file sql.js saves mean
+// the loser silently erased the winner's runs.
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     electron([
       {
         entry: 'electron/main.ts',
+        onstart(options) {
+          if (mode === 'renderer-only') return;
+          options.startup();
+        },
         vite: {
           resolve: {
             alias: {
@@ -52,4 +61,4 @@ export default defineConfig({
   server: {
     port: 5173
   }
-});
+}));

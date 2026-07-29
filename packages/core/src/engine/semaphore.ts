@@ -2,6 +2,17 @@
  * Global semaphore to limit concurrent API calls across all evaluations
  */
 
+/**
+ * A limit of 0 (or NaN, or a negative) is never a useful configuration — it is
+ * a deadlock. release() clamps permits to the ceiling, so a 0 ceiling means the
+ * queue can never drain and every caller hangs forever. updateGlobalSemaphoreLimit
+ * is exported from the published package, so the clamp belongs here rather than
+ * at any one call site.
+ */
+function normalizeLimit(value: number): number {
+  return Number.isFinite(value) && value >= 1 ? Math.floor(value) : 1;
+}
+
 class Semaphore {
   private permits: number;
   private limit: number;   // configured ceiling
@@ -9,8 +20,8 @@ class Semaphore {
   private queue: Array<() => void> = [];
 
   constructor(permits: number) {
-    this.permits = permits;
-    this.limit = permits;
+    this.limit = normalizeLimit(permits);
+    this.permits = this.limit;
   }
 
   async acquire(): Promise<void> {
@@ -46,8 +57,8 @@ class Semaphore {
   setPermits(newPermits: number): void {
     // Account for permits already held, otherwise re-initializing mid-run
     // re-issues them and the effective limit doubles.
-    this.limit = newPermits;
-    this.permits = Math.max(0, newPermits - this.inUse);
+    this.limit = normalizeLimit(newPermits);
+    this.permits = Math.max(0, this.limit - this.inUse);
 
     // If we increased permits, release queued requests
     while (this.permits > 0 && this.queue.length > 0) {

@@ -30,9 +30,12 @@ function App() {
   useEffect(() => {
     if (!selectedEvaluationId) return;
 
-    const handleUpdate = (data: any) => {
+    // preload invokes callback(ipcEvent, data) — binding only one parameter
+    // silently captured the IpcRendererEvent, so data.type was always undefined
+    // and EVERY backend error toast was dropped.
+    const handleUpdate = (_event: any, data: any) => {
       if (!data) return;
-      
+
       // Only handle errors at App level
       if (data.type === 'error') {
         toast.error(data.message || 'Something went wrong', {

@@ -31,6 +31,7 @@ import { getProviderAdapter } from '../providers/index.js';
 import { initGlobalSemaphore } from './semaphore.js';
 import { rngFor } from './rng.js';
 import { COST_LABELS } from './estimate.js';
+import { selectChampion } from './champion.js';
 import { calculateFitness } from './fitness.js';
 import { getDatabase } from '../database/init.js';
 
@@ -299,7 +300,7 @@ export async function startEvaluation(
     } else {
       state.queue = state.run.generations[state.currentGeneration].filter(n => n.status === 'awaiting');
       console.log(`[Evaluator] Resume queue: ${state.queue.length} nodes`);
-      evaluationLoop(runId);
+      startEvaluationLoop(runId);
     }
     console.log(`[Evaluator] startEvaluation returning (resume)`);
     return;
@@ -374,7 +375,7 @@ async function mutatePopulationInBackground(
     // Start evaluation loop
     if (state.status === 'running') {
       console.log(`[Evaluator] Starting evaluation loop...`);
-      evaluationLoop(runId);
+      startEvaluationLoop(runId);
     }
     return;
   }
@@ -385,7 +386,7 @@ async function mutatePopulationInBackground(
 
   console.log(`[Evaluator] Mutating ${nodesToMutate.length} nodes in parallel...`);
 
-  const mutationPromises = nodesToMutate.map(async (node) => {
+  const fillNode = async (node: CandidateNode) => {
     try {
       // The fill phase runs before the evaluation loop's first budget check —
       // without this gate, 2×(initialSize-1) service calls always execute in
@@ -447,11 +448,26 @@ async function mutatePopulationInBackground(
       // Send error update
       sendUpdate(runId, { type: 'node_updated', node });
     }
+  };
+
+  // Bounded worker pool, NOT nodesToMutate.map(...). A plain .map drives every
+  // async body to its first await in one tick, so all N budget checks read
+  // totals.usd === 0 and the gate never fires — an initialSize of 20 against a
+  // two-call budget still spent 38 calls. Workers pull one node at a time, so
+  // each check sees the spend of everything that finished before it.
+  const workerCount = Math.max(1, Math.min(state.config.parallelLimit || 1, nodesToMutate.length));
+  let nextNodeIndex = 0;
+  const mutationPromises = Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const index = nextNodeIndex++;
+      if (index >= nodesToMutate.length) return;
+      await fillNode(nodesToMutate[index]);
+    }
   });
-  
+
   try {
     await Promise.all(mutationPromises);
-    
+
     console.log(`[Evaluator] All mutations complete`);
     persistRun(state);
 
@@ -479,7 +495,7 @@ async function mutatePopulationInBackground(
     // Start evaluation loop
     if (state.status === 'running') {
       console.log(`[Evaluator] Starting evaluation loop...`);
-      evaluationLoop(runId);
+      startEvaluationLoop(runId);
     } else {
       console.log(`[Evaluator] NOT starting evaluation loop, status=${state.status}`);
     }
@@ -492,6 +508,40 @@ async function mutatePopulationInBackground(
 /**
  * Main evaluation loop - Rolling queue implementation for maximum parallelism
  */
+/**
+ * Fire-and-forget entry point for the loop.
+ *
+ * Every caller starts the loop without awaiting it, so anything that escaped
+ * evaluationLoop became an unhandled rejection — which on Node 15+ terminates
+ * the process. A single misbehaving operator plugin could therefore kill the
+ * CLI outright, or (in Electron, where the renderer survives) leave the run
+ * wedged at status 'running' forever with no error ever shown.
+ */
+function startEvaluationLoop(runId: UUID): void {
+  evaluationLoop(runId).catch(error => {
+    console.error(`[Evaluator] Evaluation loop crashed for ${runId.slice(0, 8)}:`, error);
+    const state = activeEvaluations.get(runId);
+    if (state) {
+      state.loopRunning = false;
+      // 'stopped' + stopReason 'error' is the closest terminal state the run
+      // schema has; without it the run stays 'running' forever in the UI.
+      state.status = 'stopped';
+      state.run.status = 'stopped';
+      state.run.stopReason = 'error';
+      state.run.finishedAt = Date.now();
+      try {
+        persistRun(state);
+      } catch (persistError) {
+        console.error('[Evaluator] Could not persist the crashed run:', persistError);
+      }
+      activeEvaluations.delete(runId);
+    }
+    sendUpdate(runId, { type: 'error', message: `Evaluation failed: ${error instanceof Error ? error.message : String(error)}` });
+    sendUpdate(runId, { type: 'stop', reason: 'error' });
+    sendUpdate(runId, { type: 'status', status: 'stopped' });
+  });
+}
+
 async function evaluationLoop(runId: UUID): Promise<void> {
   const state = activeEvaluations.get(runId);
   if (!state) {
@@ -586,6 +636,7 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       console.log(`[Evaluator] Stop condition tripped with ${state.queue.length} queued nodes — skipping them`);
       for (const queued of state.queue) queued.status = 'skipped';
       state.queue = [];
+      state.loopRunning = false;
       await finishEvaluation(runId, state);
       return;
     }
@@ -604,6 +655,7 @@ async function evaluationLoop(runId: UUID): Promise<void> {
 
       // Check stopping conditions
       if (shouldStop(state)) {
+        state.loopRunning = false;
         await finishEvaluation(runId, state);
         return;
       }
@@ -612,7 +664,8 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       if (state.config.targets.maxGenerations) {
         if (state.currentGeneration + 1 >= state.config.targets.maxGenerations) {
           console.log(`[Evaluator] Reached max generations (${state.config.targets.maxGenerations})`);
-          state.run.stopReason = 'target';
+          state.run.stopReason = 'generations';
+          state.loopRunning = false;
           await finishEvaluation(runId, state);
           return;
         }
@@ -630,10 +683,8 @@ async function evaluationLoop(runId: UUID): Promise<void> {
     }
   } while (activePromises.size > 0 || state.queue.length > 0);
 
-  state.loopRunning = false; // a later resume may legitimately start a new loop
-
   console.log(`[Evaluator] Evaluation loop exited (status=${state.status}, queue=${state.queue.length}, inProgress=${state.inProgress.size})`);
-  
+
   // If we exited because of pause, wait for any remaining in-progress nodes
   if (state.status === 'pausing') {
     console.log(`[Evaluator] Pausing... waiting for ${activePromises.size} active promises and ${state.inProgress.size} in-progress nodes to complete`);
@@ -648,6 +699,13 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
+    // Only actually pause if a Resume didn't arrive while we were draining —
+    // forcing 'paused' unconditionally silently undid that resume.
+    if (state.status !== 'pausing') {
+      console.log(`[Evaluator] Resume arrived during the pause drain (status=${state.status}) — not pausing`);
+      state.loopRunning = false;
+      return;
+    }
     console.log(`[Evaluator] All in-progress nodes completed, now fully paused`);
     state.status = 'paused';
     state.run.status = 'paused';
@@ -656,9 +714,16 @@ async function evaluationLoop(runId: UUID): Promise<void> {
     state.run.pausedAt = state.pausedAt; // Send to frontend
     sendUpdate(runId, { type: 'status', status: 'paused', totalPausedMs: state.totalPausedMs, pausedAt: state.pausedAt });
     persistRun(state);
+    // Cleared only now, AFTER the drain. Clearing it before let a Resume during
+    // the drain start a second loop over the same state — the exact race the
+    // guard exists to prevent.
+    state.loopRunning = false;
   } else if (state.status === 'running') {
+    state.loopRunning = false;
     // Loop exited naturally (queue empty)
     await finishEvaluation(runId, state);
+  } else {
+    state.loopRunning = false;
   }
 }
 
@@ -838,6 +903,7 @@ async function processNode(
       state.inProgress.delete(node.id);
       sendUpdate(runId, { type: 'node_updated', node });
       sendUpdate(runId, { type: 'error', message: node.error });
+      state.loopRunning = false;
       await finishEvaluation(runId, state);
       return;
     }
@@ -1149,7 +1215,11 @@ function shouldStop(state: EvaluationState): boolean {
   // Max generations (counting from 0, so if maxGenerations=3, we want gen 0, 1, 2 only)
   if (config.targets.maxGenerations) {
     if (state.currentGeneration >= config.targets.maxGenerations) {
-      state.run.stopReason = 'target';
+      // 'generations', NOT 'target': running out of generations is the ordinary
+      // end of every run, while 'target' means the quality bar was actually
+      // reached. Reporting both as 'target' made any script branching on
+      // stopReason === 'target' wrong on essentially every run.
+      state.run.stopReason = 'generations';
       return true;
     }
   }
@@ -1178,8 +1248,12 @@ async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<voi
   const contenders = finished.slice(0, state.pairwiseContenders);
   if (contenders.length < 2) return;
 
+  // !== undefined, not truthiness: budgetUSD 0 means "spend nothing", and
+  // truthiness read it as "no limit" — so a 0-budget resume could still fund a
+  // full round of judge calls.
   const budget = state.config.targets.budgetUSD;
-  if (budget && state.run.totals.usd >= budget) {
+  const budgetCapped = budget !== undefined;
+  if (budgetCapped && state.run.totals.usd >= budget!) {
     console.warn('[Playoff] Budget exhausted — skipping playoff');
     return;
   }
@@ -1193,7 +1267,7 @@ async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<voi
       accrueCost(state, COST_LABELS.playoff, state.config.serviceModel, { usd, promptTokens, completionTokens, calls: 1 });
       sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
     },
-    shouldAbort: () => !!(budget && state.run.totals.usd >= budget),
+    shouldAbort: () => budgetCapped && state.run.totals.usd >= budget!,
   });
   if (!result) return;
 
@@ -1287,19 +1361,18 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
   };
   state.run.holdout = holdout;
 
-  // Champion = latest playoff winner when playoffs ran, else best finished node by fitness
   const finished = state.run.generations.flat().filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined);
-  const playoffChampionId = [...(state.run.playoffs ?? [])]
-    .sort((a, b) => b.generation - a.generation)[0]?.ranking[0];
-  const champion =
-    (playoffChampionId ? finished.find(n => n.id === playoffChampionId) : undefined)
-    ?? [...finished].sort((a, b) => b.metrics!.fitness! - a.metrics!.fitness!)[0];
+  const { champion, staleplayoffIgnored } = selectChampion(finished, state.run.playoffs, n => n.generation);
+  if (staleplayoffIgnored) {
+    console.warn('[Evaluator] Last playoff predates the newest evaluated generation — ranking the champion by fitness instead');
+  }
   if (!champion) {
     holdout.skipped = 'no-champion';
     sendUpdate(runId, { type: 'holdout_result', holdout });
     return;
   }
-  if (state.config.targets.budgetUSD && state.run.totals.usd >= state.config.targets.budgetUSD) {
+  // Same 0-means-zero rule as the playoff gate above.
+  if (state.config.targets.budgetUSD !== undefined && state.run.totals.usd >= state.config.targets.budgetUSD) {
     holdout.skipped = 'budget';
     console.warn('[Evaluator] Budget exhausted — skipping holdout evaluation');
     sendUpdate(runId, { type: 'holdout_result', holdout });
@@ -1435,6 +1508,11 @@ function persistRun(state: EvaluationState): void {
       SET run_json = ?
       WHERE id = ?
     `).run(JSON.stringify(state.run), state.run.id);
+    // Flush now instead of 50ms from now. docs/cli.md promises "if the process
+    // dies, nothing is lost" — with only the debounced save, a hard crash
+    // inside that window lost the checkpoint the resume path depends on.
+    // Checkpoints happen once per generation, so the extra fsync is cheap.
+    db.flush();
   } catch (error) {
     console.error('[Evaluator] Checkpoint persist failed:', error);
   }
@@ -1491,7 +1569,7 @@ export function resumeEvaluation(runId: UUID): void {
     // If queue is empty, the background mutation may still be in progress
     if (state.queue.length > 0 || state.inProgress.size > 0) {
       console.log(`[Evaluator] Starting evaluation loop on resume`);
-      evaluationLoop(runId);
+      startEvaluationLoop(runId);
     } else {
       console.log(`[Evaluator] No work to resume yet (mutations may still be in progress)`);
       // The loop will be started when mutations complete

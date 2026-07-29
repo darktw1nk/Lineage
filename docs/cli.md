@@ -21,7 +21,13 @@ npm run cli -- --set-key <provider> <key>   # Save API key (shared with desktop 
 npm run cli -- --help                       # Show help
 ```
 
-Progress and all engine logs go to stderr; stdout carries exactly the JSON result. Pipe with `2>/dev/null` for clean JSON, or use `--output <path>` to write it to a file. A markdown run report lands in `testoutputs/` beside the output file by default — `--report <path>` puts it exactly where you want it, `--report none` skips it.
+Progress and all engine logs go to stderr; stdout carries exactly the JSON result. **When capturing stdout, add `--silent` to `npm run`** — without it npm prints its own two-line banner to stdout ahead of the payload, and `JSON.parse` fails on it:
+
+```bash
+npm run --silent cli -- --config c.json 2>/dev/null > results.json   # clean JSON
+```
+
+`--output <path>` writes the file directly and sidesteps the issue entirely. A markdown run report lands in `testoutputs/` beside the output file by default — `--report <path>` puts it exactly where you want it, `--report none` skips it.
 
 **Cost estimation**: every run prints `Estimated cost: $low – $high (~N calls)` at startup, and `--estimate --config cfg.json` prints the same estimate (JSON on stdout, per-phase breakdown on stderr) without running anything. The band brackets the one true unknown — completion lengths; treat `high` as the commit number. Warnings call out uncatalogued models and budgets below the low bound.
 
@@ -53,7 +59,9 @@ Both modes score **deterministically** — no judge calls, zero grading cost, no
               "properties": { "name": { "type": "string" }, "email": { "type": "string" } } } }
 ```
 
-Scoring: unparseable JSON → 0; parses but violates the schema → 1–5 (fewer violations score higher); fully conformant → 10. Passed at ≥7, so only conformance passes. Markdown fences are stripped before parsing.
+Scoring: unparseable JSON → 0; parses but violates the schema → 1–5 (closer to the schema scores higher — credit is the fraction of required keys satisfied, discounted by violations that missing keys don't explain); fully conformant → 10. Passed at ≥7, so only conformance passes. Markdown fences are stripped before parsing.
+
+If the response is prose *containing* JSON ("Sure, here you go: {…}"), the JSON is recovered but capped at 5 and never passes — a caller doing `JSON.parse` on that response would throw, so it is a format failure, and letting it reach 10 would reward a model for merely quoting the schema template.
 
 `"mode": "tool_call"` — tools are offered to the model; success is calling the right function with the right arguments:
 
@@ -208,7 +216,7 @@ When `initialPrompts` is set, `populationSize` is ignored (population size = arr
 | `serviceModel` | string | first of `models` | Model for grading, mutations, crossover, meta-prompting. |
 | `serviceModelMaxTokens` | number | `20000` | Max tokens for all model calls. |
 
-Valid providers: `openai`, `anthropic`, `gemini`, `openrouter`.
+Valid providers: `openai`, `anthropic`, `gemini`, `openrouter`, `groq` (plus any registered by a plugin).
 
 ### Population & Generations
 
@@ -292,7 +300,7 @@ Controls how offspring are created each generation:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `parallelLimit` | number | `5` | Maximum concurrent API calls. |
-| `retries` | number | `3` | Retry attempts for transient failures. |
+| `retries` | number | `3` | How many times a mutation re-prompts the service model when it returns unparseable JSON. Provider-level retries for transient HTTP failures are separate and not configurable. Values below 1 are treated as 1. |
 
 ### Test Cases
 
@@ -302,9 +310,13 @@ Each entry in `testSet`:
 |---|---|---|---|
 | `prompt` | string | **required** | The test input sent to the candidate prompt. |
 | `expected` | string | - | Expected output (used by `exact_match` mode). |
-| `mode` | `"llm_grade"` / `"exact_match"` | `"llm_grade"` | How to score the output. |
+| `mode` | `"llm_grade"` / `"exact_match"` / `"json_schema"` / `"tool_call"` | `"llm_grade"` | How to score the output. See [Agent-builder test modes](#agent-builder-test-modes). |
 | `name` | string | `"Test N"` | Display name. |
 | `id` | string | auto UUID | Stable identifier. |
+| `holdout` | boolean | `false` | Hold this test out of evolution and score the champion on it at the end. |
+| `schema` | object | - | JSON Schema for `json_schema` mode. |
+| `tools` | array | - | Tool definitions (OpenAI shape) offered in `tool_call` mode. |
+| `expectedTool` | object | - | `{ name, args?, argsMode? }` — what a `tool_call` test expects. |
 | `grading.strictZeroOnDeviation` | boolean | - | For exact_match: score 0 if not equal. |
 | `grading.distanceMetric` | string | - | `"levenshtein"`, `"json_diff"`, or `"numeric_abs"`. |
 
@@ -320,6 +332,7 @@ Keys are resolved with priority: **environment variable > config file > electron
 | `anthropicKey` | `ANTHROPIC_API_KEY` |
 | `geminiKey` | `GEMINI_API_KEY` |
 | `openrouterKey` | `OPENROUTER_API_KEY` |
+| `groqKey` | `GROQ_API_KEY` |
 
 Save a key permanently (shared with desktop app):
 ```bash
@@ -387,7 +400,11 @@ The CLI writes a full JSON result to stdout on completion. Structure:
   "startedAt": 1234567890,
   "finishedAt": 1234567899,
   "durationMs": 9000,
+  "activeDurationMs": 9000,
   "stopReason": "generations",
+  "testSet": [
+    { "id": "t1", "name": "Extraction", "mode": "llm_grade", "holdout": false }
+  ],
   "totals": { "tokensPrompt": 0, "tokensCompletion": 0, "usd": 0.0, "calls": 0 },
   "cacheHits": 0,
   "best": {
@@ -418,4 +435,20 @@ The CLI writes a full JSON result to stdout on completion. Structure:
 }
 ```
 
-Use `--output results.json` to write to file, or pipe: `npm run cli -- --config c.json 2>/dev/null > results.json`
+Use `--output results.json` to write to file, or pipe: `npm run --silent cli -- --config c.json 2>/dev/null > results.json` (the `--silent` keeps npm's banner off stdout).
+
+**`stopReason`** is one of:
+
+| Value | Meaning |
+|---|---|
+| `target` | `targetFitness` was reached — the quality bar was actually hit |
+| `generations` | `maxGenerations` was reached; the ordinary end of a run |
+| `budget` | `budgetUSD` was reached — the run was **cut short** |
+| `time` | `timeLimitMs` was reached — the run was **cut short** |
+| `manual` | Stopped by the user |
+| `exhausted` | No candidates left to evaluate |
+| `error` | Stopped by an unrecoverable error |
+
+Branch on `target` only when you mean "hit the quality bar"; an ordinary successful run reports `generations`.
+
+**`testSet`** maps each test `id` to its name, mode and holdout flag, so `tests[].testId` inside `generations` resolves without re-reading the config. **`activeDurationMs`** is the time this process spent working — on a `--resume` it excludes the downtime that `durationMs` includes.

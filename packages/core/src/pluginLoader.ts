@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import type { PluginManifest, OperatorPlugin, ProviderPlugin } from './types.js';
-import { registerOperator, registerProvider } from './registry.js';
+import { registerOperator, registerProvider, unregisterOperator, unregisterProvider } from './registry.js';
 
 export interface LoadPluginsOptions {
   dirs?: string[];
@@ -47,6 +47,30 @@ function validateProvider(p: any): asserts p is ProviderPlugin {
   if (typeof p.adapter.call !== 'function') throw new Error(`provider '${p.adapter.name}' adapter missing call() function`);
 }
 
+/** How long a plugin's module body may take to evaluate before we give up. */
+const IMPORT_TIMEOUT_MS = 10_000;
+
+/**
+ * A plugin's top-level code runs during import. A module that never settles —
+ * the realistic case being a provider plugin that pings a local server on a
+ * dead socket — left loadPlugins pending forever. In the desktop app that runs
+ * before createWindow(), so the user got no window, no error, and no way to
+ * reach Settings to disable the offending plugin. A throw was already handled;
+ * a hang was not.
+ */
+async function importWithTimeout(file: string): Promise<any> {
+  let timer: NodeJS.Timeout;
+  return Promise.race([
+    import(pathToFileURL(file).href),
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`plugin did not finish loading within ${IMPORT_TIMEOUT_MS}ms (top-level code may be blocking)`)),
+        IMPORT_TIMEOUT_MS,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 export async function loadPlugins(opts: LoadPluginsOptions): Promise<PluginManifest[]> {
   const files = [
     ...(opts.dirs ?? []).flatMap(discover),
@@ -54,12 +78,13 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<PluginManif
   ];
   const disabled = new Set(opts.disabled ?? []);
   const manifests: PluginManifest[] = [];
+  const seenNames = new Map<string, string>();
 
   for (const file of files) {
     const manifest: PluginManifest = { name: path.basename(file), source: file, operators: [], providers: [] };
     manifests.push(manifest);
     try {
-      const mod = await import(pathToFileURL(file).href);
+      const mod = await importWithTimeout(file);
       const plugin = mod.default;
       if (!plugin || typeof plugin !== 'object' || typeof plugin.name !== 'string' || !plugin.name) {
         throw new Error('default export must be an object with a string "name"');
@@ -72,22 +97,42 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<PluginManif
         continue;
       }
 
+      // Two plugins sharing a name both loaded, and the Settings toggle (keyed
+      // by name) then disabled or enabled both at once.
+      const firstSeen = seenNames.get(plugin.name);
+      if (firstSeen) {
+        throw new Error(`plugin name '${plugin.name}' is already registered (loaded from ${firstSeen})`);
+      }
+
       if (plugin.operators !== undefined && !Array.isArray(plugin.operators)) throw new Error('"operators" must be an array');
       if (plugin.providers !== undefined && !Array.isArray(plugin.providers)) throw new Error('"providers" must be an array');
 
+      // Validate the WHOLE plugin before registering any of it. Registering as
+      // we validated left a rejected plugin half-live: the manifest reported an
+      // error while its earlier operators stayed callable, contradicting the
+      // "contributes nothing" contract in docs/plugins.md.
+      for (const op of plugin.operators ?? []) validateOperator(op);
+      for (const prov of plugin.providers ?? []) validateProvider(prov);
+
       for (const op of plugin.operators ?? []) {
-        validateOperator(op);
         registerOperator(op);
         manifest.operators.push(op.name);
       }
       for (const prov of plugin.providers ?? []) {
-        validateProvider(prov);
         registerProvider(prov);
         manifest.providers.push(prov.adapter.name);
       }
+      seenNames.set(plugin.name, file);
       console.log(`[Plugins] Loaded '${manifest.name}' (${manifest.operators.length} operators, ${manifest.providers.length} providers) from ${file}`);
     } catch (error) {
+      // Roll back whatever this plugin managed to register before it failed —
+      // registerOperator/registerProvider still throw on name collisions and
+      // invalid model prices, which pre-validation cannot see.
+      for (const name of manifest.operators) unregisterOperator(name);
+      for (const id of manifest.providers) unregisterProvider(id);
       manifest.error = error instanceof Error ? error.message : String(error);
+      manifest.operators = [];
+      manifest.providers = [];
       console.error(`[Plugins] Failed to load ${file}: ${manifest.error}`);
     }
   }

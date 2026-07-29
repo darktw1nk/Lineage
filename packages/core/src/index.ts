@@ -39,6 +39,7 @@ export { isEvaluationActive } from './engine/evaluator_v2.js';
 export { scoreJsonSchema, scoreToolCall } from './engine/structured.js';
 export { estimateRunCost, COST_LABELS } from './engine/estimate.js';
 export type { CostEstimate } from './engine/estimate.js';
+export { selectChampion } from './engine/champion.js';
 export { runPairwisePlayoff } from './engine/pairwise.js';
 export type { PlayoffOptions, PlayoffResult } from './engine/pairwise.js';
 export type { LoadPluginsOptions } from './pluginLoader.js';

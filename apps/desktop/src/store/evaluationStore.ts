@@ -28,6 +28,7 @@ interface EvaluationStore {
   setHoldout: (evalId: UUID, holdout: EvaluationRun['holdout']) => void;
   addPlayoff: (evalId: UUID, playoff: { generation: number; ranking: UUID[] }) => void;
   updateStatus: (evalId: UUID, status: string, totalPausedMs?: number, pausedAt?: number) => void;
+  setStopReason: (evalId: UUID, reason: string) => void;
   setLoading: (evalId: UUID, isLoading: boolean) => void;
   
   // Subscription management
@@ -186,17 +187,35 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
     set((state) => {
       const evaluation = state.evaluations.get(evalId);
       if (!evaluation) return state;
-      
+
       const newEvaluations = new Map(state.evaluations);
       const updated = { ...evaluation, status: status as any };
       if (totalPausedMs !== undefined) {
         updated.totalPausedMs = totalPausedMs;
       }
+      // A terminal status always clears pausedAt, and 'running' means resumed —
+      // the engine sends pausedAt: undefined to say "clear it", which a plain
+      // !== undefined check silently ignored, leaving a stale timestamp.
       if (pausedAt !== undefined) {
         updated.pausedAt = pausedAt;
+      } else if (status === 'running' || status === 'finished' || status === 'stopped') {
+        updated.pausedAt = undefined;
+      }
+      if (status === 'finished' && updated.finishedAt === undefined) {
+        updated.finishedAt = Date.now();
       }
       newEvaluations.set(evalId, updated);
-      
+
+      return { evaluations: newEvaluations };
+    });
+  },
+
+  setStopReason: (evalId, reason) => {
+    set((state) => {
+      const evaluation = state.evaluations.get(evalId);
+      if (!evaluation) return state;
+      const newEvaluations = new Map(state.evaluations);
+      newEvaluations.set(evalId, { ...evaluation, stopReason: reason as any });
       return { evaluations: newEvaluations };
     });
   },
@@ -234,6 +253,13 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       switch (data.type) {
         case 'status':
           store.updateStatus(evalId, data.status, data.totalPausedMs, data.pausedAt);
+          break;
+
+        case 'stop':
+          // Why the run ended (budget/time/target/manual/...). Without this the
+          // live UI showed a plain "Finished" and only revealed the real reason
+          // after an app restart re-read run_json.
+          store.setStopReason(evalId, data.reason);
           break;
           
         case 'node_created':

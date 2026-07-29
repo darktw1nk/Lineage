@@ -27,6 +27,17 @@ console.info = toStderr;
 console.warn = toStderr;
 console.debug = toStderr;
 
+/**
+ * Write a command's actual RESULT to stdout.
+ *
+ * Redirecting console.* above is about engine chatter, but it was applied
+ * process-wide, so commands whose output IS the payload — `--list-models`,
+ * `--sync-models`, `--set-key` — wrote zero bytes to stdout. An agent following
+ * the documented "run --list-models first" step and capturing stdout saw
+ * nothing at all.
+ */
+const emit = (line = '') => { process.stdout.write(line + '\n'); };
+
 const VALID_PROVIDERS: Provider[] = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq'];
 
 // ---------------------------------------------------------------------------
@@ -238,7 +249,7 @@ function parseArgs(argv: string[]): {
 async function handleSetKey(provider: Provider, key: string): Promise<void> {
   saveApiKey(provider, key);
   const masked = key.length > 4 ? '***' + key.slice(-4) : '****';
-  console.log(`Saved ${provider} key (${masked})`);
+  emit(`Saved ${provider} key (${masked})`);
 }
 
 async function handleSyncModels(dbPath?: string): Promise<void> {
@@ -274,14 +285,14 @@ async function handleSyncModels(dbPath?: string): Promise<void> {
   });
   insertMany();
 
-  console.log(`Synced ${models.length} models from OpenRouter`);
+  emit(`Synced ${models.length} models from OpenRouter`);
 
   const { closeDatabase } = await import('@promptengine/core');
   closeDatabase();
 }
 
 async function handleListModels(dbPath?: string): Promise<void> {
-  await initCliDatabase(dbPath);
+  await initCliDatabase(dbPath, { readOnly: true });
 
   const { getDatabase } = await import('@promptengine/core');
   const db = getDatabase();
@@ -298,22 +309,24 @@ async function handleListModels(dbPath?: string): Promise<void> {
   }>;
 
   if (rows.length === 0) {
-    console.log('No models found. Run --sync-models to fetch from OpenRouter.');
+    emit('No models found. Run --sync-models to fetch from OpenRouter.');
     const { closeDatabase } = await import('@promptengine/core');
     closeDatabase();
     return;
   }
 
-  console.log(`\n${'Provider'.padEnd(12)} ${'Model'.padEnd(45)} ${'Prompt/1k'.padEnd(12)} Completion/1k`);
-  console.log('-'.repeat(85));
+  emit();
+  emit(`${'Provider'.padEnd(12)} ${'Model'.padEnd(45)} ${'Prompt/1k'.padEnd(12)} Completion/1k`);
+  emit('-'.repeat(85));
 
   for (const row of rows) {
-    console.log(
+    emit(
       `${row.provider.padEnd(12)} ${row.model.padEnd(45)} $${row.prompt_usd_per_1k.toFixed(6).padEnd(11)} $${row.completion_usd_per_1k.toFixed(6)}`
     );
   }
 
-  console.log(`\nTotal: ${rows.length} models`);
+  emit();
+  emit(`Total: ${rows.length} models`);
 
   const { closeDatabase } = await import('@promptengine/core');
   closeDatabase();
@@ -377,11 +390,17 @@ async function emitOutputs(
   outputPath?: string,
   reportArg?: string,
 ): Promise<void> {
-  // Optionally write to output file
+  // Optionally write to output file. A bad path must NOT change the exit code:
+  // the run already completed and its JSON already reached stdout, so throwing
+  // here turned a good, paid-for run into a CI failure — and skipped the report.
   if (outputPath) {
-    const fsMod = await import('fs');
-    fsMod.writeFileSync(outputPath, JSON.stringify(result, null, 2));
-    process.stderr.write(`\nResults written to ${outputPath}\n`);
+    try {
+      const fsMod = await import('fs');
+      fsMod.writeFileSync(outputPath, JSON.stringify(result, null, 2));
+      process.stderr.write(`\nResults written to ${outputPath}\n`);
+    } catch (error) {
+      process.stderr.write(`\nWarning: could not write results to ${outputPath}: ${error instanceof Error ? error.message : error}\n`);
+    }
   }
 
   // Markdown report: --report none skips it; --report <path> writes exactly there;
@@ -420,12 +439,16 @@ async function emitOutputs(
   }
 }
 
-async function handleEstimate(configPath: string, dbPath?: string, seedOverride?: number): Promise<void> {
+async function handleEstimate(configPath: string, dbPath?: string, seedOverride?: number, pluginDirs: string[] = []): Promise<void> {
   const cliConfig = loadCliConfig(configPath);
   installStoreShim(extractConfigKeys(cliConfig), cliConfig.systemPrompts);
-  await initCliDatabase(dbPath);
+  await initCliDatabase(dbPath, { readOnly: true });
   const pathMod = await import('path');
   const configDir = pathMod.dirname(pathMod.resolve(configPath));
+  // Plugin providers must be registered before validation, or estimating a
+  // config that runs fine fails with 'Unknown provider "…"'.
+  const { loadCliPlugins } = await import('./plugins.js');
+  await loadCliPlugins({ configDir, configPlugins: cliConfig.plugins ?? [], flagDirs: pluginDirs });
   const evalConfig = toEvaluationConfig(cliConfig, configDir);
   if (seedOverride !== undefined) {
     // Keep the preview faithful: the seed influences the holdout partition
@@ -550,10 +573,13 @@ async function main(): Promise<void> {
       console.error('--estimate requires --config');
       process.exit(1);
     }
-    if (args.output || args.report || args.pluginDirs.length > 0) {
-      process.stderr.write('note: --estimate is a dry run — --output/--report/--plugins are ignored\n');
+    if (args.output || args.report) {
+      process.stderr.write('note: --estimate is a dry run — --output/--report are ignored\n');
     }
-    await handleEstimate(args.config, args.db, args.seed);
+    if (args.resume) {
+      process.stderr.write('note: --resume is ignored with --estimate (the estimate describes a fresh run of --config)\n');
+    }
+    await handleEstimate(args.config, args.db, args.seed, args.pluginDirs);
     return;
   }
 

@@ -7,8 +7,8 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev": "vite --mode renderer-only",
+    "electron:dev": "vite",
     "build": "vite build && electron-builder",
     "build:dev": "vite build",
     "test": "vitest run",

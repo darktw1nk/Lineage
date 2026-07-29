@@ -19,7 +19,7 @@ import type {
 
 type HoldoutResult = NonNullable<EvaluationRun['holdout']>;
 import { createCliStore } from './store.js';
-import { setStore } from '@promptengine/core';
+import { setStore, selectChampion } from '@promptengine/core';
 import * as display from './display.js';
 
 // ---------------------------------------------------------------------------
@@ -49,9 +49,14 @@ export interface EvolutionResult {
   configName: string;
   startedAt: number;
   finishedAt: number;
+  /** Wall-clock from startedAt. On a resumed run this includes the downtime. */
   durationMs: number;
+  /** Time this process actually spent working — the number to quote on a resume. */
+  activeDurationMs: number;
   stopReason?: string;
   error?: string;
+  /** id → name/mode for every configured test, so tests[].testId resolves from the output alone. */
+  testSet: Array<{ id: UUID; name: string; mode: string; holdout: boolean }>;
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
   cacheHits: number;
   best: {
@@ -129,6 +134,10 @@ function buildResult(
   run: EvaluationRun,
   collector: RunCollector,
   finishedAt: number,
+  // When this process started work. Differs from run.startedAt on a resume,
+  // where the wall-clock span would otherwise report an overnight gap as
+  // "Duration: 8h 40m" for ten minutes of actual work.
+  processStartedAt: number,
 ): EvolutionResult {
   // Sort generations by number
   const sortedGens = [...collector.generations.entries()].sort((a, b) => a[0] - b[0]);
@@ -148,14 +157,21 @@ function buildResult(
     })),
   }));
 
-  // Champion: latest playoff winner when playoffs ran, else best-by-fitness
-  let best = collector.bestNode;
-  const lastPlayoff = collector.playoffs[collector.playoffs.length - 1];
-  if (lastPlayoff) {
-    for (const nodesMap of collector.generations.values()) {
-      const winner = nodesMap.get(lastPlayoff.ranking[0]);
-      if (winner) { best = winner; break; }
-    }
+  // Champion: same rule the engine's holdout pass uses — a playoff winner only
+  // counts when its playoff covers the newest evaluated generation.
+  const finishedNodes = sortedGens.flatMap(([gen, nodesMap]) =>
+    [...nodesMap.values()]
+      .filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
+      .map(n => ({ node: n, generation: gen })),
+  );
+  const choice = selectChampion(
+    finishedNodes.map(f => ({ id: f.node.id, generation: f.generation, metrics: f.node.metrics, node: f.node })),
+    collector.playoffs,
+    entry => entry.generation,
+  );
+  const best = choice.champion?.node ?? collector.bestNode;
+  if (choice.staleplayoffIgnored) {
+    console.warn('[CLI] The last pairwise playoff predates the newest evaluated generation — ranking by fitness instead');
   }
 
   return {
@@ -165,8 +181,15 @@ function buildResult(
     startedAt: run.startedAt,
     finishedAt,
     durationMs: finishedAt - run.startedAt,
+    activeDurationMs: finishedAt - processStartedAt,
     stopReason: collector.stopReason ?? undefined,
     error: collector.error ?? undefined,
+    testSet: config.testSet.map(t => ({
+      id: t.id,
+      name: t.name ?? '',
+      mode: t.mode ?? 'llm_grade',
+      holdout: t.holdout === true,
+    })),
     totals: { ...collector.totals },
     cacheHits: collector.cacheHits,
     holdout: collector.holdout ?? undefined,
@@ -208,6 +231,7 @@ export async function runEvolution(
   // Reset display state from any previous run
   display.resetState();
 
+  const processStartedAt = Date.now();
   const collector = createCollector();
 
   // Set up the sendUpdate hook before importing the evaluator
@@ -383,6 +407,10 @@ export async function runEvolution(
     db.prepare(
       'INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version) VALUES (?, ?, ?, ?, ?)',
     ).run(run.id, run.configId, run.startedAt, JSON.stringify(run), run.version);
+    // Durable before the first paid call: a crash inside the debounce window
+    // left no run row at all, so `--resume <runId>` answered "Run not found"
+    // for a run that had already spent money.
+    db.flush();
   } else {
     const finishedCount = run.generations.flat().filter((n) => n.status === 'finished').length;
     const from = run.generations.length > 0 ? `generation ${run.generations.length - 1}` : 'the start';
@@ -403,14 +431,14 @@ export async function runEvolution(
     const finishedAt = Date.now();
     collector.error = err.message ?? String(err);
     display.onError(collector.error!);
-    return buildResult(config, run, collector, finishedAt);
+    return buildResult(config, run, collector, finishedAt, processStartedAt);
   }
 
   // Wait for completion (resolves on 'finished' status)
   await finishedPromise;
 
   const finishedAt = Date.now();
-  const result = buildResult(config, run, collector, finishedAt);
+  const result = buildResult(config, run, collector, finishedAt, processStartedAt);
 
   if (result.holdout?.seed && result.holdout?.champion) {
     process.stderr.write(`Generalization (unseen tests): seed ${result.holdout.seed.score.toFixed(2)} → champion ${result.holdout.champion.score.toFixed(2)}\n`);

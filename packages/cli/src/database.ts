@@ -50,13 +50,16 @@ function getElectronDbPath(): string | null {
 
 /**
  * Initialize the database for CLI use.
- * Imports initializeDatabase from the engine and passes the resolved path.
+ *
+ * Pass readOnly for commands that only read the shared catalog
+ * (`--list-models`, `--estimate`): they take no lock, so having the desktop app
+ * open does not turn them into a hard failure.
  */
-export async function initCliDatabase(explicitPath?: string): Promise<void> {
+export async function initCliDatabase(explicitPath?: string, options: { readOnly?: boolean } = {}): Promise<void> {
   const dbPath = resolveDbPath(explicitPath);
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   // Import the engine's database init — it accepts an optional dbPath
   const { initializeDatabase } = await import('@promptengine/core');
-  await initializeDatabase(dbPath);
+  await initializeDatabase(dbPath, { readOnly: options.readOnly });
 }

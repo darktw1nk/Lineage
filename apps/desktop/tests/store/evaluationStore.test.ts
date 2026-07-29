@@ -230,4 +230,36 @@ describe('evaluationStore subscriptions', () => {
     expect(unsubscribeSpies.get('run-2')).toHaveBeenCalledTimes(1);
     expect(store().subscriptions.size).toBe(0);
   });
+
+  it('records WHY a run stopped, not just that it finished', () => {
+    // The switch had no 'stop' case, so the reason was logged as an unknown
+    // event and dropped: a run cut short by the budget cap showed a plain
+    // "Finished" until the app was restarted and re-read run_json.
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().subscribe('run-1');
+
+    const cb = capturedCallbacks.get('run-1')!;
+    cb({}, { type: 'stop', reason: 'budget' });
+    cb({}, { type: 'status', status: 'finished' });
+
+    const run = store().evaluations.get('run-1')!;
+    expect(run.stopReason).toBe('budget');
+    expect(run.status).toBe('finished');
+    expect(run.finishedAt).toBeTypeOf('number');
+  });
+
+  it('clears pausedAt on resume even though the engine sends it as undefined', () => {
+    // `pausedAt !== undefined` ignored the engine's explicit "clear it" signal,
+    // leaving a stale timestamp that kept inflating the paused-time display.
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().subscribe('run-1');
+
+    const cb = capturedCallbacks.get('run-1')!;
+    cb({}, { type: 'status', status: 'paused', totalPausedMs: 0, pausedAt: 1000 });
+    expect(store().evaluations.get('run-1')!.pausedAt).toBe(1000);
+
+    cb({}, { type: 'status', status: 'running', totalPausedMs: 500, pausedAt: undefined });
+    expect(store().evaluations.get('run-1')!.pausedAt).toBeUndefined();
+    expect(store().evaluations.get('run-1')!.totalPausedMs).toBe(500);
+  });
 });

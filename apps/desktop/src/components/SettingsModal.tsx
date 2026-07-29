@@ -360,37 +360,33 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
             {/* Table Body */}
             <div className="max-h-80 overflow-y-auto">
-              {getSortedCosts(localCosts, sortColumn, sortDirection).map((cost, idx) => {
-                const originalIdx = localCosts.findIndex(
-                  c => c.provider === cost.provider && c.model === cost.model
-                );
+              {getSortedCosts(localCosts, sortColumn, sortDirection).map(({ cost, index: originalIdx }) => {
+                // Replace the row rather than mutating it in place: the old
+                // `[...localCosts]` was a shallow copy, so assigning through it
+                // edited the very objects React Query holds in its cache.
+                const patchRow = (patch: Partial<ModelCostEntry>) => {
+                  setLocalCosts(prev => prev.map((row, i) => (i === originalIdx ? { ...row, ...patch } : row)));
+                };
                 return (
-                  <div key={`${cost.provider}-${cost.model}-${idx}`} className="grid grid-cols-12 gap-2 items-center px-3 py-2 border-b hover:bg-muted/50">
+                  <div key={originalIdx} className="grid grid-cols-12 gap-2 items-center px-3 py-2 border-b hover:bg-muted/50">
                     <div className="col-span-3">
                       <select
                         className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm h-9"
                         value={cost.provider}
-                        onChange={(e) => {
-                          const newCosts = [...localCosts];
-                          newCosts[originalIdx].provider = e.target.value as any;
-                          setLocalCosts(newCosts);
-                        }}
+                        onChange={(e) => patchRow({ provider: e.target.value as any })}
                       >
                         <option value="openai">OpenAI</option>
                         <option value="anthropic">Anthropic</option>
                         <option value="gemini">Gemini</option>
                         <option value="openrouter">OpenRouter</option>
+                        <option value="groq">Groq</option>
                       </select>
                     </div>
                     <div className="col-span-3">
                       <Input
                         className="h-9"
                         value={cost.model}
-                        onChange={(e) => {
-                          const newCosts = [...localCosts];
-                          newCosts[originalIdx].model = e.target.value;
-                          setLocalCosts(newCosts);
-                        }}
+                        onChange={(e) => patchRow({ model: e.target.value })}
                       />
                     </div>
                     <div className="col-span-2">
@@ -399,11 +395,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         type="number"
                         step="0.01"
                         value={(cost.promptUSDper1k * 1000).toFixed(2)}
-                        onChange={(e) => {
-                          const newCosts = [...localCosts];
-                          newCosts[originalIdx].promptUSDper1k = (parseFloat(e.target.value) || 0) / 1000;
-                          setLocalCosts(newCosts);
-                        }}
+                        onChange={(e) => patchRow({ promptUSDper1k: (parseFloat(e.target.value) || 0) / 1000 })}
                       />
                     </div>
                     <div className="col-span-3">
@@ -412,11 +404,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         type="number"
                         step="0.01"
                         value={(cost.completionUSDper1k * 1000).toFixed(2)}
-                        onChange={(e) => {
-                          const newCosts = [...localCosts];
-                          newCosts[originalIdx].completionUSDper1k = (parseFloat(e.target.value) || 0) / 1000;
-                          setLocalCosts(newCosts);
-                        }}
+                        onChange={(e) => patchRow({ completionUSDper1k: (parseFloat(e.target.value) || 0) / 1000 })}
                       />
                     </div>
                     <div className="col-span-1 flex justify-center">
@@ -424,10 +412,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         variant="ghost"
                         size="icon"
                         className="h-9 w-9"
-                        onClick={() => {
-                          const newCosts = localCosts.filter((_, i) => i !== originalIdx);
-                          setLocalCosts(newCosts);
-                        }}
+                        onClick={() => setLocalCosts(prev => prev.filter((_, i) => i !== originalIdx))}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
@@ -536,12 +521,20 @@ function FilterableModelSelect({
 }
 
 // Helper function to sort costs
+/**
+ * Sort for display while keeping each row's TRUE index in localCosts.
+ *
+ * Recovering the index afterwards with findIndex(provider && model) aliased any
+ * two rows that matched — and "Add row" creates rows with an empty model, so
+ * adding two and editing the second silently edited the first, while deleting
+ * the second deleted the first and left the second on screen.
+ */
 function getSortedCosts(
   costs: ModelCostEntry[],
   column: SortColumn,
   direction: SortDirection
-): ModelCostEntry[] {
-  const sorted = [...costs].sort((a, b) => {
+): Array<{ cost: ModelCostEntry; index: number }> {
+  const sorted = costs.map((cost, index) => ({ cost, index })).sort(({ cost: a }, { cost: b }) => {
     let aVal: string | number;
     let bVal: string | number;
 

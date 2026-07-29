@@ -447,9 +447,12 @@ function FitnessBreakdown({ node, config, evaluation }: { node: CandidateNode; c
 
   // Cost
   if (node.metrics.costUSD !== undefined && normalizedWeights.cost > 0 && config.fitness.costNorm) {
-    const maxCostValue = config.fitness.costNorm.mode === 'relative' && maxCost !== undefined
-      ? maxCost
-      : config.fitness.costNorm.maxUSDPerCall || 0.1;
+    // Must match packages/core/src/engine/fitness.ts: with every node costing
+    // $0 the dynamic max is 0, and 0/0 rendered the whole breakdown as NaN.
+    const configuredMaxCost = config.fitness.costNorm.maxUSDPerCall;
+    const maxCostValue =
+      (config.fitness.costNorm.mode === 'relative' && maxCost !== undefined && maxCost > 0 ? maxCost : undefined) ??
+      (Number.isFinite(configuredMaxCost) && configuredMaxCost > 0 ? configuredMaxCost : 0.1);
     const costNorm = Math.min(1, node.metrics.costUSD / maxCostValue);
     const costScore = (1 - costNorm) * 10;
     
@@ -476,9 +479,11 @@ function FitnessBreakdown({ node, config, evaluation }: { node: CandidateNode; c
 
   // Latency
   if (node.metrics.latencyMs !== undefined && normalizedWeights.latency > 0 && config.fitness.latencyNorm) {
-    const maxLatencyValue = config.fitness.latencyNorm.mode === 'relative' && maxLatency !== undefined
-      ? maxLatency
-      : config.fitness.latencyNorm.maxMs || 30000;
+    // Same guard as maxCostValue above.
+    const configuredMaxLatency = config.fitness.latencyNorm.maxMs;
+    const maxLatencyValue =
+      (config.fitness.latencyNorm.mode === 'relative' && maxLatency !== undefined && maxLatency > 0 ? maxLatency : undefined) ??
+      (Number.isFinite(configuredMaxLatency) && configuredMaxLatency > 0 ? configuredMaxLatency : 30000);
     const latencyNorm = Math.min(1, node.metrics.latencyMs / maxLatencyValue);
     const latencyScore = (1 - latencyNorm) * 10;
     
