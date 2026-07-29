@@ -12,10 +12,14 @@
  */
 
 import { format } from 'node:util';
+import fsSync from 'node:fs';
 import { loadCliConfig, toEvaluationConfig, extractConfigKeys } from './config.js';
 import { installStoreShim } from './engine.js';
 import { resolveApiKey, saveApiKey } from './store.js';
-import { initCliDatabase } from './database.js';
+import { initCliDatabase, resolveDbPath } from './database.js';
+
+/** The database this process locked, so the exit handler can release it. */
+let lastResolvedDbPath: string | null = null;
 import type { Provider, EvaluationConfig } from '@promptengine/core';
 import type { CliConfig } from './config.js';
 
@@ -69,13 +73,21 @@ async function cleanup(signal: string): Promise<void> {
 
 process.on('SIGINT', () => { cleanup('SIGINT'); });
 process.on('SIGTERM', () => { cleanup('SIGTERM'); });
+// Last-resort lock release. Several paths call process.exit(1) AFTER
+// initCliDatabase has taken the lock — an unresumable run, a missing provider,
+// a validation failure — and every one of them used to leave the .lock file
+// behind, manufacturing exactly the stale lock the next invocation has to
+// reclaim. The lock file is pid-stamped, so releasing it here is safe: only the
+// owner deletes it.
 process.on('exit', () => {
-  if (!cleanupDone) {
-    try {
-      // Synchronous import not possible here — rely on closeDatabase having been called
-      // by the command handler. This is a last-resort guard.
-    } catch { /* best-effort */ }
-  }
+  if (cleanupDone) return;
+  try {
+    const dbPath = lastResolvedDbPath;
+    if (!dbPath) return;
+    const lock = `${dbPath}.lock`;
+    const holder = JSON.parse(fsSync.readFileSync(lock, 'utf-8'));
+    if (holder?.pid === process.pid) fsSync.rmSync(lock, { force: true });
+  } catch { /* no lock, not ours, or already gone */ }
 });
 
 // ---------------------------------------------------------------------------
@@ -267,6 +279,7 @@ async function handleSetKey(provider: Provider, key: string): Promise<void> {
 
 async function handleSyncModels(dbPath?: string): Promise<void> {
   // Initialize DB first
+  lastResolvedDbPath = resolveDbPath(dbPath);
   await initCliDatabase(dbPath);
 
   // Resolve OpenRouter key
@@ -305,6 +318,7 @@ async function handleSyncModels(dbPath?: string): Promise<void> {
 }
 
 async function handleListModels(dbPath?: string): Promise<void> {
+  lastResolvedDbPath = null; // read-only opens take no lock
   await initCliDatabase(dbPath, { readOnly: true });
 
   const { getDatabase } = await import('@promptengine/core');
@@ -363,6 +377,7 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
   }
 
   // Initialize database
+  lastResolvedDbPath = resolveDbPath(dbPath);
   await initCliDatabase(dbPath);
 
   // Verify we have API keys for all required providers
@@ -455,6 +470,7 @@ async function emitOutputs(
 async function handleEstimate(configPath: string, dbPath?: string, seedOverride?: number, pluginDirs: string[] = []): Promise<void> {
   const cliConfig = loadCliConfig(configPath);
   installStoreShim(extractConfigKeys(cliConfig), cliConfig.systemPrompts);
+  lastResolvedDbPath = null; // read-only opens take no lock
   await initCliDatabase(dbPath, { readOnly: true });
   const pathMod = await import('path');
   const configDir = pathMod.dirname(pathMod.resolve(configPath));
@@ -495,6 +511,7 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
     await loadCliPlugins({ configDir, configPlugins: cliConfig?.plugins ?? [], flagDirs: pluginDirs });
   }
 
+  lastResolvedDbPath = resolveDbPath(dbPath);
   await initCliDatabase(dbPath);
   const { getDatabase } = await import('@promptengine/core');
   const db = getDatabase();

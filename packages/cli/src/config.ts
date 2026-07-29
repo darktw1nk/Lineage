@@ -242,7 +242,18 @@ export function validateCliConfig(config: CliConfig): void {
   positiveInt(config.callTimeoutMs, 'callTimeoutMs');
   positiveInt(config.timeLimitMs, 'timeLimitMs');
   nonNegativeNumber(config.budget, 'budget');
-  nonNegativeNumber(config.targetFitness, 'targetFitness');
+  // targetFitness 0 is met by literally every candidate, so the run stops after
+  // one generation — never what anyone means. budget 0 IS meaningful ("spend
+  // nothing"), which is why only this one is rejected.
+  if (config.targetFitness !== undefined) {
+    nonNegativeNumber(config.targetFitness, 'targetFitness');
+    if (config.targetFitness <= 0) {
+      throw new Error('"targetFitness" must be greater than 0 — every candidate already meets 0, so the run would stop after one generation');
+    }
+    if (config.targetFitness > 10) {
+      throw new Error(`"targetFitness" must be <= 10 (fitness is scored 0-10); got ${config.targetFitness}`);
+    }
+  }
   positiveInt(config.retries, 'retries', 0);
   if (config.seed !== undefined && (typeof config.seed !== 'number' || !Number.isFinite(config.seed))) {
     throw new Error(`"seed" must be a number (got ${JSON.stringify(config.seed)})`);

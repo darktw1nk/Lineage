@@ -43,6 +43,8 @@ interface EvaluationState {
   queue: CandidateNode[];
   inProgress: Set<UUID>;
   cache: Map<string, TestResult[]>;
+  /** Evaluations currently running, keyed the same way, so duplicates join rather than re-pay. */
+  inFlightEvaluations: Map<string, Promise<TestResult[]>>;
   lineageHistory: Map<UUID, { bestFitness: number; stagnantGenerations: number }>;
   operatorEffectiveness: Record<string, { totalDelta: number; count: number }>;
   fitnessTests: TestCase[];   // tests visible to evolution
@@ -172,8 +174,16 @@ export async function startEvaluation(
     console.warn(`[Evaluator] parallelLimit ${config.parallelLimit} resolved to ${globalLimit}`);
     config.parallelLimit = globalLimit;
   }
-  initGlobalSemaphore(globalLimit);
-  console.log(`[Evaluator] Global API limit: ${globalLimit}`);
+  // The semaphore is process-global and shared by every concurrent run, so a
+  // starting run must never LOWER the ceiling another run is already using.
+  // initGlobalSemaphore was last-writer-wins: starting a parallelLimit-1 run
+  // beside a parallelLimit-8 one dropped the big run to 1-way concurrency for
+  // the rest of its life, and nothing ever raised it back. Take the max of
+  // every live run instead; each run's own dispatch loop still honours its own
+  // parallelLimit, so this only stops cross-run interference.
+  const liveLimits = [...activeEvaluations.values()].map(s => s.config.parallelLimit || 1);
+  initGlobalSemaphore(Math.max(globalLimit, ...liveLimits));
+  console.log(`[Evaluator] Global API limit: ${Math.max(globalLimit, ...liveLimits)} (this run: ${globalLimit})`);
 
   // Budget enforcement is computed from catalogued prices, so an uncatalogued
   // model counts every call as $0 and the cap can never trip. That is CORRECT
@@ -253,6 +263,7 @@ export async function startEvaluation(
     queue: [],
     inProgress: new Set(),
     cache: new Map(),
+    inFlightEvaluations: new Map(),
     lineageHistory: new Map(),
     operatorEffectiveness: {},
     fitnessTests,
@@ -318,7 +329,7 @@ export async function startEvaluation(
     if (state.run.generations[0].some(n => n.status === 'pending')) {
       // Interrupted during initial fill — the fill path re-mutates pending nodes,
       // then queues gen 0 and starts the loop
-      mutatePopulationInBackground(runId, state);
+      mutatePopulationInBackground(runId, state).catch(err => onBackgroundFillCrash(runId, err));
     } else {
       state.queue = state.run.generations[state.currentGeneration].filter(n => n.status === 'awaiting');
       console.log(`[Evaluator] Resume queue: ${state.queue.length} nodes`);
@@ -355,7 +366,7 @@ export async function startEvaluation(
   console.log(`[Evaluator] All ${shellNodes.length} shell nodes sent to UI`);
 
   // Start background mutation (non-blocking)
-  mutatePopulationInBackground(runId, state);
+  mutatePopulationInBackground(runId, state).catch(err => onBackgroundFillCrash(runId, err));
   
   console.log(`[Evaluator] startEvaluation returning (mutation in background)`);
 }
@@ -410,6 +421,19 @@ async function mutatePopulationInBackground(
 
   const fillNode = async (node: CandidateNode) => {
     try {
+      // Stop means STOP. fillNode gated only on the budget, and fill nodes are
+      // never added to `inProgress` — which is the only thing finishEvaluation
+      // drains. So a Stop during the initial fill reported the run finished
+      // with 0 calls and then made 2x(initialSize-1) paid service calls with no
+      // UI left to interrupt them, and `eval:delete`'s drain exited on its first
+      // poll because isEvaluationActive had already gone false.
+      if (state.status === 'stopped' || state.status === 'pausing') {
+        node.status = 'awaiting';
+        node.changeLog = [{ label: 'CARRY', text: 'Run stopped before mutation' }];
+        sendUpdate(runId, { type: 'node_updated', node });
+        return;
+      }
+
       // The fill phase runs before the evaluation loop's first budget check —
       // without this gate, 2×(initialSize-1) service calls always execute in
       // full no matter how small the budget is.
@@ -530,6 +554,35 @@ async function mutatePopulationInBackground(
 /**
  * Main evaluation loop - Rolling queue implementation for maximum parallelism
  */
+/**
+ * Last-resort handler for the population fill.
+ *
+ * mutatePopulationInBackground is fire-and-forget, and two of its sendUpdate
+ * calls sit outside its own try/catch — so a host whose sendUpdate throws
+ * ("Object has been destroyed", which is exactly what webContents.send does on
+ * a closed window) produced an unhandled rejection. Node kills the process on
+ * those: a paid CLI run aborted mid-flight, or the Electron main process died.
+ * Its sibling startEvaluationLoop was given this guard; this one was missed.
+ */
+function onBackgroundFillCrash(runId: UUID, error: unknown): void {
+  console.error(`[Evaluator] Population fill crashed for ${runId.slice(0, 8)}:`, error);
+  const state = activeEvaluations.get(runId);
+  if (state) {
+    state.status = 'stopped';
+    state.run.status = 'stopped';
+    state.run.stopReason = 'error';
+    state.run.finishedAt = Date.now();
+    try { persistRun(state); } catch { /* nothing more we can do */ }
+    activeEvaluations.delete(runId);
+  }
+  try {
+    sendUpdate(runId, { type: 'error', message: `Population fill failed: ${error instanceof Error ? error.message : String(error)}` });
+    sendUpdate(runId, { type: 'status', status: 'stopped' });
+  } catch {
+    // The host's sendUpdate is what failed in the first place.
+  }
+}
+
 /**
  * Fire-and-forget entry point for the loop.
  *
@@ -961,10 +1014,35 @@ async function runTests(
     console.log(`[Evaluator] Cache hit for node ${node.id.slice(0, 8)}`);
     state.run.cacheHits++;
     sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
-    return state.cache.get(cacheKey)!;
+    // A COPY: handing back the stored array meant two nodes shared one mutable
+    // results object.
+    return state.cache.get(cacheKey)!.map(r => ({ ...r }));
   }
 
-  const results = await evaluatePromptOnTests(node.prompt, node.params, state.fitnessTests, state, runId);
+  // Register the in-flight evaluation BEFORE awaiting it, so siblings with an
+  // identical key wait for this call instead of making their own. The entry was
+  // only written after the await resolved, and the loop dispatches the whole
+  // batch in one tick — so every duplicate prompt in a generation missed and
+  // paid in full. Measured on an ordinary run: 6 candidate calls at
+  // parallelLimit 1 versus 18 at parallelLimit 6, +75% total spend for the same
+  // population. The default parallelLimit is 5.
+  let inFlight = state.inFlightEvaluations.get(cacheKey);
+  if (inFlight) {
+    console.log(`[Evaluator] Node ${node.id.slice(0, 8)} joining an identical in-flight evaluation`);
+    state.run.cacheHits++;
+    sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+    return (await inFlight).map(r => ({ ...r }));
+  }
+
+  inFlight = evaluatePromptOnTests(node.prompt, node.params, state.fitnessTests, state, runId);
+  state.inFlightEvaluations.set(cacheKey, inFlight);
+  let results: TestResult[];
+  try {
+    results = await inFlight;
+  } finally {
+    // Failures must not be cached, and must not leave joiners waiting forever.
+    state.inFlightEvaluations.delete(cacheKey);
+  }
 
   // Store in cache
   state.cache.set(cacheKey, results);

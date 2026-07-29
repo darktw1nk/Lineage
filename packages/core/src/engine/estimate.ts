@@ -83,8 +83,14 @@ export async function estimateRunCost(
   const judgePromptTok = candPromptTok + 400;
   const maxOut = Math.min(config.serviceModelMaxTokens || 20000, 1024);
 
-  const per = (p: Price, promptT: number, compT: number) =>
-    (promptT / 1000) * p.promptUSDper1k + (compT / 1000) * p.completionUSDper1k;
+  // Clamp like the accrual path does. A catalog row can still carry a negative
+  // price — an OpenRouter "-1" sentinel synced before that filter existed — and
+  // the preflight banner then quoted a NEGATIVE cost while the run itself
+  // correctly recorded $0.
+  const per = (p: Price, promptT: number, compT: number) => {
+    const usd = (promptT / 1000) * p.promptUSDper1k + (compT / 1000) * p.completionUSDper1k;
+    return Number.isFinite(usd) ? Math.max(0, usd) : 0;
+  };
 
   const breakdown: CostEstimate['breakdown'] = [];
   const add = (label: string, calls: number, lowPer: number, highPer: number) => {
