@@ -444,10 +444,14 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
  */
 export function extractConfigKeys(config: CliConfig): Record<string, string> {
   const keys: Record<string, string> = {};
-  if (config.openaiKey) keys.openaiKey = config.openaiKey;
-  if (config.anthropicKey) keys.anthropicKey = config.anthropicKey;
-  if (config.geminiKey) keys.geminiKey = config.geminiKey;
-  if (config.openrouterKey) keys.openrouterKey = config.openrouterKey;
-  if (config.groqKey) keys.groqKey = config.groqKey;
+  // ANY `<something>Key` field, not just the five built-ins. The docs and the
+  // missing-key error both tell users to put `"<provider>Key"` in the config,
+  // but a hardcoded list made that a silent no-op for every plugin provider —
+  // the advice named a field the loader never read.
+  for (const [field, value] of Object.entries(config)) {
+    if (/^[A-Za-z0-9_-]+Key$/.test(field) && typeof value === 'string' && value) {
+      keys[field] = value;
+    }
+  }
   return keys;
 }

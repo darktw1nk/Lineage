@@ -95,6 +95,9 @@ interface EvaluationState {
   resolvePriceProbe: (() => void) | null;
   /** Calls that threw. Their provider-side spend, if any, is unknowable here. */
   failedCalls: number;
+  /** Wall clock of the last per-node checkpoint, and what it cost — see maybeCheckpointNode. */
+  lastNodeCheckpointAt: number;
+  lastCheckpointCostMs: number;
 }
 
 // Active evaluations map
@@ -367,6 +370,8 @@ async function startEvaluationInner(
     priceProbe: null,
     resolvePriceProbe: null,
     failedCalls: 0,
+    lastNodeCheckpointAt: 0, // 0 => the first node always checkpoints
+    lastCheckpointCostMs: 0,
     stopRequested: false,
     loopRunning: false,
     // Restore accumulated paused time: hard-zeroing it on resume charges every
@@ -1108,7 +1113,7 @@ async function processNode(
     sendUpdate(runId, { type: 'node_updated', node });
   }
 
-  persistRun(state, false); // per-node: ride the adaptive debounce, not an fsync each time
+  maybeCheckpointNode(state); // self-throttling: see the function's comment
 }
 
 /**
@@ -2017,6 +2022,47 @@ function resumeAdjustedPausedMs(run: EvaluationRun, isResume: boolean): number {
  * in-memory row is updated either way, so a crash loses at most the debounce
  * window rather than a whole generation.
  */
+/**
+ * Fraction of wall-clock time the per-node checkpoint is allowed to consume.
+ * 1/20 = 5%. Checkpoint cost scales with the size of the whole run, so a fixed
+ * "every node" policy is O(nodes x runSize) — quadratic.
+ */
+const CHECKPOINT_DUTY_DIVISOR = 20;
+const MAX_NODE_CHECKPOINT_GAP_MS = 15_000;
+
+/**
+ * Checkpoint after a node, but not more often than the checkpoint can afford.
+ *
+ * `persistRun` does `JSON.stringify(state.run)` plus an UPDATE carrying that
+ * whole string, and `state.run` holds every node of every generation with every
+ * test output. Running it once per node therefore costs O(nodes x runSize) —
+ * measured on a 30-node x 20-generation run with 20 KB outputs, generation 19
+ * took 33.9 s of which 31.3 s (92%) was checkpointing, against 1.5 s for
+ * generation 0. Totals: 42.9 GB of JSON produced, 214 s inside sql.js, single
+ * longest synchronous block 2.9 s — and in Electron every one of those is a
+ * frozen main process.
+ *
+ * Self-tuning: measure how long a checkpoint takes and require that much x20 of
+ * elapsed time before the next one. Cheap runs (a few ms per checkpoint) still
+ * checkpoint on effectively every node; expensive ones back off. A crash loses
+ * at most the gap, which is the same class of loss the DB's save debounce
+ * already accepts — and generation boundaries, pauses and the final write all
+ * call persistRun directly and are never throttled.
+ */
+export function nodeCheckpointDue(now: number, lastAt: number, lastCostMs: number): boolean {
+  const required = Math.min(MAX_NODE_CHECKPOINT_GAP_MS, lastCostMs * CHECKPOINT_DUTY_DIVISOR);
+  return now - lastAt >= required;
+}
+
+function maybeCheckpointNode(state: EvaluationState): void {
+  if (!nodeCheckpointDue(Date.now(), state.lastNodeCheckpointAt, state.lastCheckpointCostMs)) return;
+
+  const startedAt = Date.now();
+  persistRun(state, false); // ride the DB's adaptive debounce, not an fsync each time
+  state.lastCheckpointCostMs = Date.now() - startedAt;
+  state.lastNodeCheckpointAt = Date.now();
+}
+
 function persistRun(state: EvaluationState, durable = true): void {
   try {
     state.run.lastCheckpointAt = Date.now();

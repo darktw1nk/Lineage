@@ -128,7 +128,10 @@ export function resolveApiKey(
   if (fromEnv) return fromEnv;
 
   // 2. CLI config file key
-  const configKey = CONFIG_KEY_MAP[provider];
+  // Same fallback shape as the env var above: a plugin provider "myprov" reads
+  // `myprovKey`. A lookup restricted to the five built-ins made the field the
+  // error message recommends do nothing at all for plugins.
+  const configKey = CONFIG_KEY_MAP[provider] ?? `${String(provider)}Key`;
   const fromConfig = cliConfigKeys && configKey ? clean(cliConfigKeys[configKey]) : null;
   if (fromConfig) return fromConfig;
 

@@ -255,7 +255,13 @@ async function startEvaluation(runId: string): Promise<void> {
     // only a console.error in the Logs panel, which is closed by default.
     const requiredProviders = new Set<string>(config.enabledModels.map(m => m.provider));
     requiredProviders.add(config.serviceModel.provider);
-    const missingKeys = [...requiredProviders].filter(p => !getApiKeySync(p));
+    // Only adapters that declare they need a key. A plugin provider may talk to
+    // a local server (the shipped Ollama example does) and need none.
+    const { getProviderAdapter } = await import('@promptengine/core');
+    const needsKey = (p: string) => {
+      try { return (getProviderAdapter(p as any) as any)?.requiresApiKey === true; } catch { return false; }
+    };
+    const missingKeys = [...requiredProviders].filter(p => needsKey(p) && !getApiKeySync(p));
     if (missingKeys.length > 0) {
       throw new Error(
         `No API key for ${missingKeys.join(', ')}. Open Settings → API Keys and add ${missingKeys.length > 1 ? 'them' : 'it'}, then start the run again.`,

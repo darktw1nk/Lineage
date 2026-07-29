@@ -5,7 +5,15 @@ import { withCause } from './retry.js';
 
 export abstract class BaseProviderAdapter implements ProviderAdapter {
   abstract name: Provider;
-  
+
+  /**
+   * Every adapter built on this base fetches a hosted API and cannot work
+   * without a key — call() throws below if one is missing, so hosts should say
+   * so up front rather than letting every node fail. Plugin adapters do NOT
+   * extend this class and default to not requiring one.
+   */
+  readonly requiresApiKey = true;
+
   abstract estimateTokens(input: string): { prompt: number; completion?: number };
   
   abstract callAPI(opts: {

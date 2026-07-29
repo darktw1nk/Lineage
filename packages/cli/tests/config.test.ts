@@ -330,6 +330,24 @@ describe('CLI Config - extractConfigKeys', () => {
     const keys = extractConfigKeys(MINIMAL_CONFIG);
     expect(Object.keys(keys)).toHaveLength(0);
   });
+
+  it('harvests a PLUGIN provider key, not just the five built-ins', () => {
+    // The docs and the missing-key error both tell users to put
+    // "<provider>Key" in the config, but a hardcoded five-field list made that
+    // a silent no-op for plugin providers: the advice named a field nothing
+    // read, and the run failed with "no API key found" for a key that was
+    // sitting right there in the config.
+    const keys = extractConfigKeys({ ...MINIMAL_CONFIG, ollamaKey: 'sk-plugin' } as any);
+    expect(keys.ollamaKey).toBe('sk-plugin');
+  });
+
+  it('does not harvest non-key fields that merely end in other text', () => {
+    const keys = extractConfigKeys({
+      ...MINIMAL_CONFIG, seedPrompt: 'x', monkey: 'not-a-key', Key: 'bare',
+    } as any);
+    expect(keys.monkey).toBeUndefined();
+    expect(keys.seedPrompt).toBeUndefined();
+  });
 });
 
 describe('CLI Config - loadCliConfig', () => {

@@ -227,6 +227,17 @@ export interface ToolDef {
 
 export interface ProviderAdapter {
   name: Provider;
+  /**
+   * Whether hosts should refuse to start a run without an API key for this
+   * provider. The five built-in adapters set it; a plugin provider opts in.
+   *
+   * Default is NO requirement, because a host cannot know a third-party
+   * provider's auth model — it may talk to a local server, read its own env
+   * var, or need nothing at all. Assuming a key was required refused to start
+   * any run using the shipped Ollama example, whose own header says "No API
+   * key needed", with `No API key found for provider: ollama`.
+   */
+  requiresApiKey?: boolean;
   estimateTokens(input: string): { prompt: number; completion?: number };
   call(opts: {
     model: string;

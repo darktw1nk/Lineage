@@ -17,6 +17,7 @@ import { loadCliConfig, toEvaluationConfig, extractConfigKeys } from './config.j
 import { installStoreShim } from './engine.js';
 import { resolveApiKey, saveApiKey } from './store.js';
 import { initCliDatabase, resolveDbPath } from './database.js';
+import { providerRequiresApiKey } from './providers.js';
 
 /** The database this process locked, so the exit handler can release it. */
 let lastResolvedDbPath: string | null = null;
@@ -450,6 +451,11 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
   requiredProviders.add(evalConfig.serviceModel.provider);
 
   for (const provider of requiredProviders) {
+    // Only refuse for adapters that SAY they need a key. A host cannot know a
+    // plugin provider's auth model — the shipped Ollama example talks to a
+    // local server and its own header says "No API key needed", yet this
+    // exited 1 with `No API key found for provider: ollama`.
+    if (!providerRequiresApiKey(provider)) continue;
     const key = resolveApiKey(provider, configKeys);
     if (!key) {
       console.error(`No API key found for provider: ${provider}`);
@@ -643,6 +649,11 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
   }
 
   for (const provider of requiredProviders) {
+    // Only refuse for adapters that SAY they need a key. A host cannot know a
+    // plugin provider's auth model — the shipped Ollama example talks to a
+    // local server and its own header says "No API key needed", yet this
+    // exited 1 with `No API key found for provider: ollama`.
+    if (!providerRequiresApiKey(provider)) continue;
     const key = resolveApiKey(provider, configKeys);
     if (!key) {
       console.error(`No API key found for provider: ${provider}`);
