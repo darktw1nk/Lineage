@@ -34,6 +34,7 @@ import { COST_LABELS } from './estimate.js';
 import { selectChampion } from './champion.js';
 import { calculateFitness, resetFitnessWarnings } from './fitness.js';
 import { store } from '../store.js';
+import { recordSpend, readSpend, clearSpend } from './spendledger.js';
 import { getDatabase } from '../database/init.js';
 
 interface EvaluationState {
@@ -409,6 +410,23 @@ async function startEvaluationInner(
   console.log(`[Evaluator] Status sent: running`);
 
   if (isResume) {
+    // Adopt any spend the sidecar recorded after the last checkpoint. Taking
+    // the LARGER of the two means a stale or missing sidecar can only
+    // under-report; it can never invent spend.
+    try {
+      const ledger = readSpend(getDatabase().dbPath, state.run.id);
+      if (ledger && ledger.totals.usd > state.run.totals.usd) {
+        const lost = ledger.totals.usd - state.run.totals.usd;
+        const lostCalls = ledger.totals.calls - state.run.totals.calls;
+        console.warn(
+          `[Evaluator] Recovered $${lost.toFixed(6)} over ${lostCalls} call(s) billed after the last checkpoint. ` +
+          `Without this they would be charged by the provider but invisible to totals and to budgetUSD.`,
+        );
+        state.run.totals = { ...ledger.totals };
+        if (ledger.costBreakdown) state.run.costBreakdown = ledger.costBreakdown;
+      }
+    } catch { /* advisory only */ }
+
     const nowFingerprint = graderFingerprint();
     if (state.run.graderFingerprint && state.run.graderFingerprint !== nowFingerprint) {
       activeEvaluations.delete(runId);
@@ -1772,6 +1790,12 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
 
   persistRun(state);
 
+  // The checkpoint is now authoritative and the run cannot be resumed, so the
+  // sidecar has nothing left to recover. Clearing it AFTER the durable write
+  // means a crash in between simply leaves a sidecar that agrees with the
+  // checkpoint — the resume path takes the larger of the two either way.
+  try { clearSpend(getDatabase().dbPath, state.run.id); } catch { /* best effort */ }
+
   sendUpdate(runId, { type: 'cost_breakdown', breakdown: state.run.costBreakdown, estimate: state.run.estimate });
 
   // Send final updates
@@ -1962,6 +1986,19 @@ function accrueCost(
     rec.completionTokens += c.completionTokens;
     rec.usd += c.usd;
   }
+
+  // Durable, on EVERY accrual. The checkpoint cannot do this — it serialises
+  // the whole run — so spend between checkpoints used to vanish on a crash and
+  // each resume re-armed the entire budget. This sidecar is ~1 KB regardless of
+  // run size. See spendledger.ts.
+  try {
+    recordSpend(getDatabase().dbPath, {
+      runId: state.run.id,
+      totals: { ...state.run.totals },
+      costBreakdown: state.run.costBreakdown,
+      at: Date.now(),
+    });
+  } catch { /* advisory only — never fail a run over accounting */ }
 }
 
 /** Checkpoint the run so an interrupted process loses nothing. Never throws. */

@@ -155,6 +155,10 @@ function renameWithRetry(from: string, to: string, attempts = 10): void {
 export class SqlJsWrapper {
   _db: SqlJsDatabase;
   private _dbPath: string;
+
+  /** Where this handle's file lives — sidecars are written alongside it. */
+  get dbPath(): string { return this._dbPath; }
+
   private _saveTimer: ReturnType<typeof setTimeout> | null = null;
   private _readOnly: boolean;
   private _consecutiveSaveFailures = 0;
