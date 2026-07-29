@@ -104,6 +104,9 @@ describe('evaluation CRUD round-trip', () => {
     const run = await invoke('eval:create', makeConfig());
     expect(run.id).toBeTruthy();
     expect(run.configId).toBe('cfg-abc');
+    // Preflight estimate stamped at creation (models may be uncatalogued in the
+    // test DB — prices are then $0, but the call count is always positive)
+    expect(run.estimate?.calls).toBeGreaterThan(0);
 
     const list = await invoke('eval:list');
     expect(list.some((r: any) => r.id === run.id)).toBe(true);

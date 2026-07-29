@@ -250,6 +250,10 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
         case 'playoff_result':
           store.addPlayoff(evalId, { generation: data.generation, ranking: data.ranking });
           break;
+
+        case 'cost_breakdown':
+          // Persisted on run_json; no live UI yet
+          break;
           
         default:
           console.warn(`[Store] Unknown IPC event type: ${data.type}`);

@@ -175,6 +175,15 @@ async function createEvaluation(config: EvaluationConfig): Promise<EvaluationRun
     cacheHits: 0,
     version: '1.0',
   };
+
+  // Stamp the preflight estimate — the report compares it to actual spend
+  try {
+    const { estimateRunCost, getModelCost } = await import('@promptengine/core');
+    const est = await estimateRunCost(config, getModelCost);
+    run.estimate = { calls: est.calls, low: est.low, high: est.high, breakdown: est.breakdown };
+  } catch (error) {
+    console.warn('[IPC] estimate stamping failed (non-fatal):', error);
+  }
   
   const runInsert = db.prepare(`
     INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version)
