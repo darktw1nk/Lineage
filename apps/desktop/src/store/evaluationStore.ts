@@ -56,12 +56,24 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       if (!evaluation) return state;
       
       const generations = [...evaluation.generations];
-      
-      // Ensure generation exists
+
+      // `node.generation` arrives over IPC and was trusted as an array index,
+      // so a node claiming generation 200000 allocated 200001 arrays in the
+      // padding loop below. Padding itself is legitimate — it is how a
+      // late-subscribing renderer catches up on generations it never saw — so
+      // this is a sanity ceiling, not a tight bound. The largest run measured
+      // in this project was 60 generations.
+      const MAX_GENERATION_INDEX = 10_000;
+      if (!Number.isInteger(node.generation) || node.generation < 0 || node.generation > MAX_GENERATION_INDEX) {
+        console.warn(
+          `[Store] Ignoring node ${String(node.id).slice(0, 8)}: generation ${node.generation} is not a plausible index.`,
+        );
+        return state;
+      }
       while (generations.length <= node.generation) {
         generations.push([]);
       }
-      
+
       // Find and update node
       const gen = generations[node.generation];
       const index = gen.findIndex(n => n.id === node.id);

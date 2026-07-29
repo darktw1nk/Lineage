@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { Pause, Play, Square, Loader2, Settings2 } from 'lucide-react';
 import type { UUID } from '../types';
@@ -116,14 +117,16 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
     if (isPaused) {
       try {
         await window.electronAPI.eval.resume(evaluation.id);
-      } catch (error) {
-        console.error('Resume error:', error);
+      } catch (error: any) {
+        // These went to the console only, which the Logs panel hides by
+        // default — the button simply appeared not to work.
+        toast.error(`Could not resume: ${error?.message ?? error}`);
       }
     } else {
       try {
         await window.electronAPI.eval.pause(evaluation.id);
-      } catch (error) {
-        console.error('Pause error:', error);
+      } catch (error: any) {
+        toast.error(`Could not pause: ${error?.message ?? error}`);
       }
     }
   };
@@ -132,6 +135,10 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
     setIsStopping(true);
     try {
       await window.electronAPI.eval.stop(evaluation.id);
+    } catch (error: any) {
+      // handleStop had no catch at all: a rejected eval:stop was an unhandled
+      // promise rejection and the user was told nothing.
+      toast.error(`Could not stop the run: ${error?.message ?? error}`);
     } finally {
       setTimeout(() => setIsStopping(false), 1000); // Clear after status updates
     }

@@ -94,13 +94,23 @@ export function LeftSidebar({
   }, [isResizing, width]);
   
   // Get evaluations from database (for list of all evaluations)
-  const { data: dbEvaluations = [] } = useQuery<Array<EvaluationRun & { configName?: string; interrupted?: boolean }>>({
+  const { data: dbEvaluations = [], error: listError } = useQuery<Array<EvaluationRun & { configName?: string; interrupted?: boolean }>>({
     queryKey: ['evaluations'],
     queryFn: async () => {
       return await window.electronAPI.eval.list();
     },
     refetchInterval: 2000,
   });
+
+  // The list poll had no error branch, so a failing eval:list simply froze
+  // the sidebar (React Query keeps the last good data) and emptied it on the
+  // next cold start — with nothing on screen saying why. This is the panel
+  // App.tsx does not wrap in an ErrorBoundary.
+  useEffect(() => {
+    if (listError) {
+      toast.error(`Could not load evaluations: ${(listError as any)?.message ?? listError}`);
+    }
+  }, [listError]);
   
   // Get real-time data from Zustand store
   const storeEvaluations = useEvaluationStore((state) => state.evaluations);

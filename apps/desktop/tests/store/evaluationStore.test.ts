@@ -93,6 +93,19 @@ describe('evaluationStore mutations', () => {
     expect(gens[2][0].id).toBe('n9');
   });
 
+  it('ignores a node claiming an implausible generation index', () => {
+    // node.generation arrives over IPC and was used as an array index, so a
+    // node claiming generation 200000 allocated 200001 arrays in the padding
+    // loop. Padding itself is legitimate (a late-subscribing renderer catches
+    // up that way), so this is a sanity ceiling, not a tight bound.
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().updateNodeInEvaluation('run-1', makeNode('huge', 200_000));
+    expect(store().evaluations.get('run-1')!.generations.length).toBeLessThan(10);
+
+    store().updateNodeInEvaluation('run-1', makeNode('neg', -1));
+    expect(store().evaluations.get('run-1')!.generations.length).toBeLessThan(10);
+  });
+
   it('updateNodeInEvaluation is a no-op for unknown evaluations', () => {
     store().updateNodeInEvaluation('missing', makeNode('n1'));
     expect(store().evaluations.size).toBe(0);
