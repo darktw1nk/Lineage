@@ -1,6 +1,7 @@
 /**
  * Global semaphore to limit concurrent API calls across all evaluations
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
  * A limit of 0 (or NaN, or a negative) is never a useful configuration — it is
@@ -94,6 +95,30 @@ export function updateGlobalSemaphoreLimit(limit: number): void {
 }
 
 /**
+ * Tracks whether the CURRENT async call chain already holds a permit.
+ *
+ * One logical API call must consume exactly one permit. It used to be possible
+ * for a single call to acquire twice and then wait on itself forever:
+ *   - a plugin adapter that calls withGlobalSemaphore itself,
+ *   - a router plugin that delegates to a built-in adapter (which acquires),
+ *   - a plugin subclassing a DUPLICATE copy of BaseProviderAdapter, which the
+ *     `instanceof` guard in registry.ts cannot recognise (dual-package: the
+ *     plugin resolves dist/ while the host runs src/).
+ * acquire() has no timeout and callTimeoutMs is never reached, so the run hung
+ * forever with no error — at ANY parallelLimit, as soon as that many calls were
+ * in flight, which is the normal steady state.
+ *
+ * Re-entrancy fixes all three at the source, rather than trying to enumerate
+ * the adapter shapes that need wrapping.
+ */
+const permitHeld = new AsyncLocalStorage<boolean>();
+
+/** True when the caller is already inside a permit on this async chain. */
+export function holdsGlobalPermit(): boolean {
+  return permitHeld.getStore() === true;
+}
+
+/**
  * Wrap an async API call with the global semaphore
  */
 export async function withGlobalSemaphore<T>(
@@ -110,11 +135,16 @@ export async function withGlobalSemaphore<T>(
     }
   }
   
+  // Already holding one on this chain: run inline. Acquiring a second
+  // permit for the same logical call is what deadlocked the run.
+  if (permitHeld.getStore() === true) {
+    return fn();
+  }
+
   await globalSemaphore.acquire();
 
   try {
-    const result = await fn();
-    return result;
+    return await permitHeld.run(true, fn);
   } finally {
     globalSemaphore.release();
   }

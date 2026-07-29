@@ -35,6 +35,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
     system?: string;
     temperature: number;
     seed?: number;
+    images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
     maxTokens?: number;
     timeoutMs?: number;
     tools?: ToolDef[];
@@ -50,7 +51,16 @@ export class GeminiAdapter extends BaseProviderAdapter {
       console.log(`[Gemini] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
       
       const body: any = {
-        contents: [{ parts: [{ text: opts.prompt }] }],
+        // inlineData parts carry images. Not declared or read before, so a
+        // vision test against Gemini silently sent no image.
+        contents: [{
+          parts: [
+            ...(opts.images ?? []).map(img => ({
+              inlineData: { mimeType: img.mimeType, data: img.base64 },
+            })),
+            { text: opts.prompt },
+          ],
+        }],
         generationConfig: {
           temperature: opts.temperature,
           maxOutputTokens: opts.maxTokens ?? 4096,

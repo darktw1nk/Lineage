@@ -25,6 +25,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
     system?: string;
     temperature: number;
     seed?: number;
+    images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
     maxTokens?: number;
     timeoutMs?: number;
     tools?: ToolDef[];
@@ -42,7 +43,21 @@ export class AnthropicAdapter extends BaseProviderAdapter {
       
       const body: any = {
         model: opts.model,
-        messages: [{ role: 'user', content: opts.prompt }],
+        // Images ride as content blocks. This adapter did not declare or read
+        // `images` at all, so a vision test against Claude sent the prompt with
+        // NO image, every candidate scored near 0, and nothing said why.
+        messages: [{
+          role: 'user',
+          content: opts.images?.length
+            ? [
+                ...opts.images.map(img => ({
+                  type: 'image',
+                  source: { type: 'base64', media_type: img.mimeType, data: img.base64 },
+                })),
+                { type: 'text', text: opts.prompt },
+              ]
+            : opts.prompt,
+        }],
         temperature: opts.temperature,
         max_tokens: opts.maxTokens ?? 4096,
       };

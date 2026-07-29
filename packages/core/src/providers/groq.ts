@@ -18,6 +18,7 @@ export class GroqAdapter extends BaseProviderAdapter {
     system?: string;
     temperature: number;
     seed?: number;
+    images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
     maxTokens?: number;
     timeoutMs?: number;
     tools?: ToolDef[];
@@ -36,7 +37,21 @@ export class GroqAdapter extends BaseProviderAdapter {
         model: opts.model,
         messages: [
           ...(opts.system ? [{ role: 'system', content: opts.system }] : []),
-          { role: 'user', content: opts.prompt },
+          // OpenAI-compatible image_url blocks. Groq did not declare or read
+          // `images`, so a vision test sent the prompt with no image attached
+          // and every candidate was graded on a question it could not see.
+          {
+            role: 'user',
+            content: opts.images?.length
+              ? [
+                  { type: 'text', text: opts.prompt },
+                  ...opts.images.map(img => ({
+                    type: 'image_url',
+                    image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
+                  })),
+                ]
+              : opts.prompt,
+          },
         ],
         temperature: opts.temperature,
         max_tokens: opts.maxTokens ?? 4096,

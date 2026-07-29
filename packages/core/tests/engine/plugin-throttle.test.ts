@@ -7,7 +7,8 @@ vi.mock('../../src/store.js', () => ({
 
 import { registerProvider, resetRegistry } from '../../src/registry.js';
 import { getProviderAdapter } from '../../src/providers/index.js';
-import { initGlobalSemaphore } from '../../src/engine/semaphore.js';
+import { initGlobalSemaphore, withGlobalSemaphore } from '../../src/engine/semaphore.js';
+import { BaseProviderAdapter } from '../../src/providers/base.js';
 
 let inFlight = 0;
 let peak = 0;
@@ -55,5 +56,65 @@ describe('plugin providers obey parallelLimit', () => {
     expect(adapter.estimateTokens('abcd')).toEqual({ prompt: 1 });
     const r = await adapter.call({ model: 'm', prompt: 'p', temperature: 0 } as any);
     expect(r.output).toBe('x');
+  }, 30000);
+});
+
+describe('the throttle wrapper cannot deadlock a run', () => {
+  // registry.ts guards double-wrapping with `instanceof BaseProviderAdapter`,
+  // which three reachable plugin shapes defeat. Each one then acquires the
+  // 1-permit-per-slot semaphore twice for a single logical call, and
+  // Semaphore.acquire() has no timeout — callTimeoutMs is never reached, so the
+  // run hangs FOREVER with no error and no way out but killing the process.
+  const ranTo = async (p: Promise<unknown>, ms: number) => {
+    let timer: any;
+    const timeout = new Promise(r => { timer = setTimeout(() => r('DEADLOCK'), ms); });
+    try { return await Promise.race([p.then(() => 'ok'), timeout]); }
+    finally { clearTimeout(timer); }
+  };
+
+  it('a plugin that calls withGlobalSemaphore itself still completes', async () => {
+    initGlobalSemaphore(1);
+    registerProvider({ adapter: {
+      name: 'selfsem',
+      estimateTokens: () => ({ prompt: 1 }),
+      call: async () => withGlobalSemaphore(async () => ({
+        output: 'x', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0,
+      })),
+    } as any });
+    const adapter = getProviderAdapter('selfsem' as any);
+    expect(await ranTo(adapter.call({ model: 'm', prompt: 'p', temperature: 0 } as any), 2500)).toBe('ok');
+  }, 30000);
+
+  it('a plugin that delegates to a built-in adapter still completes', async () => {
+    // A router / fallback plugin — the built-in it calls acquires internally.
+    initGlobalSemaphore(1);
+    registerProvider({ adapter: {
+      name: 'router',
+      estimateTokens: () => ({ prompt: 1 }),
+      call: async (opts: any) => new (class extends BaseProviderAdapter {
+        name = 'inner' as any;
+        estimateTokens() { return { prompt: 1 }; }
+        async callAPI() { return { output: 'x', promptTokens: 1, completionTokens: 1, latencyMs: 1 }; }
+        async getApiKey() { return 'k'; }
+      })().call(opts),
+    } as any });
+    const adapter = getProviderAdapter('router' as any);
+    expect(await ranTo(adapter.call({ model: 'm', prompt: 'p', temperature: 0 } as any), 2500)).toBe('ok');
+  }, 30000);
+
+  it('deadlocks at any parallelLimit once that many calls are in flight', async () => {
+    initGlobalSemaphore(4);
+    registerProvider({ adapter: {
+      name: 'selfsem4',
+      estimateTokens: () => ({ prompt: 1 }),
+      call: async () => withGlobalSemaphore(async () => {
+        await new Promise(r => setTimeout(r, 5));
+        return { output: 'x', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 };
+      }),
+    } as any });
+    const adapter = getProviderAdapter('selfsem4' as any);
+    const all = Promise.all(Array.from({ length: 4 }, () =>
+      adapter.call({ model: 'm', prompt: 'p', temperature: 0 } as any)));
+    expect(await ranTo(all, 2500)).toBe('ok');
   }, 30000);
 });
