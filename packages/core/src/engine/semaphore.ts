@@ -4,36 +4,51 @@
 
 class Semaphore {
   private permits: number;
+  private limit: number;   // configured ceiling
+  private inUse = 0;       // permits currently held by callers
   private queue: Array<() => void> = [];
-  
+
   constructor(permits: number) {
     this.permits = permits;
+    this.limit = permits;
   }
-  
+
   async acquire(): Promise<void> {
     if (this.permits > 0) {
       this.permits--;
+      this.inUse++;
       return Promise.resolve();
     }
-    
+
     return new Promise<void>((resolve) => {
-      this.queue.push(resolve);
+      this.queue.push(() => {
+        this.inUse++;
+        resolve();
+      });
     });
   }
-  
+
   release(): void {
-    this.permits++;
-    
-    const next = this.queue.shift();
-    if (next) {
-      this.permits--;
-      next();
+    this.inUse = Math.max(0, this.inUse - 1);
+    // Never hand back more than the ceiling: an unconditional ++ combined with
+    // a re-init while calls are in flight permanently inflates concurrency.
+    this.permits = Math.min(this.limit, this.permits + 1);
+
+    if (this.permits > 0 && this.queue.length > 0) {
+      const next = this.queue.shift();
+      if (next) {
+        this.permits--;
+        next();
+      }
     }
   }
-  
+
   setPermits(newPermits: number): void {
-    this.permits = newPermits;
-    
+    // Account for permits already held, otherwise re-initializing mid-run
+    // re-issues them and the effective limit doubles.
+    this.limit = newPermits;
+    this.permits = Math.max(0, newPermits - this.inUse);
+
     // If we increased permits, release queued requests
     while (this.permits > 0 && this.queue.length > 0) {
       this.permits--;

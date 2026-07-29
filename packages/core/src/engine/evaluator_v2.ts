@@ -52,6 +52,7 @@ interface EvaluationState {
   pairwiseContenders: number; // resolved + clamped (2..8) from config
   costContext: 'evolution' | 'holdout'; // routes accruals to holdout labels during the final evaluation
   finishing: boolean;         // idempotency latch: finishEvaluation must run exactly once
+  loopRunning: boolean;       // re-entrancy guard: exactly one evaluationLoop per state
   pausedAt?: number; // Timestamp when paused (if currently paused)
   totalPausedMs: number; // Total time spent paused
   gradingTotal: number; // Total grading calls completed
@@ -107,13 +108,18 @@ function recalculateAllFitness(runId: UUID, state: EvaluationState): void {
   let maxLatency: number | undefined;
   
   if (state.config.fitness.costNorm?.mode === 'relative' && (state.config.fitness.weights.cost || 0) > 0) {
-    maxCost = Math.max(...finishedNodes.map(n => n.metrics?.costUSD || 0).filter(c => c > 0));
-    console.log(`[Fitness Recalc] Dynamic max cost: $${maxCost.toFixed(6)} (from ${finishedNodes.length} nodes)`);
+    // Math.max(...[]) is -Infinity: every node costing $0 (uncatalogued model)
+    // would otherwise hand fitness a negative normalizer. Leave it undefined so
+    // the configured absolute cap is used instead.
+    const costs = finishedNodes.map(n => n.metrics?.costUSD || 0).filter(c => c > 0);
+    maxCost = costs.length > 0 ? Math.max(...costs) : undefined;
+    console.log(`[Fitness Recalc] Dynamic max cost: ${maxCost === undefined ? 'n/a (all $0)' : '$' + maxCost.toFixed(6)} (from ${finishedNodes.length} nodes)`);
   }
-  
+
   if (state.config.fitness.latencyNorm?.mode === 'relative' && (state.config.fitness.weights.latency || 0) > 0) {
-    maxLatency = Math.max(...finishedNodes.map(n => n.metrics?.latencyMs || 0).filter(l => l > 0));
-    console.log(`[Fitness Recalc] Dynamic max latency: ${maxLatency.toFixed(1)}ms (from ${finishedNodes.length} nodes)`);
+    const latencies = finishedNodes.map(n => n.metrics?.latencyMs || 0).filter(l => l > 0);
+    maxLatency = latencies.length > 0 ? Math.max(...latencies) : undefined;
+    console.log(`[Fitness Recalc] Dynamic max latency: ${maxLatency === undefined ? 'n/a' : maxLatency.toFixed(1) + 'ms'} (from ${finishedNodes.length} nodes)`);
   }
   
   // Recalculate fitness for all finished nodes
@@ -157,10 +163,44 @@ export async function startEvaluation(
     throw new Error(`Run ${runId} is already finished`);
   }
   
-  // Initialize global semaphore
-  const globalLimit = config.parallelLimit || 5;
+  // Resolve the parallel limit ONCE and write it back onto the config: the
+  // loop compares against it directly, and a 0/undefined/NaN value there means
+  // no node is ever started and the run spins forever.
+  const globalLimit = Math.max(1, Math.floor(config.parallelLimit || 5));
+  if (globalLimit !== config.parallelLimit) {
+    console.warn(`[Evaluator] parallelLimit ${config.parallelLimit} resolved to ${globalLimit}`);
+    config.parallelLimit = globalLimit;
+  }
   initGlobalSemaphore(globalLimit);
   console.log(`[Evaluator] Global API limit: ${globalLimit}`);
+
+  // Budget enforcement is computed from catalogued prices, so an uncatalogued
+  // model counts every call as $0 and the cap can never trip. That is CORRECT
+  // for a genuinely free local model and WRONG for a missing catalog entry, and
+  // the engine cannot tell them apart — so record it on the run and warn loudly
+  // rather than guessing.
+  {
+    const { getModelCost } = await import('../providers/costs.js');
+    const unpriced: string[] = [];
+    for (const model of [...config.enabledModels, config.serviceModel]) {
+      const key = `${model.provider}/${model.model}`;
+      if (unpriced.includes(key)) continue;
+      const entry = await getModelCost(model);
+      if (!entry || (entry.promptUSDper1k === 0 && entry.completionUSDper1k === 0)) {
+        unpriced.push(key);
+      }
+    }
+    if (unpriced.length > 0) {
+      run.pricingUnknown = unpriced;
+      console.warn(
+        `[Evaluator] No catalogued pricing for ${unpriced.join(', ')} — those calls count as $0. ` +
+        (config.targets.budgetUSD !== undefined
+          ? `budgetUSD ($${config.targets.budgetUSD}) CANNOT be enforced against them. `
+          : '') +
+        `Run --list-models / --sync-models if this is unexpected.`
+      );
+    }
+  }
 
   // Resolve the evaluation harness settings
   const rawSamples = config.samplesPerTest ?? 1;
@@ -207,7 +247,10 @@ export async function startEvaluation(
     pairwiseContenders,
     costContext: 'evolution',
     finishing: false,
-    totalPausedMs: 0,
+    loopRunning: false,
+    // Restore accumulated paused time: hard-zeroing it on resume charges every
+    // second the process was DEAD against targets.timeLimitMs.
+    totalPausedMs: run.totalPausedMs ?? 0,
     gradingTotal: 0,
     gradingFailures: 0,
   };
@@ -334,6 +377,17 @@ async function mutatePopulationInBackground(
 
   const mutationPromises = nodesToMutate.map(async (node) => {
     try {
+      // The fill phase runs before the evaluation loop's first budget check —
+      // without this gate, 2×(initialSize-1) service calls always execute in
+      // full no matter how small the budget is.
+      if (budgetExhausted(state)) {
+        console.warn(`[Evaluator] Budget exhausted before filling node ${node.id.slice(0, 8)} — carrying the seed prompt forward`);
+        node.status = 'awaiting';
+        node.changeLog = [{ label: 'CARRY', text: 'Budget exhausted before mutation' }];
+        sendUpdate(runId, { type: 'node_updated', node });
+        return;
+      }
+
       console.log(`[Evaluator] Mutating node ${node.id.slice(0, 8)}...`);
 
       // Stable label: the node's index in generation 0 — identical streams across resume
@@ -425,7 +479,16 @@ async function evaluationLoop(runId: UUID): Promise<void> {
     console.log(`[Evaluator] Evaluation loop called but state not found for ${runId.slice(0, 8)}`);
     return;
   }
-  
+
+  // Re-entrancy guard: two loops over one state race the generation transition
+  // (an in-creation generation is momentarily [], which reads as "complete") and
+  // can finish the run with an empty final generation full of paid-for zombies.
+  if (state.loopRunning) {
+    console.warn(`[Evaluator] Evaluation loop already running for ${runId.slice(0, 8)} — ignoring duplicate start`);
+    return;
+  }
+  state.loopRunning = true;
+
   console.log(`[Evaluator] Evaluation loop started for ${runId.slice(0, 8)}`);
   console.log(`[Evaluator] Queue length: ${state.queue.length}, InProgress: ${state.inProgress.size}`);
   
@@ -434,11 +497,21 @@ async function evaluationLoop(runId: UUID): Promise<void> {
   
   // Helper to start processing a node
   const startNodeProcessing = (node: CandidateNode): Promise<void> => {
-    const promise = processNode(runId, node, state).then(() => {
-      activePromises.delete(promise);
-      // After a node completes, check if we should process more
-      processNextNode();
-    });
+    // .catch is load-bearing: an unhandled rejection here (e.g. the host's
+    // sendUpdate throwing because the window was destroyed) would leave the
+    // promise in activePromises forever, wedging the loop permanently.
+    const promise = processNode(runId, node, state)
+      .catch((error) => {
+        console.error(`[Evaluator] processNode rejected for ${node.id.slice(0, 8)}:`, error);
+        node.status = 'failed';
+        node.error = error instanceof Error ? error.message : String(error);
+        state.inProgress.delete(node.id);
+      })
+      .then(() => {
+        activePromises.delete(promise);
+        // After a node completes, check if we should process more
+        processNextNode();
+      });
     activePromises.add(promise);
     return promise;
   };
@@ -537,7 +610,9 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       }
     }
   } while (activePromises.size > 0 || state.queue.length > 0);
-  
+
+  state.loopRunning = false; // a later resume may legitimately start a new loop
+
   console.log(`[Evaluator] Evaluation loop exited (status=${state.status}, queue=${state.queue.length}, inProgress=${state.inProgress.size})`);
   
   // If we exited because of pause, wait for any remaining in-progress nodes
@@ -723,6 +798,18 @@ async function processNode(
       console.log(`[Evaluator] Operator effectiveness [${opKey}]: avgΔ=${avgDelta.toFixed(3)} (count=${bucket.count})`);
     }
   } catch (error) {
+    // Budget exhaustion is a controlled stop, not a node failure: mark the node
+    // skipped so it isn't reported as a broken candidate, and let the loop's
+    // shouldStop finish the run cleanly.
+    if (error instanceof BudgetExhaustedError) {
+      console.log(`[Evaluator] Node ${node.id.slice(0, 8)} abandoned: budget exhausted`);
+      node.status = 'skipped';
+      state.run.stopReason = 'budget';
+      state.inProgress.delete(node.id);
+      sendUpdate(runId, { type: 'node_updated', node });
+      return;
+    }
+
     console.error(`[Evaluator] Node ${node.id.slice(0, 8)} failed:`, error);
     node.status = 'failed';
     node.error = error instanceof Error ? error.message : String(error);
@@ -849,6 +936,13 @@ async function runSingleSample(
       }
     }
 
+    // Budget gate at the actual spend point: node-boundary checks alone let a
+    // single generation fire tests × samples × parallelLimit more calls after
+    // the cap was reached.
+    if (budgetExhausted(state)) {
+      throw new BudgetExhaustedError();
+    }
+
     const result = await adapter.call({
       model: params.model.model,
       prompt: samplePrompt,
@@ -886,6 +980,10 @@ async function runSingleSample(
     let llmGradeReasoning: string | undefined;
     
     if (test.mode === 'llm_grade') {
+      // Grading is a second billable call per sample — gate it too
+      if (budgetExhausted(state)) {
+        throw new BudgetExhaustedError();
+      }
       const { evaluateTestResultLLM } = await import('./fitness.js');
       const serviceAdapter = getProviderAdapter(state.config.serviceModel.provider);
       
@@ -1006,8 +1104,9 @@ function shouldStop(state: EvaluationState): boolean {
     }
   }
   
-  // Budget limit
-  if (config.targets.budgetUSD) {
+  // Budget limit (!== undefined, not truthiness: budgetUSD 0 means "spend
+  // nothing", not "no limit")
+  if (config.targets.budgetUSD !== undefined) {
     if (run.totals.usd >= config.targets.budgetUSD) {
       state.run.stopReason = 'budget';
       return true;
@@ -1224,8 +1323,14 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
 
   // The final generation never reaches moveToNextGeneration — run its playoff here
   // so the champion (and the holdout below) reflect the last generation's ranking.
-  await maybeRunPlayoff(runId, state);
-  await runHoldoutEvaluation(runId, state);
+  // Both are billable: a user who pressed Stop wants spending to STOP, not to
+  // fund a playoff plus a holdout pass afterwards.
+  if (state.run.stopReason === 'manual') {
+    console.log('[Evaluator] Manual stop — skipping playoff and holdout to stop spending');
+  } else {
+    await maybeRunPlayoff(runId, state);
+    await runHoldoutEvaluation(runId, state);
+  }
   console.log(`[Evaluator] Finishing evaluation, reason=${state.run.stopReason}`);
   
   state.status = 'stopped';
@@ -1260,6 +1365,25 @@ function computeCacheKey(node: CandidateNode, state: EvaluationState): string {
   return createHash('sha256')
     .update(`${node.prompt}|${node.params.model.provider}/${node.params.model.model}|${node.params.temperature}|${state.promptMode}|${state.samplesPerTest}|${testSetSig}`)
     .digest('hex');
+}
+
+/**
+ * True when the run has already spent its budget. Checked immediately before
+ * every billable call — `shouldStop` alone is only consulted at node
+ * boundaries, so a node with N tests × M samples could fire N×M×2 more calls
+ * (times parallelLimit) after the cap was already reached.
+ */
+function budgetExhausted(state: EvaluationState): boolean {
+  const budget = state.config.targets.budgetUSD;
+  return budget !== undefined && state.run.totals.usd >= budget;
+}
+
+/** Thrown to abandon in-flight work the moment the budget is gone. */
+class BudgetExhaustedError extends Error {
+  constructor() {
+    super('Budget exhausted');
+    this.name = 'BudgetExhaustedError';
+  }
 }
 
 /** Single accounting path: totals + per-purpose + per-model breakdown together. */
@@ -1322,6 +1446,12 @@ export function pauseEvaluation(runId: UUID): void {
 export function resumeEvaluation(runId: UUID): void {
   const state = activeEvaluations.get(runId);
   if (state) {
+    // Only a paused run can resume. Without this, a double-click in the desktop
+    // fires two resumes and starts a second evaluation loop over shared state.
+    if (state.status !== 'paused' && state.status !== 'pausing') {
+      console.warn(`[Evaluator] Resume ignored for ${runId.slice(0, 8)}: status is '${state.status}', not paused`);
+      return;
+    }
     console.log(`[Evaluator] Resume requested for ${runId.slice(0, 8)}, queue=${state.queue.length}, inProgress=${state.inProgress.size}`);
     
     // Calculate pause duration and add to total

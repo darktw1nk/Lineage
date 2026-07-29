@@ -37,6 +37,38 @@ describe('scoreJsonSchema', () => {
     expect(twoWrong.score).toBeGreaterThanOrEqual(1);
   });
 
+  it('the gradient rewards being CLOSER, not failing earlier (bug-hunt regression)', () => {
+    // Scoring by raw ajv error count inverted this: a nearly-complete object
+    // trips one error per missing field, while a bare scalar trips exactly one
+    // root-type error — so garbage outranked near-misses.
+    const FIVE = {
+      type: 'object', additionalProperties: false, required: ['a', 'b', 'c', 'd', 'e'],
+      properties: { a: { type: 'string' }, b: { type: 'string' }, c: { type: 'string' }, d: { type: 'string' }, e: { type: 'string' } },
+    } as object;
+    const s = (out: string) => scoreJsonSchema(out, FIVE).score;
+
+    const perfect = s('{"a":"1","b":"2","c":"3","d":"4","e":"5"}');
+    const fourOfFive = s('{"a":"1","b":"2","c":"3","d":"4"}');
+    const oneOfFive = s('{"a":"1"}');
+    const emptyObject = s('{}');
+    const unrelatedArray = s('[]');
+    const bareString = s('"hello"');
+
+    expect(perfect).toBe(10);
+    expect(fourOfFive).toBeGreaterThan(oneOfFive);
+    expect(oneOfFive).toBeGreaterThan(emptyObject);
+    // The inversion: wrong-shaped output must NOT beat a partially-correct object
+    expect(unrelatedArray).toBeLessThan(oneOfFive);
+    expect(bareString).toBeLessThan(oneOfFive);
+    // All partial credit stays below the pass threshold
+    expect(fourOfFive).toBeLessThanOrEqual(5);
+  });
+
+  it('extracts JSON embedded in prose instead of scoring it 0', () => {
+    const r = scoreJsonSchema('Sure! Here you go: {"name":"Bob","email":"b@x.co"} — hope that helps.', SCHEMA);
+    expect(r.score).toBe(10);
+  });
+
   it('invalid schema scores 0 without throwing', () => {
     const r = scoreJsonSchema('{}', { type: 'not-a-type' } as object);
     expect(r.score).toBe(0);

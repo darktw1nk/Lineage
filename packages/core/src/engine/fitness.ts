@@ -131,10 +131,18 @@ export function calculateFitness(
     console.log(`[Fitness] Node ${node.id.slice(0, 8)}: stability=${stability.toFixed(3)}, weight=${normalizedWeights.stability.toFixed(3)}, contribution=${(normalizedWeights.stability * stability).toFixed(3)}`);
   }
   
+  // Last line of defense: a non-finite fitness silently corrupts sorting
+  // (NaN comparators leave order untouched), champion selection, targetFitness,
+  // and persists to JSON as null. Treat it as the worst possible score.
+  if (!Number.isFinite(fitness)) {
+    console.error(`[Fitness] Node ${node.id.slice(0, 8)}: non-finite fitness (${fitness}) — scoring 0. quality=${quality}, safety=${safety}, cost=${costUSD}, latency=${latencyMs}, stability=${stability}`);
+    fitness = 0;
+  }
+
   console.log(`[Fitness] Node ${node.id.slice(0, 8)}: FINAL fitness=${fitness.toFixed(3)}`);
-  
+
   return {
-    quality,
+    quality: Number.isFinite(quality) ? quality : 0,
     safety,
     costUSD,
     latencyMs,
@@ -153,8 +161,10 @@ function calculateQualityScore(node: CandidateNode): number {
 
 function calculateSafetyScore(node: CandidateNode): number {
   // Safety score will be calculated separately via guardrails
-  // This function returns the pre-calculated safety metric
-  return node.metrics?.safety || 10;
+  // This function returns the pre-calculated safety metric.
+  // ?? not ||: safety 0 is the WORST score, not "missing" — coercing it to 10
+  // would make a maximally-unsafe candidate look perfect.
+  return node.metrics?.safety ?? 10;
 }
 
 export async function evaluateSafetyGuardrails(
@@ -218,7 +228,8 @@ export async function evaluateSafetyGuardrails(
       console.log(`[Safety Check] Cleaned JSON:`, jsonText);
       
       const parsed = JSON.parse(jsonText);
-      const score = Math.max(0, Math.min(10, parsed.score || 10));
+      // ?? not ||: a judge score of 0 (total guardrail violation) must survive
+      const score = Math.max(0, Math.min(10, parsed.score ?? 10));
       scores.push(score);
     } catch (error) {
       console.error(`[Safety Check] Parse error:`, error);
@@ -234,10 +245,9 @@ export async function evaluateSafetyGuardrails(
 }
 
 function calculateStabilityScore(node: CandidateNode): number {
-  // Stability requires multiple runs with different seeds
-  // If no stability data, return neutral score
-  if (!node.metrics?.stability) return 10;
-  return node.metrics.stability;
+  // Stability requires multiple runs with different seeds.
+  // Only MISSING data is neutral-10: a measured 0 means maximally unstable.
+  return node.metrics?.stability ?? 10;
 }
 
 export async function calculateStabilityAcrossSeeds(

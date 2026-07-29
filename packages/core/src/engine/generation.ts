@@ -89,13 +89,19 @@ export function selectTopPerformers(
     // Top-P selection
     const topP = config.selection.topP || 0.5;
     const totalFitness = sorted.reduce((sum, n) => sum + (n.metrics?.fitness || 0), 0);
-    let cumulative = 0;
-    let cutoff = 0;
-    for (let i = 0; i < sorted.length; i++) {
-      cumulative += (sorted[i].metrics?.fitness || 0) / totalFitness;
-      if (cumulative >= topP) {
-        cutoff = i + 1;
-        break;
+    // All-zero fitness means the cumulative share is 0/0 = NaN and no cutoff can
+    // ever trip — take everyone rather than collapsing to a single parent.
+    let cutoff = sorted.length;
+    if (totalFitness > 0) {
+      let cumulative = 0;
+      for (let i = 0; i < sorted.length; i++) {
+        cumulative += (sorted[i].metrics?.fitness || 0) / totalFitness;
+        // Epsilon: with topP=1.0 float error leaves the sum at 0.999...,
+        // which would otherwise leave the sentinel untouched
+        if (cumulative >= topP - 1e-9) {
+          cutoff = i + 1;
+          break;
+        }
       }
     }
     topPerformers = sorted.slice(0, Math.max(1, cutoff));
@@ -260,6 +266,11 @@ export async function createNextGeneration(
         }
       }
       
+      // Elitism must never consume the whole population: with numElite ===
+      // targetPopSize every child is a finished clone, nothing is queued, and
+      // the run ends silently with no stopReason and no evolution at all.
+      numElite = Math.min(numElite, Math.max(0, targetPopSize - 1));
+
       // Sort playoff-rank first (rank 1 = playoff winner), then fitness descending
       lastGenFinishedNodes.sort((a, b) => {
         const ra = a.metrics?.playoffRank ?? Infinity;
@@ -294,9 +305,12 @@ export async function createNextGeneration(
     }
   }
   
-  // Calculate remaining children to create via genetic operators
-  const remainingChildren = targetPopSize - numElite;
-  console.log(`[Generation] Creating ${remainingChildren} new children via genetic operators (${numElite} elites already added)`);
+  // Calculate remaining children to create via genetic operators.
+  // Subtract the elites ACTUALLY added, not the number requested: when the
+  // previous generation had fewer finished nodes than eliteShare asks for,
+  // subtracting the request silently shrinks the generation.
+  const remainingChildren = targetPopSize - newGenNodes.length;
+  console.log(`[Generation] Creating ${remainingChildren} new children via genetic operators (${newGenNodes.length} elites already added)`);
   
   // Step 1: Collect shares for every referenced operator (built-ins from the
   // legacy fields; plugin operators from operators.custom, which also overrides

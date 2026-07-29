@@ -133,6 +133,16 @@ export class OpenAIAdapter extends BaseProviderAdapter {
       
       const latencyMs = Date.now() - startTime;
       
+      // A 200 carrying an error body (or no choices) is a provider failure, not
+      // an empty completion — surface it as retryable instead of billing $0 and
+      // grading the candidate on an empty string.
+      if (data.error) {
+        throw new RetryableError(`OpenAI API returned an error body: ${data.error.message ?? JSON.stringify(data.error)}`, data.error.code ?? 500);
+      }
+      if (!Array.isArray(data.choices) || data.choices.length === 0) {
+        throw new RetryableError('OpenAI response contained no choices', 500);
+      }
+
       const message = data.choices[0]?.message;
       let toolCalls;
       if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {

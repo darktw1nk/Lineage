@@ -128,7 +128,14 @@ export class SqlJsWrapper {
     if (this._saveTimer) return;
     this._saveTimer = setTimeout(() => {
       this._saveTimer = null;
-      this._saveToDisk();
+      // Runs on a timer: an unguarded throw here (ENOSPC, EPERM from AV/OneDrive
+      // touching %APPDATA%) becomes an uncaught exception that kills the
+      // Electron main process or a paid CLI run mid-flight.
+      try {
+        this._saveToDisk();
+      } catch (error) {
+        console.error('[Database] Scheduled save failed (will retry on next write):', error);
+      }
     }, 50);
   }
 
@@ -141,9 +148,30 @@ export class SqlJsWrapper {
     this._saveToDisk();
   }
 
+  /**
+   * Atomic whole-file save: write a sibling temp file, fsync it, then rename
+   * over the target. A plain writeFileSync truncates first, so a crash or disk
+   * error mid-write leaves a torn (unopenable) or zero-byte database — and a
+   * zero-byte file is silently treated as a fresh install, erasing all history.
+   */
   private _saveToDisk(): void {
-    const data = this._db.export();
-    fs.writeFileSync(this._dbPath, Buffer.from(data));
+    const data = Buffer.from(this._db.export());
+    const tmpPath = `${this._dbPath}.tmp`;
+    let fd: number | undefined;
+    try {
+      fd = fs.openSync(tmpPath, 'w');
+      fs.writeSync(fd, data);
+      fs.fsyncSync(fd); // durable before the rename makes it visible
+      fs.closeSync(fd);
+      fd = undefined;
+      fs.renameSync(tmpPath, this._dbPath); // atomic on both NTFS and POSIX
+    } catch (error) {
+      if (fd !== undefined) {
+        try { fs.closeSync(fd); } catch { /* already closing down */ }
+      }
+      try { fs.rmSync(tmpPath, { force: true }); } catch { /* best effort */ }
+      throw error;
+    }
   }
 
   close(): void {
@@ -180,6 +208,19 @@ export async function initializeDatabase(dbPath: string): Promise<void> {
   let sqlDb: SqlJsDatabase;
   if (fs.existsSync(dbPath)) {
     const fileBuffer = fs.readFileSync(dbPath);
+    if (fileBuffer.length === 0) {
+      // sql.js happily accepts an empty buffer as a brand-new database, and
+      // migrations would then log "Fresh install" — silently discarding every
+      // run the file used to hold. Refuse instead, and point at the recovery.
+      const orphanTmp = `${dbPath}.tmp`;
+      const hint = fs.existsSync(orphanTmp)
+        ? ` A partial write exists at ${orphanTmp} — inspect it before deleting.`
+        : '';
+      throw new Error(
+        `Database file at ${dbPath} is empty (0 bytes). Refusing to treat it as a fresh install, ` +
+        `which would discard existing history. Restore it from backup, or delete the file to start clean.${hint}`
+      );
+    }
     sqlDb = new SQL.Database(fileBuffer);
   } else {
     sqlDb = new SQL.Database();
@@ -321,8 +362,11 @@ function insertDefaultModelCosts(db: SqlJsWrapper): void {
     { provider: 'gemini', model: 'gemini-2.5-flash-lite', promptUSD: 0.10, completionUSD: 0.40 },
   ];
 
+  // OR IGNORE: the fresh-install branch is inferred from a missing version row.
+  // If that row is ever absent while model_costs is populated, a plain INSERT
+  // trips the UNIQUE constraint and the database becomes permanently unopenable.
   const insert = db.prepare(`
-    INSERT INTO model_costs (provider, model, prompt_usd_per_1k, completion_usd_per_1k)
+    INSERT OR IGNORE INTO model_costs (provider, model, prompt_usd_per_1k, completion_usd_per_1k)
     VALUES (?, ?, ?, ?)
   `);
 

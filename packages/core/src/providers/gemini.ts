@@ -94,18 +94,35 @@ export class GeminiAdapter extends BaseProviderAdapter {
       
       const latencyMs = Date.now() - startTime;
       
-      // Gemini token counting is approximate
+      // A 200 carrying an error object (or no candidates at all) must not be
+      // treated as an empty-but-successful completion — that bills $0 and
+      // grades the candidate on "".
+      if (data.error) {
+        throw new RetryableError(`Gemini API returned an error body: ${data.error.message ?? JSON.stringify(data.error)}`, data.error.code ?? 500);
+      }
+      if (!Array.isArray(data.candidates) || data.candidates.length === 0) {
+        throw new RetryableError(`Gemini response has no candidates (finishReason: ${data.promptFeedback?.blockReason ?? 'unknown'})`, 500);
+      }
+
       const parts = data.candidates?.[0]?.content?.parts ?? [];
       const output = parts.filter((p: any) => typeof p.text === 'string').map((p: any) => p.text).join('');
       const fnParts = parts.filter((p: any) => p.functionCall);
       const toolCalls = fnParts.length > 0
         ? fnParts.map((p: any) => ({ name: p.functionCall.name, arguments: p.functionCall.args ?? {} }))
         : undefined;
-      const promptTokens = this.estimateTokens(opts.prompt).prompt;
-      // Function calls ARE completion output — a functionCall-only response
-      // would otherwise count ~0 completion tokens and undercount cost
+
+      // Prefer the API's own usage numbers. The char-estimate fallback missed
+      // opts.system entirely (the candidate prompt — usually the LARGEST input,
+      // since promptMode defaults to 'system') and all reasoning tokens, which
+      // undercounted real spend by orders of magnitude on 2.5-series models.
+      const usage = data.usageMetadata;
+      const promptTokens = usage?.promptTokenCount
+        ?? this.estimateTokens((opts.system ? opts.system + '\n\n' : '') + opts.prompt).prompt;
+      // Function calls ARE completion output; thinking tokens are billed as output too
       const completionText = output + fnParts.map((p: any) => JSON.stringify(p.functionCall)).join('');
-      const completionTokens = this.estimateTokens(completionText).prompt;
+      const completionTokens = usage
+        ? (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0)
+        : this.estimateTokens(completionText).prompt;
 
       const result = {
         output,

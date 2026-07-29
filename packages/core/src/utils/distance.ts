@@ -100,14 +100,17 @@ export function numericAbsScore0to10(gold: string, pred: string, toleranceFactor
   try {
     const goldNum = parseFloat(gold);
     const predNum = parseFloat(pred);
-    
-    if (isNaN(goldNum) || isNaN(predNum)) return 0;
-    
+
+    // isFinite, not isNaN: parseFloat('1e999') and 'Infinity' both yield
+    // Infinity, and Infinity/Infinity later produces NaN — which would poison
+    // fitness, sorting, and targetFitness comparisons downstream.
+    if (!Number.isFinite(goldNum) || !Number.isFinite(predNum)) return 0;
+
     const delta = Math.abs(predNum - goldNum);
     const tolerance = Math.max(1, Math.abs(goldNum) * toleranceFactor);
-    
+
     const score = Math.round(10 * (1 - Math.min(1, delta / (tolerance + delta))));
-    return score;
+    return Number.isFinite(score) ? score : 0;
   } catch {
     return 0;
   }
