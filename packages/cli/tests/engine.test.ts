@@ -26,6 +26,8 @@ vi.mock('@promptengine/core', () => ({
   }),
   closeDatabase: vi.fn(),
   setStore: vi.fn(),
+  estimateRunCost: vi.fn(async () => ({ calls: 10, low: 0.001, high: 0.01, perGeneration: false, breakdown: [], warnings: [] })),
+  getModelCost: vi.fn(async () => null),
 }));
 
 let stderrSpy: ReturnType<typeof vi.spyOn>;
@@ -344,5 +346,47 @@ describe('CLI Engine - runEvolution', () => {
     // configId in result should differ from original since it was regenerated
     // (The first config-123 failed, so it got a new UUID)
     expect(result.configId).not.toBe('config-123');
+  });
+
+  it('resumed runs: replayed node_created history competes for best', async () => {
+    // Review-caught bug: best-tracking only listened to node_updated, so the
+    // global best from before an interruption (replayed as node_created) lost.
+    const preCrashBest = makeNode({ id: 'pre-crash', metrics: { quality: 9.9, fitness: 0.99 }, prompt: 'CHAMPION' });
+    const existingRun: any = {
+      id: 'resumed-run', configId: 'config-123', startedAt: 1,
+      totals: { tokensPrompt: 10, tokensCompletion: 10, usd: 0.01, calls: 5 },
+      generations: [[preCrashBest]], cacheHits: 0, version: '1.0', status: 'running',
+    };
+    mockStartEvaluation.mockImplementation(async (runId: string) => {
+      setTimeout(() => {
+        const send = capturedSendUpdate!;
+        send(runId as UUID, { type: 'node_created', node: preCrashBest }); // engine replay
+        send(runId as UUID, { type: 'node_updated', node: makeNode({ id: 'post', generation: 1, metrics: { quality: 5, fitness: 0.5 } }) });
+        send(runId as UUID, { type: 'status', status: 'finished' });
+      }, 0);
+    });
+
+    const { runEvolution } = await import('../src/engine.js');
+    const result = await runEvolution(makeConfig(), { existingRun });
+    expect(result.best?.nodeId).toBe('pre-crash');
+    expect(result.best?.prompt).toBe('CHAMPION');
+  });
+
+  it('resumed runs: checkpointed playoffs are kept in results', async () => {
+    const existingRun: any = {
+      id: 'resumed-run-2', configId: 'config-123', startedAt: 1,
+      totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 0, calls: 0 },
+      generations: [[makeNode({ id: 'n1' })]], cacheHits: 0, version: '1.0', status: 'running',
+      playoffs: [{ generation: 0, ranking: ['n1'] }],
+    };
+    mockStartEvaluation.mockImplementation(async (runId: string) => {
+      setTimeout(() => {
+        capturedSendUpdate!(runId as UUID, { type: 'status', status: 'finished' });
+      }, 0);
+    });
+
+    const { runEvolution } = await import('../src/engine.js');
+    const result = await runEvolution(makeConfig(), { existingRun });
+    expect(result.playoffs).toEqual([{ generation: 0, ranking: ['n1'] }]);
   });
 });
