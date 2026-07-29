@@ -62,7 +62,9 @@ Progress/logs → stderr. `--output` (and stdout) → pure JSON. Exit 0 = usable
 
 ## Reading results
 
-`results.json`: `best.prompt` / `best.fitness` (0–10) / `best.model`, per-node `tests[].score` + `llmGradeReasoning` (judge's justification — read it to understand low scores), `totals.usd`, `stopReason` (`target` | `budget` | `exhausted` | …). With pairwise enabled: `playoffs` lists each generation's head-to-head ranking, ranked nodes carry `metrics.playoffRank`, and `best` is the last playoff's winner — which may have LOWER fitness than another node; that's the feature working, not a bug.
+`results.json`: `best.prompt` / `best.fitness` (0–10) / `best.model`, per-node `tests[].score` + `llmGradeReasoning` (judge's justification — read it to understand low scores), `totals.usd`, `stopReason` (`target` | `budget` | `exhausted` | …).
+
+- `costBreakdown` splits actual spend by purpose (and `model:*` keys by model) — if LLM grading or playoffs dominate, cheapen `serviceModel`, not the candidates. With pairwise enabled: `playoffs` lists each generation's head-to-head ranking, ranked nodes carry `metrics.playoffRank`, and `best` is the last playoff's winner — which may have LOWER fitness than another node; that's the feature working, not a bug.
 
 ## Common mistakes
 

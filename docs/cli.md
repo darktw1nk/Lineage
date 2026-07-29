@@ -25,6 +25,8 @@ Progress and all engine logs go to stderr; stdout carries exactly the JSON resul
 
 **Cost estimation**: every run prints `Estimated cost: $low – $high (~N calls)` at startup, and `--estimate --config cfg.json` prints the same estimate (JSON on stdout, per-phase breakdown on stderr) without running anything. The band brackets the one true unknown — completion lengths; treat `high` as the commit number. Warnings call out uncatalogued models and budgets below the low bound.
 
+**Cost breakdown**: results.json also carries the ACTUAL spend split by purpose and by model (`costBreakdown`) plus the stamped preflight `estimate` — the report's "Where the money went" table shows them side by side. If judge spend ("LLM grading"/"Pairwise playoffs") dominates, pick a cheaper `serviceModel`.
+
 **Model IDs**: run `--list-models` first — only catalogued models get correct cost accounting (budget enforcement depends on it). Catalog pricing refreshed 2026-07; providers retire models over time, so if a run fails with a 404 "model no longer available", pick a newer model from `--list-models` or sync via OpenRouter.
 
 **`llm_grade` + `expected`**: when a test case has an `expected` value, the default LLM judge receives it as a reference answer and grades consistency with it (content and format). For strict formatting requirements, you can still override `systemPrompts.llmGradingPrompt` with a custom rubric.

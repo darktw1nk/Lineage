@@ -65,6 +65,8 @@ export interface EvolutionResult {
   holdout?: HoldoutResult;
   seed?: number;
   playoffs?: Array<{ generation: number; ranking: string[] }>;
+  costBreakdown?: EvaluationRun['costBreakdown'];
+  estimate?: EvaluationRun['estimate'];
   generations: EvolutionResultGeneration[];
 }
 
@@ -81,6 +83,8 @@ interface RunCollector {
   stopReason: string | null;
   holdout: HoldoutResult | null;
   playoffs: Array<{ generation: number; ranking: string[] }>;
+  costBreakdown: EvaluationRun['costBreakdown'] | null;
+  estimate: EvaluationRun['estimate'] | null;
 }
 
 function createCollector(): RunCollector {
@@ -93,6 +97,8 @@ function createCollector(): RunCollector {
     stopReason: null,
     holdout: null,
     playoffs: [],
+    costBreakdown: null,
+    estimate: null,
   };
 }
 
@@ -166,6 +172,8 @@ function buildResult(
     holdout: collector.holdout ?? undefined,
     ...(config.seed !== undefined ? { seed: config.seed } : {}),
     ...(collector.playoffs.length ? { playoffs: collector.playoffs } : {}),
+    ...(collector.costBreakdown ? { costBreakdown: collector.costBreakdown } : {}),
+    ...(collector.estimate ? { estimate: collector.estimate } : {}),
     best: best
       ? {
           prompt: best.prompt,
@@ -286,6 +294,10 @@ export async function runEvolution(
       case 'playoff_result':
         collector.playoffs.push({ generation: data.generation, ranking: data.ranking });
         break;
+      case 'cost_breakdown':
+        collector.costBreakdown = data.breakdown ?? null;
+        collector.estimate = data.estimate ?? null;
+        break;
       case 'error':
         collector.error = data.message;
         display.onError(data.message);
@@ -352,6 +364,8 @@ export async function runEvolution(
       const scope = est.perGeneration ? ' per generation' : '';
       process.stderr.write(`Estimated cost${scope}: $${est.low.toFixed(4)} – $${est.high.toFixed(4)} (~${est.calls} calls)\n`);
       for (const w of est.warnings) process.stderr.write(`  note: ${w}\n`);
+      // Stamp the preflight snapshot on the run: the report compares it to actuals
+      run.estimate = { calls: est.calls, low: est.low, high: est.high, breakdown: est.breakdown };
     } catch (err: any) {
       process.stderr.write(`Cost estimate unavailable: ${err.message}\n`);
     }

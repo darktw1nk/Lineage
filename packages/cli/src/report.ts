@@ -141,6 +141,32 @@ export function generateReport(
   lines.push(`| API calls | ${result.totals.calls} |`);
   lines.push('');
 
+  // ---- Where the money went ----
+  if (result.costBreakdown) {
+    lines.push('## Where the money went');
+    lines.push('');
+    if (result.estimate) {
+      lines.push(`*Estimated: $${result.estimate.low.toFixed(4)} – $${result.estimate.high.toFixed(4)} (~${result.estimate.calls} calls) · Actual: $${result.totals.usd.toFixed(4)} (${result.totals.calls} calls)*`);
+      lines.push('');
+    }
+    const estByLabel = new Map((result.estimate?.breakdown ?? []).map(b => [b.label, b]));
+    const purposes = Object.keys(result.costBreakdown).filter(k => !k.startsWith('model:'));
+    const allLabels = [...new Set([...purposes, ...estByLabel.keys()])];
+    lines.push('| Purpose | Est. calls | Calls | Est. $ | Actual $ |');
+    lines.push('|---|---|---|---|---|');
+    for (const label of allLabels) {
+      const act = result.costBreakdown[label];
+      const est = estByLabel.get(label);
+      lines.push(`| ${label} | ${est ? est.calls : '—'} | ${act ? act.calls : '—'} | ${est ? `$${est.low.toFixed(4)}–$${est.high.toFixed(4)}` : '—'} | ${act ? `$${act.usd.toFixed(4)}` : '—'} |`);
+    }
+    const models = Object.keys(result.costBreakdown).filter(k => k.startsWith('model:'));
+    if (models.length > 0) {
+      lines.push('');
+      lines.push('**By model:** ' + models.map(m => `${m.slice(6)} $${result.costBreakdown![m].usd.toFixed(4)} (${result.costBreakdown![m].calls} calls)`).join(', '));
+    }
+    lines.push('');
+  }
+
   // ---- Fitness Progression ----
   lines.push('## Fitness Progression');
   lines.push('');
