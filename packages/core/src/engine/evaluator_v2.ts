@@ -22,6 +22,7 @@ import type {
   TestCase,
   TestResult,
   ProviderAdapter,
+  ModelRef,
 } from '../types.js';
 import { createHash } from 'crypto';
 import { createShellPopulation, mutateNode } from './operators_v2.js';
@@ -29,6 +30,7 @@ import { selectTopPerformers, createNextGeneration } from './generation.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { initGlobalSemaphore } from './semaphore.js';
 import { rngFor } from './rng.js';
+import { COST_LABELS } from './estimate.js';
 import { calculateFitness } from './fitness.js';
 import { getDatabase } from '../database/init.js';
 
@@ -48,6 +50,7 @@ interface EvaluationState {
   promptMode: 'system' | 'inline'; // resolved from config (default 'system')
   pairwiseEnabled: boolean;   // opt-in pairwise playoff
   pairwiseContenders: number; // resolved + clamped (2..8) from config
+  costContext: 'evolution' | 'holdout'; // routes accruals to holdout labels during the final evaluation
   pausedAt?: number; // Timestamp when paused (if currently paused)
   totalPausedMs: number; // Total time spent paused
   gradingTotal: number; // Total grading calls completed
@@ -201,6 +204,7 @@ export async function startEvaluation(
     promptMode: config.promptMode ?? 'system',
     pairwiseEnabled,
     pairwiseContenders,
+    costContext: 'evolution',
     totalPausedMs: 0,
     gradingTotal: 0,
     gradingFailures: 0,
@@ -340,10 +344,10 @@ async function mutatePopulationInBackground(
       node.status = 'awaiting';
       
       // Track costs
-      state.run.totals.tokensPrompt += result.cost.promptTokens;
-      state.run.totals.tokensCompletion += result.cost.completionTokens;
-      state.run.totals.usd += result.cost.usd;
-      state.run.totals.calls += result.cost.calls;
+      accrueCost(state, COST_LABELS.fill, state.config.serviceModel, {
+        usd: result.cost.usd, promptTokens: result.cost.promptTokens,
+        completionTokens: result.cost.completionTokens, calls: result.cost.calls,
+      });
       
       // Send totals update
       sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
@@ -613,10 +617,10 @@ async function processNode(
       safetyScore = safetyResult.score;
       
       // Track service model costs from safety checks
-      state.run.totals.tokensPrompt += safetyResult.totalPromptTokens;
-      state.run.totals.tokensCompletion += safetyResult.totalCompletionTokens;
-      state.run.totals.usd += safetyResult.totalCost;
-      state.run.totals.calls += safetyResult.calls;
+      accrueCost(state, COST_LABELS.safety, state.config.serviceModel, {
+        usd: safetyResult.totalCost, promptTokens: safetyResult.totalPromptTokens,
+        completionTokens: safetyResult.totalCompletionTokens, calls: safetyResult.calls,
+      });
       
       sendUpdate(runId, {
         type: 'totals',
@@ -643,10 +647,10 @@ async function processNode(
       stabilityScore = stabilityResult.score;
       
       // Track candidate model costs from stability runs
-      state.run.totals.tokensPrompt += stabilityResult.totalPromptTokens;
-      state.run.totals.tokensCompletion += stabilityResult.totalCompletionTokens;
-      state.run.totals.usd += stabilityResult.totalCost;
-      state.run.totals.calls += stabilityResult.calls;
+      accrueCost(state, COST_LABELS.stability, node.params.model, {
+        usd: stabilityResult.totalCost, promptTokens: stabilityResult.totalPromptTokens,
+        completionTokens: stabilityResult.totalCompletionTokens, calls: stabilityResult.calls,
+      });
       
       sendUpdate(runId, {
         type: 'totals',
@@ -849,10 +853,10 @@ async function runSingleSample(
       : result.output;
     
     // Update totals immediately for candidate model call
-    state.run.totals.tokensPrompt += result.promptTokens;
-    state.run.totals.tokensCompletion += result.completionTokens;
-    state.run.totals.usd += result.usd;
-    state.run.totals.calls++;
+    accrueCost(state, state.costContext === 'holdout' ? COST_LABELS.holdout : COST_LABELS.candidates, params.model, {
+      usd: result.usd, promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens, calls: 1,
+    });
     
     sendUpdate(runId, {
       type: 'totals',
@@ -901,10 +905,10 @@ async function runSingleSample(
       }
 
       // Track service model costs from LLM grading
-      state.run.totals.tokensPrompt += gradingResult.promptTokens;
-      state.run.totals.tokensCompletion += gradingResult.completionTokens;
-      state.run.totals.usd += gradingResult.usd;
-      state.run.totals.calls++;
+      accrueCost(state, state.costContext === 'holdout' ? COST_LABELS.holdoutGrading : COST_LABELS.grading, state.config.serviceModel, {
+        usd: gradingResult.usd, promptTokens: gradingResult.promptTokens,
+        completionTokens: gradingResult.completionTokens, calls: 1,
+      });
       
       sendUpdate(runId, {
         type: 'totals',
@@ -1052,10 +1056,7 @@ async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<voi
     tests: llmTests,
     config: state.config,
     accrue: (usd, promptTokens, completionTokens) => {
-      state.run.totals.usd += usd;
-      state.run.totals.tokensPrompt += promptTokens;
-      state.run.totals.tokensCompletion += completionTokens;
-      state.run.totals.calls++;
+      accrueCost(state, COST_LABELS.playoff, state.config.serviceModel, { usd, promptTokens, completionTokens, calls: 1 });
       sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
     },
     shouldAbort: () => !!(budget && state.run.totals.usd >= budget),
@@ -1112,10 +1113,10 @@ async function moveToNextGeneration(
   const newGenNodes = result.newNodes;
   
   // Track costs
-  state.run.totals.tokensPrompt += result.costTracking.promptTokens;
-  state.run.totals.tokensCompletion += result.costTracking.completionTokens;
-  state.run.totals.usd += result.costTracking.usd;
-  state.run.totals.calls += result.costTracking.calls;
+  accrueCost(state, COST_LABELS.operators, state.config.serviceModel, {
+    usd: result.costTracking.usd, promptTokens: result.costTracking.promptTokens,
+    completionTokens: result.costTracking.completionTokens, calls: result.costTracking.calls,
+  });
   
   sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
   
@@ -1175,6 +1176,7 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
   const meanScore = (rs: TestResult[]) => rs.reduce((a, r) => a + r.score, 0) / rs.length;
   const perTest = (rs: TestResult[]) => rs.map(r => ({ testId: r.testId, score: r.score }));
 
+  state.costContext = 'holdout';
   try {
     const championResults = await evaluatePromptOnTests(champion.prompt, champion.params, state.holdoutTests, state, runId);
     holdout.champion = { score: meanScore(championResults), perTest: perTest(championResults) };
@@ -1183,6 +1185,8 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
     console.log(`[Evaluator] Generalization (unseen tests): seed ${holdout.seed.score.toFixed(2)} → champion ${holdout.champion.score.toFixed(2)}`);
   } catch (error) {
     console.error('[Evaluator] Holdout evaluation failed:', error);
+  } finally {
+    state.costContext = 'evolution';
   }
   sendUpdate(runId, { type: 'holdout_result', holdout });
   persistRun(state);
@@ -1200,6 +1204,8 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   state.run.finishedAt = Date.now();
 
   persistRun(state);
+
+  sendUpdate(runId, { type: 'cost_breakdown', breakdown: state.run.costBreakdown, estimate: state.run.estimate });
 
   // Send final updates
   if (state.run.stopReason) {
@@ -1220,6 +1226,27 @@ function computeCacheKey(node: CandidateNode, state: EvaluationState): string {
   return createHash('sha256')
     .update(`${node.prompt}|${node.params.model.provider}/${node.params.model.model}|${node.params.temperature}|${state.promptMode}|${state.samplesPerTest}|${testSetSig}`)
     .digest('hex');
+}
+
+/** Single accounting path: totals + per-purpose + per-model breakdown together. */
+function accrueCost(
+  state: EvaluationState,
+  purpose: string,
+  model: ModelRef,
+  c: { usd: number; promptTokens: number; completionTokens: number; calls: number },
+): void {
+  state.run.totals.usd += c.usd;
+  state.run.totals.tokensPrompt += c.promptTokens;
+  state.run.totals.tokensCompletion += c.completionTokens;
+  state.run.totals.calls += c.calls;
+  const bd = (state.run.costBreakdown ??= {});
+  for (const key of [purpose, `model:${model.provider}/${model.model}`]) {
+    const rec = (bd[key] ??= { calls: 0, promptTokens: 0, completionTokens: 0, usd: 0 });
+    rec.calls += c.calls;
+    rec.promptTokens += c.promptTokens;
+    rec.completionTokens += c.completionTokens;
+    rec.usd += c.usd;
+  }
 }
 
 /** Checkpoint the run so an interrupted process loses nothing. Never throws. */

@@ -105,6 +105,13 @@ describe('resume from checkpoint', () => {
     // never hit the adapter again (cache may also shield them — either way, no calls)
     expect(evalPrompts).not.toContain(keptFinishedPrompt);
     for (const n of full.generations[0]) expect(evalPrompts).not.toContain(n.prompt);
+
+    // Cost breakdown survives resume and keeps its sums-equal-totals invariant
+    const rbd = resumed.costBreakdown;
+    expect(rbd).toBeDefined();
+    const rp = Object.keys(rbd).filter((k: string) => !k.startsWith('model:'));
+    expect(rp.reduce((a: number, k: string) => a + rbd[k].usd, 0)).toBeCloseTo(resumed.totals.usd, 10);
+    expect(rp.reduce((a: number, k: string) => a + rbd[k].calls, 0)).toBe(resumed.totals.calls);
   }, 60000);
 
   it('refuses to resume a finished run', async () => {

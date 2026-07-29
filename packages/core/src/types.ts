@@ -143,6 +143,8 @@ export interface EvaluationRun {
     skipped?: 'budget' | 'no-champion';
   };
   playoffs?: Array<{ generation: number; ranking: UUID[] }>; // pairwise playoff rankings, best first
+  costBreakdown?: Record<string, { calls: number; promptTokens: number; completionTokens: number; usd: number }>; // COST_LABELS keys + model:<provider>/<model> keys
+  estimate?: { calls: number; low: number; high: number; breakdown: Array<{ label: string; calls: number; low: number; high: number }> }; // preflight snapshot
   version: string; // schema version
   totalPausedMs?: number; // Total time spent paused (for accurate elapsed time display)
   pausedAt?: number; // Timestamp when currently paused (if status is 'paused')
