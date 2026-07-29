@@ -169,3 +169,32 @@ describe('plugin provider env fallback', () => {
     }
   });
 });
+
+describe('provider key lookup tolerates the field casing a user actually writes', () => {
+  // Isolate from the real electron-store: resolveApiKey falls back to it, and
+  // the developer running these tests has genuine keys saved there.
+  let scratch: string;
+  beforeEach(() => {
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'pe-keycase-'));
+    __setStoreDirForTests(scratch);
+  });
+  afterEach(() => {
+    __setStoreDirForTests(null);
+    fs.rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it('matches openAIKey for provider openai', () => {
+    // Exact-literal lookup for `openaiKey` ignored it silently: no warning
+    // (the typo shield whitelisted it) and no key, so the run died with
+    // "No API key found for provider: openai" with the key right there.
+    expect(resolveApiKey('openai' as any, { openAIKey: 'sk-cased' })).toBe('sk-cased');
+  });
+
+  it('still prefers the canonical spelling when both are present', () => {
+    expect(resolveApiKey('openai' as any, { openaiKey: 'sk-exact', openAIKey: 'sk-cased' })).toBe('sk-exact');
+  });
+
+  it('does not treat an unrelated *Key field as a provider key', () => {
+    expect(resolveApiKey('openai' as any, { licenseKey: 'not-a-provider-key' })).toBeNull();
+  });
+});

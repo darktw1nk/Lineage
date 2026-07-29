@@ -127,6 +127,7 @@ Both drive the same engine (`@promptengine/core`).
 
 ```bash
 npm install
+npm run cli -- --init                                       # writes a runnable evolve.json to start from
 npm run cli -- --config evolve.json --output results.json   # agents: JSON in, JSON out
 npm run electron:dev                                         # humans: watch it evolve
 ```

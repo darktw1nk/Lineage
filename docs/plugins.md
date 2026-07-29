@@ -79,7 +79,9 @@ try { /* ... */ } catch (err) { throw withPartialCost(err, spentSoFar); }
 ```
 
 - Prefer subclassing `BaseProviderAdapter` (exported from `@promptengine/core`) to inherit retry, concurrency-semaphore, and stored-key handling; implement `callAPI()` and `getApiKey()`. A plain object adapter (like the Ollama example) also works but bypasses those services.
-- API keys resolve from `<PROVIDER>_API_KEY` env vars (uppercased, dashes→underscores), `--set-key <provider> <key>`, or the desktop Settings.
+- API keys resolve from `<PROVIDER>_API_KEY` env vars (uppercased, dashes→underscores), a `"<provider>Key"` field in the CLI config, `--set-key <provider> <key>`, or the desktop Settings.
+- **`requiresApiKey: true`** — set this if your provider needs a key. Hosts refuse to start a run when a required key is missing, naming your provider and how to set it. Without it the run starts and every call fails against the real API, with retries and backoff, before reporting a generic failure. Omit it for a keyless provider (a local server like the Ollama example): defaulting to "required" is what used to make that example unusable.
+- **`supportsSeed: false`** — set this if you accept `seed` in `call()` but do not forward it. The engine partitions its result cache by seed, so an adapter that silently drops it turns identical work into cache misses. Leave it unset if you do pass the seed through.
 - `models` entries appear in the desktop model pickers and give budget enforcement correct pricing.
 
 ## Failure behavior

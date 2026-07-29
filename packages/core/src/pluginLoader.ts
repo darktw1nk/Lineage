@@ -20,7 +20,19 @@ export interface LoadPluginsOptions {
 }
 
 function discover(dir: string): string[] {
-  if (!fs.existsSync(dir)) return [];
+  // A typo'd path used to load nothing in silence, and the failure surfaced
+  // much later as an unrelated "Unknown provider" error.
+  if (!fs.existsSync(dir)) {
+    console.warn(`[Plugins] ${dir} does not exist — no plugins loaded from it.`);
+    return [];
+  }
+  // docs/plugins.md says a plugin may be a single .mjs FILE, but readdirSync on
+  // one threw a raw ENOTDIR out of the whole CLI — breaking the documented
+  // promise that a bad plugin "contributes nothing" and the host keeps running.
+  // The config-file route already handled file-vs-directory; --plugins did not.
+  if (fs.statSync(dir).isFile()) {
+    return /\.(mjs|js)$/.test(dir) ? [dir] : [];
+  }
   const found: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);

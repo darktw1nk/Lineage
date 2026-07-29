@@ -206,6 +206,16 @@ function parseArgs(argv: string[]): {
         console.error(`${flag} requires a value`);
         process.exit(1);
       }
+      // A value that is itself a flag means the user omitted the value. Left
+      // unguarded, the next flag was silently EATEN: `--report --estimate` ran
+      // a complete paid evolution and wrote the markdown report to a file
+      // literally named "--estimate" — the one flag whose entire purpose is to
+      // look before spending. `--config --db path` likewise consumed `--db` and
+      // then blamed the path ("Unknown option: <path>").
+      if (value.startsWith('--')) {
+        console.error(`${flag} requires a value, but got the flag "${value}" — did you omit it?`);
+        process.exit(1);
+      }
       return value;
     };
 
@@ -223,18 +233,10 @@ function parseArgs(argv: string[]): {
         result.pluginDirs.push(requireValue('--plugins'));
         break;
       case '--resume':
-        result.resume = args[++i];
-        if (!result.resume) {
-          console.error('--resume requires a run id');
-          process.exit(1);
-        }
+        result.resume = requireValue('--resume');
         break;
       case '--report':
-        result.report = args[++i];
-        if (!result.report) {
-          console.error("--report requires a path or 'none'");
-          process.exit(1);
-        }
+        result.report = requireValue('--report');
         break;
       case '--archive-runs':
         result.archiveRuns = requireValue('--archive-runs');
@@ -282,14 +284,14 @@ function parseArgs(argv: string[]): {
         result.listModels = true;
         break;
       case '--set-key': {
-        const provider = args[++i] as Provider;
-        const key = args[++i];
+        // Both operands guarded. Two raw argv reads let `--set-key openai
+        // --help` REPLACE a working key with the string "--help" and report
+        // success — against the store the desktop app shares, with no CLI
+        // command to inspect or undo it.
+        const provider = requireValue('--set-key <provider>') as Provider;
+        const key = requireValue('--set-key <provider> <key>');
         if (!VALID_PROVIDERS.includes(provider)) {
           console.error(`Note: "${provider}" is not a built-in provider (${VALID_PROVIDERS.join(', ')}) — saving the key anyway (plugin provider assumed).`);
-        }
-        if (!key) {
-          console.error('Missing API key value for --set-key');
-          process.exit(1);
         }
         result.setKey = { provider, key };
         break;
@@ -333,6 +335,15 @@ function handleInit(targetPath: string): void {
     console.error(`Refusing to overwrite ${resolved} — it already exists.`);
     process.exit(1);
   }
+  // `--init cfgs/deep/evolution.json` used to die on a raw ENOENT from
+  // writeFileSync with no suggestion. Creating the path the user asked for is
+  // the obvious behaviour.
+  try {
+    fsSync.mkdirSync(nodePath.dirname(resolved), { recursive: true });
+  } catch (error) {
+    console.error(`Could not create ${nodePath.dirname(resolved)}: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
 
   const starter = {
     name: 'My First Evolution',
@@ -359,8 +370,12 @@ function handleInit(targetPath: string): void {
   console.error('');
   console.error('Next:');
   console.error('  1. Set a key:      promptengine --set-key openai <key>');
-  console.error(`  2. Price the run:  promptengine --estimate --config ${targetPath}`);
-  console.error(`  3. Run it:         promptengine --config ${targetPath} --report`);
+  // Quote the path: a config called "my config.json" produced next-step
+  // commands that break in any shell. And --report takes a VALUE — printing it
+  // bare made the new user's last instruction exit 1.
+  const q = /[\s()'"]/.test(targetPath) ? `"${targetPath}"` : targetPath;
+  console.error(`  2. Price the run:  promptengine --estimate --config ${q}`);
+  console.error(`  3. Run it:         promptengine --config ${q} --report report.md`);
 }
 
 async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath?: string): Promise<void> {
@@ -541,6 +556,7 @@ async function emitOutputs(
   outputPath?: string,
   reportArg?: string,
 ): Promise<void> {
+  let outputWriteFailed = false;
   // Optionally write to output file. A bad path must NOT change the exit code:
   // the run already completed and its JSON already reached stdout, so throwing
   // here turned a good, paid-for run into a CI failure — and skipped the report.
@@ -550,7 +566,18 @@ async function emitOutputs(
       fsMod.writeFileSync(outputPath, JSON.stringify(result, null, 2));
       process.stderr.write(`\nResults written to ${outputPath}\n`);
     } catch (error) {
-      process.stderr.write(`\nWarning: could not write results to ${outputPath}: ${error instanceof Error ? error.message : error}\n`);
+      // The comment above was half right and half fatal. Setting --output
+      // SUPPRESSES stdout (engine.ts), so when the write fails the JSON reached
+      // NOWHERE — the run completed, was paid for, and exited 0 with the result
+      // gone. Fall back to stdout so the data survives, and exit non-zero so a
+      // script does not treat a lost result as success. The report is still
+      // written first, below, before the exit.
+      process.stderr.write(
+        `\nCould not write results to ${outputPath}: ${error instanceof Error ? error.message : error}\n` +
+        `Writing the JSON to stdout instead so it is not lost.\n`,
+      );
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      outputWriteFailed = true;
     }
   }
 
@@ -586,6 +613,11 @@ async function emitOutputs(
   // Agents rely on exit codes: no usable best prompt means the run failed.
   if (!result.best) {
     process.stderr.write(`\nEvolution produced no usable result${result.error ? `: ${result.error}` : ''}\n`);
+    process.exitCode = 1;
+  } else if (outputWriteFailed) {
+    // The evolution itself succeeded, but the deliverable did not land where
+    // it was asked to. A script that only checks the exit code must not read
+    // that as success.
     process.exitCode = 1;
   }
 }
@@ -750,14 +782,22 @@ async function main(): Promise<void> {
   // good, so `--config cfg.json --prune-runs 99` exited 0 having never
   // evolved anything and never said why.
   const utilityCommand =
-    args.setKey ? '--set-key'
+    args.init ? '--init'
+    : args.setKey ? '--set-key'
     : args.syncModels ? '--sync-models'
     : args.listModels ? '--list-models'
     : args.archiveRuns ? '--archive-runs'
     : args.pruneRuns !== undefined ? '--prune-runs'
     : null;
-  if (utilityCommand && (args.config || args.resume)) {
-    process.stderr.write(`note: ${utilityCommand} takes precedence — --config/--resume are ignored\n`);
+  // `--estimate` belongs in the ignored list too: the user asked for a price
+  // and silently got an archive.
+  const ignored = [
+    args.config ? '--config' : null,
+    args.resume ? '--resume' : null,
+    args.estimate ? '--estimate' : null,
+  ].filter(Boolean);
+  if (utilityCommand && ignored.length > 0) {
+    process.stderr.write(`note: ${utilityCommand} takes precedence — ${ignored.join('/')} ${ignored.length > 1 ? 'are' : 'is'} ignored\n`);
   }
 
   // Before everything else: --init needs no database, no keys and no config.

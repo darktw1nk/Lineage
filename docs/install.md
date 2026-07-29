@@ -33,6 +33,7 @@ Three ways, in priority order:
 npm run cli -- --list-models --db ./run.db
 
 # Run an evolution
+npm run cli -- --init                                    # writes a runnable evolve.json
 npm run cli -- --config evolve.json --db ./run.db --output results.json
 
 # Sync the full OpenRouter model catalog (needs an OpenRouter key)
@@ -43,7 +44,7 @@ npm run cli -- --help
 
 Behavior contract:
 
-- **stdout** carries exactly the JSON result; all progress/logs go to **stderr**
+- **stdout** carries exactly the JSON result for a `--config` run and for `--estimate`; all progress/logs go to **stderr**. (`--help` and `--list-models` print text to stdout; the other utility commands print only to stderr.)
 - `--output <path>` also writes the JSON to a file; a human-readable markdown report lands in `testoutputs/` next to it
 - **Exit code 0** ⇔ the run produced a usable best prompt; **1** otherwise
 - `--db <path>` isolates the run in its own SQLite file; without it the CLI shares the desktop app's database (synced models and history appear in both)

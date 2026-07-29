@@ -11,6 +11,37 @@
 import type { OperatorPlugin, ProviderPlugin, ProviderAdapter, ModelCostEntry } from './types.js';
 import type { SqlJsWrapper } from './database/init.js';
 import { mutateNode, crossoverNodes, metaPromptNode, varyParameters, varyModel } from './engine/operators_v2.js';
+import { withGlobalSemaphore } from './engine/semaphore.js';
+import { BaseProviderAdapter } from './providers/base.js';
+
+/**
+ * Put a plugin adapter behind the global concurrency semaphore.
+ *
+ * `withGlobalSemaphore` had exactly one call site — inside
+ * `BaseProviderAdapter.call` — and plugin adapters are plain objects (that is
+ * the shape docs/plugins.md documents and the shipped Ollama example uses), so
+ * they bypassed it entirely. docs/cli.md calls `parallelLimit` "maximum
+ * concurrent API calls"; measured peak for a plugin provider was
+ * `parallelLimit x testSet.length` (32 at parallelLimit 8 with 4 tests), and
+ * `samplesPerTest` multiplies it again. A modest 8/20/5 config would open 800
+ * concurrent requests against a third-party API or a local server.
+ *
+ * Subclasses of BaseProviderAdapter already acquire it and must NOT be
+ * double-wrapped: nested acquisition of a 1-permit semaphore self-deadlocks.
+ */
+function throttleIfNeeded(adapter: ProviderAdapter): ProviderAdapter {
+  if (adapter instanceof BaseProviderAdapter) return adapter;
+  const inner = adapter.call.bind(adapter);
+  return new Proxy(adapter, {
+    get(target, prop, receiver) {
+      if (prop === 'call') {
+        return (opts: Parameters<ProviderAdapter['call']>[0]) =>
+          withGlobalSemaphore(() => inner(opts), `${adapter.name}:${opts.model}`);
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
 
 const ZERO_COST = { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 };
 const BUILTIN_PROVIDER_IDS = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq'];
@@ -128,7 +159,7 @@ export function registerProvider(plugin: ProviderPlugin): void {
     }
   }
 
-  providers.set(id, plugin.adapter);
+  providers.set(id, throttleIfNeeded(plugin.adapter));
   if (plugin.models?.length) {
     pendingModels.push(...plugin.models);
     tryFlushModels();

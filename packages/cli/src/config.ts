@@ -255,6 +255,28 @@ export function validateCliConfig(config: CliConfig): void {
   positiveInt(config.samplesPerTest, 'samplesPerTest');
   positiveInt(config.callTimeoutMs, 'callTimeoutMs');
   positiveInt(config.timeLimitMs, 'timeLimitMs');
+
+  // `guardrails` is the one array field a user naturally writes as prose, and
+  // a bare string is iterable: fitness.ts does `for (const g of guardrails)`,
+  // so a 32-character rule became 32 safety judge calls, each grading a single
+  // CHARACTER as if it were a rule. Measured 34 total calls against 3 for the
+  // same config with brackets — and scaled to 8 candidates x 5 generations,
+  // ~1,600 meaningless paid calls. The estimator reports the inflated number
+  // faithfully, so nothing looks wrong.
+  if (config.guardrails !== undefined) {
+    if (!Array.isArray(config.guardrails)) {
+      throw new Error(
+        `"guardrails" must be an ARRAY of rules, not a ${typeof config.guardrails}. ` +
+        `Write ["${String(config.guardrails).slice(0, 40)}"] — a bare string is iterated character by character, ` +
+        'and each character costs a safety judge call.',
+      );
+    }
+    config.guardrails.forEach((g, i) => {
+      if (typeof g !== 'string' || g.trim() === '') {
+        throw new Error(`"guardrails[${i}]" must be a non-empty string (got ${JSON.stringify(g)}).`);
+      }
+    });
+  }
   nonNegativeNumber(config.budget, 'budget');
   // targetFitness 0 is met by literally every candidate, so the run stops after
   // one generation — never what anyone means. budget 0 IS meaningful ("spend
@@ -297,7 +319,12 @@ export function validateCliConfig(config: CliConfig): void {
     // `<provider>Key` is the documented way to supply a key for ANY provider,
     // including one a plugin registers — the CLI's own error message even tells
     // you to add "fakepKey". Warning that it is unknown contradicted that.
-    if (!KNOWN_KEYS.has(key) && !/^[a-z][a-z0-9]*Key$/i.test(key)) {
+    // Case-SENSITIVE `Key`, matching what extractConfigKeys actually harvests.
+    // The two were inverted: this shield whitelisted `openaikey` and `monkey`
+    // (so no warning) while the harvester ignored them (so no key) — a real
+    // credential sat in the config and the run died with "No API key found",
+    // silently. Anything that is not harvested must be warned about.
+    if (!KNOWN_KEYS.has(key) && !/^[a-zA-Z][a-zA-Z0-9]*Key$/.test(key)) {
       process.stderr.write(`warning: unknown config key "${key}" — ignored (typo?)\n`);
     }
   }
@@ -461,6 +488,10 @@ export function extractConfigKeys(config: CliConfig): Record<string, string> {
   // but a hardcoded list made that a silent no-op for every plugin provider —
   // the advice named a field the loader never read.
   for (const [field, value] of Object.entries(config)) {
+    // Case-SENSITIVE on the `Key` suffix. A case-insensitive suffix would drag
+    // in ordinary words — `monkey`, `turkey` — and put them in what is
+    // effectively a credential map. `openAIKey` is covered because it does end
+    // in `Key`; the resolver then matches it case-insensitively.
     if (/^[A-Za-z0-9_-]+Key$/.test(field) && typeof value === 'string' && value) {
       keys[field] = value;
     }

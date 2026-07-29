@@ -331,6 +331,16 @@ describe('CLI Config - extractConfigKeys', () => {
     expect(Object.keys(keys)).toHaveLength(0);
   });
 
+  it('harvests a provider key whose casing differs from the canonical field', () => {
+    // `openAIKey` is the most natural spelling on earth for a field about
+    // OpenAI. It was harvested but never matched — the resolver compared the
+    // exact literal `openaiKey` — and the typo shield whitelisted it, so a real
+    // credential sat in the config, produced no warning, and the run died with
+    // "No API key found for provider: openai".
+    const keys = extractConfigKeys({ ...MINIMAL_CONFIG, openAIKey: 'sk-cased' } as any);
+    expect(keys.openAIKey).toBe('sk-cased');
+  });
+
   it('harvests a PLUGIN provider key, not just the five built-ins', () => {
     // The docs and the missing-key error both tell users to put
     // "<provider>Key" in the config, but a hardcoded five-field list made that

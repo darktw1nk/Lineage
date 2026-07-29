@@ -132,7 +132,21 @@ export function resolveApiKey(
   // `myprovKey`. A lookup restricted to the five built-ins made the field the
   // error message recommends do nothing at all for plugins.
   const configKey = CONFIG_KEY_MAP[provider] ?? `${String(provider)}Key`;
-  const fromConfig = cliConfigKeys && configKey ? clean(cliConfigKeys[configKey]) : null;
+  // Match the field case-INSENSITIVELY. `openAIKey` is the most natural
+  // spelling on earth for a field about OpenAI, and an exact-literal lookup
+  // silently ignored it: no warning (the typo shield whitelists it), no key,
+  // and a run that failed with "No API key found for provider: openai" while
+  // the key sat right there in the config.
+  let fromConfig: string | null = null;
+  if (cliConfigKeys) {
+    const wanted = configKey.toLowerCase();
+    for (const [field, value] of Object.entries(cliConfigKeys)) {
+      if (field.toLowerCase() === wanted) {
+        fromConfig = clean(value);
+        if (fromConfig) break;
+      }
+    }
+  }
   if (fromConfig) return fromConfig;
 
   // 3. Electron-store saved key

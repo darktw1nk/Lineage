@@ -81,8 +81,15 @@ interface EvaluationState {
    * Counting in-flight commitments against the cap is what makes it a cap.
    */
   reservedUSD: number;
-  /** Per-call worst case, cached per model so the gate costs no lookups. */
-  callCeilingUSD: Map<string, number>;
+  /**
+   * Catalog prices per model, cached so the gate costs no lookups.
+   * A struct, NOT two entries with a `#c` suffix on the key: a model literally
+   * named `x#c` then read another model's completion price as its prompt
+   * price, refused every call, and finished `exhausted` with nothing produced.
+   */
+  callCeilingUSD: Map<string, { prompt: number; completion: number }>;
+  /** Completion tokens this run has actually seen per model — reservations adapt to it. */
+  observedCompletion: Map<string, { sum: number; n: number }>;
   /** Priciest single call settled so far — the reservation floor for adapter-priced models. */
   maxObservedCallUSD: number;
   /**
@@ -98,6 +105,8 @@ interface EvaluationState {
   resolvePriceProbe: (() => void) | null;
   /** Calls that threw. Their provider-side spend, if any, is unknowable here. */
   failedCalls: number;
+  /** Times the cap REFUSED a call. Settled spend can sit below the cap while this climbs. */
+  budgetRefusals: number;
   /** Wall clock of the last per-node checkpoint, and what it cost — see maybeCheckpointNode. */
   lastNodeCheckpointAt: number;
   lastCheckpointCostMs: number;
@@ -353,6 +362,27 @@ async function startEvaluationInner(
   // CLI/Electron process must still be told its cost dimension is disabled.
   resetFitnessWarnings();
 
+  // A seed promises reproducibility, and docs/cli.md's paired-run method
+  // depends on it — but latency is measured wall clock and relative-mode norms
+  // depend on what the rest of the generation happened to cost, so both make
+  // fitness a function of machine load. Measured: identical config and seed
+  // produced different champions, different models and a different best
+  // prompt. Say so rather than letting the comparison look controlled.
+  if (config.seed !== undefined) {
+    const nondeterministic = [
+      (config.fitness.weights.latency ?? 0) > 0 ? 'latency' : null,
+      config.fitness.costNorm?.mode === 'relative' && (config.fitness.weights.cost ?? 0) > 0 ? 'cost (relative)' : null,
+      config.fitness.latencyNorm?.mode === 'relative' && (config.fitness.weights.latency ?? 0) > 0 ? 'latency (relative)' : null,
+    ].filter(Boolean);
+    if (nondeterministic.length > 0) {
+      console.warn(
+        `[Evaluator] seed is set, but the ${nondeterministic.join(' and ')} weight(s) score against measured wall clock ` +
+        `or against whatever the rest of the generation happened to cost — so this run is NOT reproducible. ` +
+        `Drop those weights for a paired-seed comparison.`,
+      );
+    }
+  }
+
   // Initialize state
   const state: EvaluationState = {
     run: {
@@ -384,7 +414,9 @@ async function startEvaluationInner(
     warnedZeroCostModels: new Set(),
     reservedUSD: 0,
     callCeilingUSD: new Map(),
+    observedCompletion: new Map(),
     maxObservedCallUSD: 0,
+    budgetRefusals: 0,
     priceProbe: null,
     resolvePriceProbe: null,
     failedCalls: 0,
@@ -643,8 +675,21 @@ async function mutatePopulationInBackground(
       // Send update
       sendUpdate(runId, { type: 'node_updated', node });
     } catch (error) {
+      // A refused reservation is the cap working, not a failure. Falling into
+      // the generic handler below marked the node `failed` while leaving its
+      // shell changelog reading "Waiting for mutation..." — so the node was
+      // destroyed AND the reason was invisible. Measured 5 of 8 generation-0
+      // nodes lost this way on a budget 2.6x the run's true cost. The
+      // generation-transition path (generation.ts) already carries correctly.
+      if (error instanceof BudgetExhaustedError) {
+        console.warn(`[Evaluator] Budget exhausted before mutating ${node.id.slice(0, 8)} — carrying the seed prompt forward`);
+        node.status = 'awaiting';
+        node.changeLog = [{ label: 'CARRY', text: 'Budget exhausted before mutation' }];
+        sendUpdate(runId, { type: 'node_updated', node });
+        return;
+      }
       console.error(`[Evaluator] Mutation failed for ${node.id.slice(0, 8)}:`, error);
-      
+
       // Calls made before the failure were still billed — account for them
       const { partialCostOf } = await import('./operator-cost.js');
       const spent = partialCostOf(error);
@@ -1586,7 +1631,17 @@ async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<voi
       accrueCost(state, COST_LABELS.playoff, state.config.serviceModel, { usd, promptTokens, completionTokens, calls: 1 });
       sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
     },
-    shouldAbort: () => budgetCapped && state.run.totals.usd >= budget!,
+    // A manual Stop must abort the playoff too. finishEvaluation only drains
+    // `inProgress`, and during a generation transition every node is already
+    // finished — so the drain returned instantly, the run was declared
+    // finished, and the playoff plus a full operator batch kept running.
+    // Measured 58 further provider calls (+19.5%) served after the run
+    // reported `stopReason: manual`, absent from totals, the breakdown, the
+    // report, the spend ledger and the budget check.
+    shouldAbort: () =>
+      state.stopRequested ||
+      state.status === 'stopped' ||
+      (budgetCapped && state.run.totals.usd >= budget!),
   });
   if (!result) return;
 
@@ -1656,8 +1711,19 @@ async function moveToNextGeneration(
   const topPerformers = selectTopPerformers(currentGen, state.config);
   
   if (topPerformers.length === 0) {
-    console.log(`[Evaluator] No valid performers, stopping`);
-    state.run.stopReason = 'exhausted';
+    // Say WHY there are none. "exhausted" was written unconditionally, so a
+    // generation whose every node was abandoned by the cap reported
+    // `exhausted` — and docs/cli.md tells agents to branch on stopReason, so a
+    // budget stop read as "evolution ran out of ideas". Keep an already-set
+    // reason (budget/manual/time) rather than overwriting it.
+    const abandonedByBudget = state.budgetRefusals > 0;
+    console.log(
+      `[Evaluator] No valid performers, stopping` +
+      (abandonedByBudget ? ` (budgetUSD refused ${state.budgetRefusals} call(s) this run)` : ''),
+    );
+    if (!state.run.stopReason) {
+      state.run.stopReason = abandonedByBudget ? 'budget' : 'exhausted';
+    }
     return;
   }
   
@@ -1676,7 +1742,9 @@ async function moveToNextGeneration(
       // An operator child is 2+ service calls; reserve for both.
       reserve: (promptText: string) => reserveCall(state, state.config.serviceModel, promptText, opMaxTokens * 2),
       release: (reserved: number) => releaseCall(state, reserved),
-      exhausted: () => budgetExhausted(state),
+      // Stop as well as budget: the operator batch ran on after a manual Stop
+      // for the same reason the playoff did.
+      exhausted: () => budgetExhausted(state) || state.stopRequested || state.status === 'stopped',
     },
   );
   
@@ -1814,6 +1882,22 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   }
   console.log(`[Evaluator] Finishing evaluation, reason=${state.run.stopReason}`);
   
+  // The budget can decide a run's outcome without settled spend ever reaching
+  // the cap: reservations refuse work while totals sit below it. Reporting
+  // "generations" there told an agent branching on stopReason (as docs/cli.md
+  // instructs) that a crippled run was a clean, cheap success.
+  if (
+    state.budgetRefusals > 0 &&
+    (state.run.stopReason === 'generations' || state.run.stopReason === 'exhausted')
+  ) {
+    console.warn(
+      `[Evaluator] budgetUSD refused ${state.budgetRefusals} call(s); ` +
+      `$${state.run.totals.usd.toFixed(4)} of $${state.config.targets.budgetUSD} settled. ` +
+      `Reporting stopReason "budget" — the cap, not ${state.run.stopReason}, determined this outcome.`,
+    );
+    state.run.stopReason = 'budget';
+  }
+
   state.status = 'stopped';
   state.run.status = 'finished';
   state.run.finishedAt = Date.now();
@@ -1837,7 +1921,19 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   
   // Remove from active evaluations
   activeEvaluations.delete(runId);
-  
+
+  // Restore the ceiling to what the REMAINING runs asked for. The max-across-
+  // live-runs rule was only applied on start, never on finish, so a short
+  // parallelLimit-16 run permanently raised a long parallelLimit-1 run's
+  // ceiling — silently removing the rate-limit protection the user chose for
+  // the rest of its life.
+  const stillLive = [...activeEvaluations.values()].map(s => s.config.parallelLimit || 1);
+  if (stillLive.length > 0) {
+    const restored = Math.max(...stillLive);
+    initGlobalSemaphore(restored);
+    console.log(`[Evaluator] Global API limit restored to ${restored} (${stillLive.length} run(s) still live)`);
+  }
+
   console.log(`[Evaluator] Evaluation ${runId.slice(0, 8)} finished`);
 }
 
@@ -1908,34 +2004,58 @@ function budgetExhausted(state: EvaluationState): boolean {
 }
 
 /**
- * Worst-case dollars for one call: the whole prompt, plus a completion that
- * runs all the way to the token cap. A true upper bound is the only reservation
- * that turns budgetUSD into a bound rather than a suggestion — an average-case
- * reservation still lets a burst of concurrent calls overshoot.
+ * Completion length a reservation assumes before this run has measured one.
+ *
+ * NOT `maxTokens`. Reserving the token cap looked like the rigorous choice —
+ * a true upper bound makes budgetUSD a hard bound — but the cap defaults to
+ * 20000 while real completions are 100-1000 tokens, so every in-flight call
+ * held 20-200x its true cost, `parallelLimit` at a time. Measured on a run
+ * whose true cost was $0.3880: at a $1.00 budget (2.6x the real cost) it made
+ * 47 of 194 calls, destroyed 5 of 8 generation-0 nodes, carried 24 of 32
+ * children forward unmutated — and reported stopReason "generations" with
+ * 9.4% of the budget spent. The cap became a floor on what you had to budget:
+ * parallelLimit x 2 x maxTokens/1000 x completionPrice, regardless of the run.
+ *
+ * A realistic reservation that ADAPTS to what this run actually produces keeps
+ * the gate honest (concurrent calls still cannot all clear the same total)
+ * while leaving the overshoot bounded and small.
  */
+const ASSUMED_COMPLETION_TOKENS = 1024;
+/** Headroom over the observed mean, so a longer-than-usual reply still fits. */
+const COMPLETION_SAFETY_FACTOR = 2;
+
 async function callCeiling(
   state: EvaluationState, model: ModelRef, promptText: string, maxTokens: number,
 ): Promise<number> {
   const key = `${model.provider}/${model.model}`;
-  let perTokenPair = state.callCeilingUSD.get(key);
-  if (perTokenPair === undefined) {
+  const priceCache = (state.callCeilingUSD ??= new Map());
+  let price = priceCache.get(key);
+  if (price === undefined) {
     const { getModelCost } = await import('../providers/costs.js');
     let entry = null;
     try { entry = await getModelCost(model); } catch { /* unpriced: treated as free below */ }
-    // Pack both prices into the cache as a pair scaled per 1k.
-    state.callCeilingUSD.set(key, entry ? entry.promptUSDper1k : 0);
-    state.callCeilingUSD.set(`${key}#c`, entry ? entry.completionUSDper1k : 0);
-    perTokenPair = state.callCeilingUSD.get(key)!;
+    price = { prompt: entry?.promptUSDper1k ?? 0, completion: entry?.completionUSDper1k ?? 0 };
+    priceCache.set(key, price);
   }
-  const promptPer1k = Math.max(0, perTokenPair);
-  const completionPer1k = Math.max(0, state.callCeilingUSD.get(`${key}#c`) ?? 0);
+  const promptPer1k = Math.max(0, price.prompt);
+  const completionPer1k = Math.max(0, price.completion);
+
+  // Expected completion for THIS model: the run's own mean with headroom, or
+  // the default until it has settled a call. Never above the hard cap.
+  const seen = state.observedCompletion?.get(key);
+  const expectedCompletion = Math.min(
+    maxTokens,
+    seen && seen.n > 0
+      ? Math.max(64, Math.ceil((seen.sum / seen.n) * COMPLETION_SAFETY_FACTOR))
+      : ASSUMED_COMPLETION_TOKENS,
+  );
+
   const promptTok = Math.ceil(promptText.length / 4);
-  const fromCatalog = (promptTok / 1000) * promptPer1k + (maxTokens / 1000) * completionPer1k;
+  const fromCatalog = (promptTok / 1000) * promptPer1k + (expectedCompletion / 1000) * completionPer1k;
   // A plugin adapter (the shape docs/plugins.md documents) reports its own `usd`
   // and may have no catalog row at all, which would make the catalog ceiling $0
   // and the reservation a no-op — exactly the models where the cap matters most.
-  // The priciest call this run has actually settled is a real, observed floor
-  // for what the next one can cost.
+  // The priciest call this run has actually settled is a real, observed floor.
   const ceiling = Math.max(Number.isFinite(fromCatalog) ? fromCatalog : 0, state.maxObservedCallUSD);
   return Number.isFinite(ceiling) ? ceiling : 0;
 }
@@ -1958,6 +2078,7 @@ async function reserveCall(
     }
   }
   if (state.run.totals.usd + state.reservedUSD + ceiling > budget) {
+    state.budgetRefusals++;
     throw new BudgetExhaustedError();
   }
   state.reservedUSD += ceiling;
@@ -1969,14 +2090,22 @@ function releaseCall(state: EvaluationState, reserved: number): void {
   if (reserved > 0) {
     state.reservedUSD = Math.max(0, state.reservedUSD - reserved);
   }
-  // Always run: the probe itself reserves nothing, and a probe that never
-  // resolves (because its call threw) would strand every waiter.
-  if (state.resolvePriceProbe) {
+  // Fallback only, and DEFERRED.
+  //
+  // The probe should be resolved by accrueCost, once the price is genuinely
+  // known. But releaseCall runs in a `finally`, which fires before the
+  // accrual that follows it — resolving here directly is what made the probe
+  // useless. A microtask runs after the whole synchronous continuation
+  // (including accrueCost), so the precise resolution wins the race, and a
+  // call that THREW — and therefore never accrues — still cannot strand its
+  // waiters forever.
+  queueMicrotask(() => {
+    if (!state.resolvePriceProbe) return;
     const resolve = state.resolvePriceProbe;
     state.resolvePriceProbe = null;
     state.priceProbe = null;
     resolve();
-  }
+  });
 }
 
 /** Thrown to abandon in-flight work the moment the budget is gone. */
@@ -2015,6 +2144,29 @@ function accrueCost(
   // operator) would otherwise overstate what one call can cost.
   if (c.calls > 0) {
     state.maxObservedCallUSD = Math.max(state.maxObservedCallUSD, c.usd / c.calls);
+    // Feed the reservation model what completions on this model really look
+    // like, so the cap stops being a floor on what you have to budget.
+    // Lazily initialised: accrueCost is also reached from helpers that build a
+    // partial state (evaluatePromptOnTests is exported and called directly).
+    const observed = (state.observedCompletion ??= new Map());
+    const key = `${model.provider}/${model.model}`;
+    const seen = observed.get(key) ?? { sum: 0, n: 0 };
+    seen.sum += c.completionTokens;
+    seen.n += c.calls;
+    observed.set(key, seen);
+  }
+
+  // Resolve the price probe HERE, not in releaseCall.
+  //
+  // releaseCall runs in a `finally` that fires BEFORE this function, so every
+  // waiter woke to a still-unknown price, recomputed a ceiling of 0, and
+  // proceeded unreserved — the probe could never teach anyone anything.
+  // Measured 60% over a $0.05 cap with an unpriced model at parallelLimit 8.
+  if (state.resolvePriceProbe) {
+    const resolve = state.resolvePriceProbe;
+    state.resolvePriceProbe = null;
+    state.priceProbe = null;
+    resolve();
   }
   state.run.totals.usd += c.usd;
   state.run.totals.tokensPrompt += c.promptTokens;
