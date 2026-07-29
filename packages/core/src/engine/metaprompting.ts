@@ -89,7 +89,13 @@ function buildFailureSummary(parent: CandidateNode, config: EvaluationConfig, ma
 function truncate(text: string, maxLen: number): string {
   const oneLine = text.replace(/\n/g, ' ').trim();
   if (oneLine.length <= maxLen) return oneLine;
-  return oneLine.slice(0, maxLen) + '...';
+  // Cut on a code-point boundary. A plain slice can land between the halves of
+  // a surrogate pair, emitting a lone surrogate into the failure summary sent
+  // to the service model — one emoji at the wrong offset was enough.
+  let cut = maxLen;
+  const code = oneLine.charCodeAt(cut - 1);
+  if (code >= 0xd800 && code <= 0xdbff) cut -= 1; // don't split a high surrogate
+  return oneLine.slice(0, cut) + '...';
 }
 
 function extractJustification(reasoning: string): string {

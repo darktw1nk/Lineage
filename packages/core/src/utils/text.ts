@@ -97,22 +97,63 @@ export function stripPromptDelimiters(text: string): string {
  * first '[' to the last ']'. Throws if no parseable array is found.
  */
 export function extractJsonArray(raw: string): any[] {
-  const cleaned = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim();
-  try {
-    const direct = JSON.parse(cleaned);
-    if (Array.isArray(direct)) return direct;
-  } catch {
-    // Fall through to bracket extraction
-  }
-  const start = cleaned.indexOf('[');
-  const end = cleaned.lastIndexOf(']');
-  if (start !== -1 && end > start) {
+  // Try the raw text FIRST. Stripping ``` unconditionally corrupted any array
+  // whose strings mention code fences — and edits about fences are a common
+  // category here ("Require the answer wrapped in ```json ... ``` fences"
+  // became "Require the answer wrapped in  ...  fences", silently, in both the
+  // changelog and the instruction re-sent to the apply step).
+  const attempts: string[] = [raw.trim()];
+
+  const defenced = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+  if (defenced !== attempts[0]) attempts.push(defenced);
+
+  for (const candidate of attempts) {
     try {
-      const sliced = JSON.parse(cleaned.slice(start, end + 1));
-      if (Array.isArray(sliced)) return sliced;
-    } catch {
-      // Fall through to the error below
+      const direct = JSON.parse(candidate);
+      if (Array.isArray(direct)) return direct;
+    } catch { /* try the next form */ }
+  }
+
+  // Bracket extraction. Scanning outward from the FIRST '[' to the LAST ']'
+  // fails whenever prose either side contains a stray bracket
+  // ("Here are the edits [see list below]: [{...}]"), so walk every balanced
+  // span instead and take the first that parses as an array.
+  for (const candidate of attempts) {
+    for (const span of balancedArraySpans(candidate)) {
+      try {
+        const parsed = JSON.parse(span);
+        if (Array.isArray(parsed)) return parsed;
+      } catch { /* try the next span */ }
     }
   }
+
   throw new Error('No JSON array found in model output');
+}
+
+/** Balanced `[...]` spans, string-aware so a bracket inside a string is ignored. */
+function balancedArraySpans(text: string): string[] {
+  const spans: string[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const start = text.indexOf('[', cursor);
+    if (start === -1) break;
+    let depth = 0, inStr = false, esc = false, end = -1;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;
+      else if (ch === '[') depth++;
+      else if (ch === ']' && --depth === 0) { end = i; break; }
+    }
+    if (end === -1) { cursor = start + 1; continue; }
+    spans.push(text.slice(start, end + 1));
+    cursor = end + 1;
+  }
+  // Longest first: the outer array is the answer, a nested one rarely is.
+  return spans.sort((a, b) => b.length - a.length);
 }

@@ -171,6 +171,34 @@ describe('scoreJsonSchema', () => {
     expect(nearMiss).toBeLessThanOrEqual(5);
   });
 
+  it('the partial-credit gradient stays strict all the way down (bug-hunt regression)', () => {
+    // The penalty used to saturate at min(1, ...), so past a few extra fields
+    // every candidate collapsed to the same floor — an answer with the required
+    // key correct plus five extras scored identically to a bare string.
+    const schema = {
+      type: 'object', additionalProperties: false, required: ['answer'],
+      properties: { answer: { type: 'string' } },
+    } as object;
+    const s = (out: string) => scoreJsonSchema(out, schema).score;
+    const withExtras = (n: number) =>
+      s(JSON.stringify({ answer: 'hi', ...Object.fromEntries(Array.from({ length: n }, (_, i) => [`x${i}`, i])) }));
+
+    expect(s('{"answer":"hi"}')).toBe(10);
+    // Through the realistic range, a right answer plus noise still beats
+    // having no answer at all. (Previously ONE extra field already collapsed
+    // it to the floor.)
+    for (const n of [1, 2, 3]) {
+      expect(withExtras(n)).toBeGreaterThan(s('"hi"'));
+      expect(withExtras(n)).toBeGreaterThan(s('{}'));
+    }
+    // More extras is never worth more, and the reported score is a 1..5
+    // integer, so far enough down the two do become indistinguishable — that
+    // is the scale's granularity, not the penalty saturating.
+    expect(withExtras(1)).toBeGreaterThanOrEqual(withExtras(5));
+    expect(withExtras(5)).toBeGreaterThanOrEqual(withExtras(10));
+    expect(withExtras(10)).toBeGreaterThanOrEqual(s('"hi"'));
+  });
+
   it('extra violations outrank nothing: more broken never scores higher (bug-hunt regression)', () => {
     // satisfiedFraction measured only required-key presence, so an object with
     // every key present plus four additionalProperties violations hit the 5

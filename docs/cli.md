@@ -300,7 +300,7 @@ Each guardrail is scored 0-10 by the service model and averaged into the `safety
 |---|---|---|---|
 | `selection.policy` | `"topk"` / `"topp"` | `"topk"` | Parent selection strategy. |
 | `selection.topK` | number | `3` | Number of top parents to keep (topk). |
-| `selection.topP` | number | - | Cumulative probability threshold (topp). |
+| `selection.topP` | number | - | Cumulative share of total fitness to take as parents (`topp` policy). In practice this behaves close to "the top ⌈P·N⌉ candidates": fitness has a high floor (a mediocre candidate still scores ~5/10), so the cumulative share only diverges from a simple fraction when scores approach zero. Prefer `topK` unless you specifically want that adaptivity. |
 | `selection.eliteShare` | number | `0.05` | Fraction carried unchanged to next generation. |
 
 ### Genetic Operators

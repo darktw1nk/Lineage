@@ -250,7 +250,15 @@ function parseArgs(argv: string[]): {
           console.error('--seed requires an integer');
           process.exit(1);
         }
-        result.seed = parseInt(raw, 10);
+        const parsed = Number(raw);
+        // Beyond MAX_SAFE_INTEGER the value silently loses precision, so a run
+        // "seeded" with 999999999999999999999 is not reproducible from the
+        // number you typed.
+        if (!Number.isSafeInteger(parsed)) {
+          console.error(`--seed must be a whole number no larger than ${Number.MAX_SAFE_INTEGER} (got ${raw})`);
+          process.exit(1);
+        }
+        result.seed = parsed;
         break;
       }
       case '--sync-models':
@@ -454,6 +462,7 @@ async function handleRunEvolution(configPath: string, outputPath?: string, dbPat
   const { runEvolution } = await import('./engine.js');
   const result = await runEvolution(evalConfig, {
     onRunId: (id) => { activeRunId = id; },
+    suppressStdout: !!outputPath,
   });
   activeRunId = null;
 
@@ -646,6 +655,7 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
   const result = await runEvolution(evalConfig, {
     existingRun: run,
     onRunId: (id) => { activeRunId = id; },
+    suppressStdout: !!outputPath,
   });
   activeRunId = null;
 

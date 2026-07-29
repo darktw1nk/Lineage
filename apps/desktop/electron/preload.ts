@@ -56,8 +56,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   logs: {
     getBuffer: () => ipcRenderer.invoke('logs:getBuffer'),
     subscribe: (callback) => {
-      ipcRenderer.on('log:entry', (_event, entry) => callback(entry));
-      return () => ipcRenderer.removeAllListeners('log:entry');
+      // Remove only OUR listener. removeAllListeners tore down every
+      // subscriber's — harmless while LogsPanel is the only one, but it makes
+      // the second subscriber silently break the first. eval.subscribe above
+      // already does this correctly.
+      const handler = (_event: unknown, entry: unknown) => callback(entry as any);
+      ipcRenderer.on('log:entry', handler);
+      return () => ipcRenderer.removeListener('log:entry', handler);
     },
   },
   

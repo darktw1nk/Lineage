@@ -138,12 +138,16 @@ function satisfiedFraction(parsed: unknown, schema: any, errors: ReadonlyArray<a
   const explainedByMissingKey = (e: any) =>
     e.keyword === 'required' && required.includes(e.params?.missingProperty);
   const otherErrors = errors.filter(e => !explainedByMissingKey(e)).length;
-  // Divide by required.length + 3, not required.length. The bare denominator
-  // saturated at a SINGLE error whenever one key was required, so
-  // {"answer":"hi","reasoning":"…"} — every required key correct plus one extra
-  // field, the most common near-miss a model produces — scored the same as {}
-  // or a bare string, giving evolution no signal that the answer was right.
-  const penalty = Math.min(1, otherErrors / (required.length + 3));
+
+  // A DIMINISHING penalty, never a saturating one.
+  //
+  // `min(1, otherErrors / N)` hit 1 and stayed there, so past that point every
+  // candidate collapsed to the same floor: an answer with all required keys
+  // correct plus five extra fields scored identically to a bare string. Halving
+  // the remaining credit per error keeps the ordering strict all the way down —
+  // more wrong is always worth less, and never exactly zero while the required
+  // keys are right.
+  const penalty = 1 - 0.5 ** (otherErrors / Math.max(1, required.length));
 
   return (ok / required.length) * (1 - penalty);
 }

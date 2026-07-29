@@ -12,16 +12,23 @@ class WrappedStatement {
     private _sql: string,
   ) {}
 
-  run(...params: unknown[]): { changes: number } {
-    const flat = flattenParams(params);
+  run(...params: unknown[]): { changes: number; lastInsertRowid: number } {
+    const flat = flattenParams(params).map(coerceBindValue);
     try {
-      this._wrapper._db.run(this._sql, flat);
+      this._wrapper._db.run(this._sql, flat as any);
     } catch (err) {
       throwCompatError(err);
     }
     const changes = this._wrapper._db.getRowsModified();
+    // better-sqlite3 returns lastInsertRowid alongside changes. Omitting it
+    // meant any caller reaching for it silently got undefined.
+    let lastInsertRowid = 0;
+    try {
+      const row = this._wrapper._db.exec('SELECT last_insert_rowid() AS id');
+      lastInsertRowid = Number(row?.[0]?.values?.[0]?.[0] ?? 0);
+    } catch { /* not an INSERT, or no rowid table */ }
     this._wrapper._scheduleSave();
-    return { changes };
+    return { changes, lastInsertRowid };
   }
 
   get(...params: unknown[]): unknown {
@@ -76,6 +83,36 @@ function flattenParams(params: unknown[]): (string | number | Uint8Array | null)
     return params[0];
   }
   return params as (string | number | Uint8Array | null)[];
+}
+
+/**
+ * Normalise a bound value, or refuse it loudly.
+ *
+ * sql.js silently accepted several shapes that better-sqlite3 rejects, and
+ * each stored something the reader could not recognise: `NaN` became NULL,
+ * `Infinity` stored as a REAL that read back as `null`, a JS array bound as a
+ * BLOB, and a BigInt past 2^53 degraded to a lossy REAL. Booleans are the one
+ * exception worth allowing — 0/1 is the obvious intent and SQLite has no
+ * boolean type — so they are converted rather than rejected.
+ */
+function coerceBindValue(value: unknown): string | number | Uint8Array | null {
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'bigint') {
+    if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < BigInt(Number.MIN_SAFE_INTEGER)) {
+      throw new Error(`Cannot bind BigInt ${value}: outside the safe integer range, binding it would lose precision`);
+    }
+    return Number(value);
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(`Cannot bind ${value}: SQLite has no representation for it (NaN would become NULL, Infinity reads back as null)`);
+  }
+  if (value instanceof Date) {
+    throw new Error('Cannot bind a Date directly — store an ISO string or an epoch number');
+  }
+  if (Array.isArray(value)) {
+    throw new Error('Cannot bind an array as a single value — it would be stored as a BLOB');
+  }
+  return value as string | number | Uint8Array | null;
 }
 
 /** Convert sql.js errors to better-sqlite3–compatible error objects */

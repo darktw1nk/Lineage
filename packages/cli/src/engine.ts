@@ -218,6 +218,8 @@ function buildResult(
 export interface RunEvolutionOptions {
   onRunId?: (id: string) => void;
   existingRun?: EvaluationRun; // resume: checkpointed run loaded from the DB (skips inserts)
+  /** Suppress the stdout copy of the result — set when --output writes it to a file. */
+  suppressStdout?: boolean;
 }
 
 /**
@@ -448,8 +450,13 @@ export async function runEvolution(
     process.stderr.write(`Generalization (unseen tests): seed ${result.holdout.seed.score.toFixed(2)} → champion ${result.holdout.champion.score.toFixed(2)}\n`);
   }
 
-  // Write JSON result to stdout for piping
-  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  // Write JSON result to stdout for piping — unless --output already wrote it
+  // to a file. `--output <path>  Write JSON results to file (default: stdout)`
+  // reads as either/or, and printing a 7KB duplicate to a terminal after
+  // writing the file is just noise.
+  if (!options?.suppressStdout) {
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  }
 
   return result;
 }

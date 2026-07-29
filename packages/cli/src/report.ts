@@ -466,6 +466,12 @@ export function generateReport(
     } else if (result.holdout.seed && result.holdout.champion) {
       lines.push(`Scores on ${result.holdout.testIds.length} test(s) evolution never saw (${result.holdout.samplesPerTest} sample(s)/test):`);
       lines.push('');
+      // The seed baseline is re-run with the CHAMPION's params, including any
+      // model the run swapped to. That is deliberate — it isolates the prompt's
+      // contribution — but "seed → champion" does not read that way, and a
+      // reader would otherwise assume the baseline used the original model.
+      lines.push('*Both rows use the champion\'s model and parameters, so this measures the PROMPT\'s contribution with any model change held constant.*');
+      lines.push('');
       lines.push('| Test | Seed | Champion |');
       lines.push('|------|------|----------|');
       const testName = (id: string) => config.testSet.find(t => t.id === id)?.name ?? id.slice(0, 8);

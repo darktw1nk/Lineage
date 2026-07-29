@@ -130,7 +130,18 @@ function selectRandomStrategies(count: number = 2, rng: () => number = Math.rand
   // Flatten all strategies with their categories
   for (const category of Object.keys(MUTATION_STRATEGIES)) {
     const strategies = MUTATION_STRATEGIES[category];
+    // A category mapped to a STRING instead of an array iterates by character,
+    // so `{"structure": "Reorder the sections"}` in systemPrompts produced
+    // eighteen one-letter "strategies". Skip and say so.
+    if (!Array.isArray(strategies)) {
+      console.warn(
+        `[Mutation] systemPrompts.mutationStrategies."${category}" must be an array of strings — ignoring it ` +
+        `(got ${typeof strategies}).`,
+      );
+      continue;
+    }
     for (const strategy of strategies) {
+      if (typeof strategy !== 'string' || !strategy.trim()) continue;
       allStrategies.push({
         category: category.charAt(0).toUpperCase() + category.slice(1), // Capitalize first letter
         strategy,
@@ -220,6 +231,14 @@ export async function mutateNode(
       
       // Try to parse JSON (tolerates fences and surrounding prose)
       edits = extractJsonArray(proposalResult.output);
+      // The SHAPE was never checked, only that it parsed as an array. A model
+      // returning `["tighten", "add examples"]` produced a changelog of
+      // "Unknown edit" entries, and `[null, null]` threw a raw TypeError out
+      // of mutateNode. Treat a wrong shape as an unparseable response so the
+      // existing retry loop re-prompts for the documented format.
+      if (!edits.every(e => e && typeof e === 'object' && typeof (e as any).edit === 'string')) {
+        throw new Error('Edits must be objects with a string "edit" field, e.g. [{"label":"MUTATION","edit":"..."}]');
+      }
       console.log(`[Mutation] Successfully parsed edits on attempt ${attempt + 1}:`, edits);
       
       // Success! Break out of retry loop

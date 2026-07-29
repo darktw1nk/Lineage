@@ -97,8 +97,11 @@ function App() {
         </div>
 
         {/* Right Panel - Node Details */}
+        {/* resetKey covers BOTH ids: selectedNodeId is not cleared when you
+            switch evaluations, so a boundary keyed only on it stayed tripped
+            after moving to a different run. */}
         {selectedNodeId && !showConfig && (
-          <ErrorBoundary label="this candidate's details" resetKey={selectedNodeId}>
+          <ErrorBoundary label="this candidate's details" resetKey={`${selectedEvaluationId}:${selectedNodeId}`}>
             <RightPanel
               evaluationId={selectedEvaluationId}
               nodeId={selectedNodeId}

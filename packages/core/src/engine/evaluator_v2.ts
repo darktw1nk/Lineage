@@ -1235,6 +1235,15 @@ async function runSingleSample(
       passed = gradingResult.passed;
       llmGradeReasoning = gradingResult.reasoning;
 
+      // Bill the call BEFORE the circuit breaker can throw. The breaker's own
+      // trigger call was made and charged by the provider, but the throw jumped
+      // over the accrual below it — so the run's totals were short by exactly
+      // one grading call, every time the breaker fired.
+      accrueCost(state, state.costContext === 'holdout' ? COST_LABELS.holdoutGrading : COST_LABELS.grading, state.config.serviceModel, {
+        usd: gradingResult.usd, promptTokens: gradingResult.promptTokens,
+        completionTokens: gradingResult.completionTokens, calls: 1,
+      });
+
       // Track grading parse failures for circuit breaker
       state.gradingTotal++;
       if ((gradingResult as any)._parseError) {
@@ -1251,11 +1260,7 @@ async function runSingleSample(
         }
       }
 
-      // Track service model costs from LLM grading
-      accrueCost(state, state.costContext === 'holdout' ? COST_LABELS.holdoutGrading : COST_LABELS.grading, state.config.serviceModel, {
-        usd: gradingResult.usd, promptTokens: gradingResult.promptTokens,
-        completionTokens: gradingResult.completionTokens, calls: 1,
-      });
+      // (grading cost already accrued above, before the circuit breaker)
       
       sendUpdate(runId, {
         type: 'totals',

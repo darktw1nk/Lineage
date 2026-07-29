@@ -251,3 +251,41 @@ describe('nested transactions (bug-hunt regression)', () => {
     expect(db.prepare('SELECT name FROM nest_undo').all()).toEqual([]);
   });
 });
+
+describe('better-sqlite3 parity (bug-hunt regression)', () => {
+  it('run() reports lastInsertRowid', () => {
+    wrapper.exec('CREATE TABLE rowid_test (id INTEGER PRIMARY KEY, name TEXT)');
+    const first = wrapper.prepare('INSERT INTO rowid_test (name) VALUES (?)').run('a');
+    const second = wrapper.prepare('INSERT INTO rowid_test (name) VALUES (?)').run('b');
+    expect(first.lastInsertRowid).toBe(1);
+    expect(second.lastInsertRowid).toBe(2);
+  });
+
+  it('booleans bind as 0/1', () => {
+    wrapper.exec('CREATE TABLE bool_test (flag INTEGER)');
+    wrapper.prepare('INSERT INTO bool_test (flag) VALUES (?)').run(true as any);
+    wrapper.prepare('INSERT INTO bool_test (flag) VALUES (?)').run(false as any);
+    const rows = wrapper.prepare('SELECT flag FROM bool_test').all() as Array<{ flag: number }>;
+    expect(rows.map(r => r.flag)).toEqual([1, 0]);
+  });
+
+  it('refuses values SQLite cannot round-trip', () => {
+    wrapper.exec('CREATE TABLE reject_test (v REAL)');
+    const insert = wrapper.prepare('INSERT INTO reject_test (v) VALUES (?)');
+    // Each of these was silently accepted and stored as something the reader
+    // could not recognise: NaN became NULL, Infinity read back as null, an
+    // array became a BLOB, and a large BigInt degraded to a lossy REAL.
+    expect(() => insert.run(NaN as any)).toThrow(/NaN/);
+    expect(() => insert.run(Infinity as any)).toThrow(/Infinity/);
+    expect(() => insert.run(new Date() as any)).toThrow(/Date/);
+    expect(() => insert.run(12345678901234567890n as any)).toThrow(/precision/);
+    // The array FORM is `.run([v])`; an array as a VALUE is `.run([[1, 2]])`.
+    expect(() => insert.run([[1, 2]] as any)).toThrow(/array/);
+  });
+
+  it('accepts a BigInt inside the safe range', () => {
+    wrapper.exec('CREATE TABLE bigint_test (v INTEGER)');
+    wrapper.prepare('INSERT INTO bigint_test (v) VALUES (?)').run(42n as any);
+    expect((wrapper.prepare('SELECT v FROM bigint_test').get() as any).v).toBe(42);
+  });
+});

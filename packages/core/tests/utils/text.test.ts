@@ -86,3 +86,30 @@ describe('extractJsonArray', () => {
     expect(() => extractJsonArray('I cannot produce edits for this prompt.')).toThrow(/No JSON array/);
   });
 });
+
+describe('extractJsonArray hostile inputs (bug-hunt regressions)', () => {
+  it('does not corrupt an array whose strings mention code fences', () => {
+    // Stripping ``` unconditionally rewrote the CONTENT — and prompt edits
+    // about code fences are a common category here.
+    const raw = '[{"label":"MUTATION","edit":"Require ```json ... ``` fences"}]';
+    expect(extractJsonArray(raw)[0].edit).toBe('Require ```json ... ``` fences');
+  });
+
+  it('still unwraps a genuinely fenced array', () => {
+    expect(extractJsonArray('```json\n[{"a":1}]\n```')).toEqual([{ a: 1 }]);
+  });
+
+  it('recovers an array despite stray brackets in the prose', () => {
+    // first-'[' to last-']' spanned the prose and failed to parse.
+    expect(extractJsonArray('Here are the edits [see list below]:\n[{"a":1}]')).toEqual([{ a: 1 }]);
+    expect(extractJsonArray('[{"a":1}]\nNote: removed rule [3].')).toEqual([{ a: 1 }]);
+  });
+
+  it('ignores brackets inside strings', () => {
+    expect(extractJsonArray('[{"edit":"use [brackets] freely"}]')[0].edit).toBe('use [brackets] freely');
+  });
+
+  it('still throws when there is no array at all', () => {
+    expect(() => extractJsonArray('I could not produce edits.')).toThrow(/No JSON array/);
+  });
+});
