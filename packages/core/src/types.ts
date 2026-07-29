@@ -266,6 +266,7 @@ export interface ProviderAdapter {
     latencyMs: number;
     usd: number;
     toolCalls?: Array<{ name: string; arguments: Record<string, unknown> }>; // present only when the model called tools
+    truncated?: boolean; // the token cap ended the reply, not the model — see BaseProviderAdapter.callAPI
   }>;
 }
 

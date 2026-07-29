@@ -130,6 +130,9 @@ export class GeminiAdapter extends BaseProviderAdapter {
         promptTokens,
         completionTokens,
         latencyMs,
+        // The cap ended the reply, not the model. Without this a cut-off
+        // answer is graded as a bad one.
+        truncated: data.candidates?.[0]?.finishReason === 'MAX_TOKENS',
       };
       
       console.log(`[Gemini] Parsed result - output length: ${result.output.length}, tokens: ${result.promptTokens}/${result.completionTokens}, latency: ${result.latencyMs}ms`);

@@ -109,6 +109,9 @@ export class GroqAdapter extends BaseProviderAdapter {
         promptTokens: data.usage?.prompt_tokens ?? 0,
         completionTokens: data.usage?.completion_tokens ?? 0,
         latencyMs,
+        // The cap ended the reply, not the model. Without this a cut-off
+        // answer is graded as a bad one.
+        truncated: data.choices?.[0]?.finish_reason === 'length',
       };
     }, {
       maxRetries: 3,

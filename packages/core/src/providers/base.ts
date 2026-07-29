@@ -34,6 +34,16 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     completionTokens: number;
     latencyMs: number;
     toolCalls?: Array<{ name: string; arguments: Record<string, unknown> }>;
+    /**
+     * The provider stopped because the token cap was reached, not because the
+     * model was finished. Set from each API's own stop signal.
+     *
+     * Nothing surfaced this, so a cut-off answer was indistinguishable from a
+     * bad one: a json_schema test scored it 0/10 with "invalid JSON: no
+     * parseable JSON found in the response" and nothing named
+     * serviceModelMaxTokens. The user rewrites their prompt to fix a setting.
+     */
+    truncated?: boolean;
   }>;
 
   async call(opts: {

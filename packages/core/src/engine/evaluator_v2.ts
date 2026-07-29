@@ -59,6 +59,8 @@ interface EvaluationState {
   finishing: boolean;
   /** Warn once, not per node, when stability is weighted but unmeasurable. */
   warnedStabilityNeedsSamples: boolean;
+  /** Warn once when the token cap, not the model, is ending replies. */
+  warnedTruncation: boolean;
   /** Models already warned about reporting $0 for real tokens. */
   warnedZeroCostModels: Set<string>;
   /** A Stop was requested — checked between billable phases so spending actually halts. */
@@ -378,6 +380,7 @@ async function startEvaluationInner(
     costContext: 'evolution',
     finishing: false,
     warnedStabilityNeedsSamples: false,
+    warnedTruncation: false,
     warnedZeroCostModels: new Set(),
     reservedUSD: 0,
     callCeilingUSD: new Map(),
@@ -1326,6 +1329,18 @@ async function runSingleSample(
       releaseCall(state, reserved);
     }
 
+    // A reply the CAP ended, not the model, is not a bad answer — but every
+    // downstream scorer treats it as one. A json_schema test on a cut-off reply
+    // scored 0/10 with "invalid JSON: no parseable JSON found in the response",
+    // naming nothing, so the user rewrites the prompt to fix a setting.
+    if (result.truncated && !state.warnedTruncation) {
+      state.warnedTruncation = true;
+      console.warn(
+        `[Evaluator] ${params.model.provider}/${params.model.model} hit the ${maxTokens}-token cap mid-reply. ` +
+        `Cut-off answers are scored as-is, so results are misleading until you raise serviceModelMaxTokens.`,
+      );
+    }
+
     // Tool responses serialize into the output channel so samples, cache,
     // playoff, reports, and the UI all compose without special cases.
     const effectiveOutput = result.toolCalls
@@ -1463,7 +1478,12 @@ async function runSingleSample(
       exact,
       passed,
       output: effectiveOutput,
-      reasoning: llmGradeReasoning,
+      // Put the real cause in the per-test explanation, not only in a console
+      // warning the desktop hides by default. "invalid JSON: no parseable JSON
+      // found" is true but blames the prompt for a token-cap setting.
+      reasoning: result.truncated
+        ? `[cut off at the ${maxTokens}-token cap — raise serviceModelMaxTokens] ${llmGradeReasoning ?? ''}`.trim()
+        : llmGradeReasoning,
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
       latencyMs: result.latencyMs,

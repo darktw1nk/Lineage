@@ -107,6 +107,9 @@ export class AnthropicAdapter extends BaseProviderAdapter {
         promptTokens: data.usage?.input_tokens ?? 0,
         completionTokens: data.usage?.output_tokens ?? 0,
         latencyMs,
+        // The cap ended the reply, not the model. Without this a cut-off
+        // answer is graded as a bad one.
+        truncated: data.stop_reason === 'max_tokens',
       };
       
       console.log(`[Anthropic] Parsed result - output length: ${result.output.length}, tokens: ${result.promptTokens}/${result.completionTokens}, latency: ${result.latencyMs}ms`);
