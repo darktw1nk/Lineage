@@ -69,7 +69,7 @@ export interface EvolutionResult {
   } | null;
   holdout?: HoldoutResult;
   seed?: number;
-  playoffs?: Array<{ generation: number; ranking: string[] }>;
+  playoffs?: Array<{ generation: number; ranking: string[]; decisive?: boolean }>;
   costBreakdown?: EvaluationRun['costBreakdown'];
   estimate?: EvaluationRun['estimate'];
   generations: EvolutionResultGeneration[];
@@ -87,7 +87,12 @@ interface RunCollector {
   error: string | null;
   stopReason: string | null;
   holdout: HoldoutResult | null;
-  playoffs: Array<{ generation: number; ranking: string[] }>;
+  /**
+   * `decisive` is load-bearing, not decoration: a non-decisive playoff is one
+   * the engine explicitly refused to act on, and dropping the flag published a
+   * ranking that reads as "the generation's best" but is a coin flip.
+   */
+  playoffs: Array<{ generation: number; ranking: string[]; decisive?: boolean }>;
   costBreakdown: EvaluationRun['costBreakdown'] | null;
   estimate: EvaluationRun['estimate'] | null;
 }
@@ -330,7 +335,7 @@ export async function runEvolution(
         collector.holdout = data.holdout;
         break;
       case 'playoff_result':
-        collector.playoffs.push({ generation: data.generation, ranking: data.ranking });
+        collector.playoffs.push({ generation: data.generation, ranking: data.ranking, decisive: data.decisive });
         break;
       case 'cost_breakdown':
         collector.costBreakdown = data.breakdown ?? null;
@@ -426,7 +431,7 @@ export async function runEvolution(
     // Completed playoffs are checkpointed on the run and never re-judged
     // (dedupe guard) — seed the collector so results.json keeps them.
     for (const p of run.playoffs ?? []) {
-      collector.playoffs.push({ generation: p.generation, ranking: p.ranking });
+      collector.playoffs.push({ generation: p.generation, ranking: p.ranking, decisive: p.decisive });
     }
   }
 

@@ -583,7 +583,15 @@ export async function evaluateTestResultLLM(
     // the 5.0 default below, so failing harder paid better. And a non-numeric
     // score is the judge not answering, not the candidate scoring zero: fall
     // through to the recovery path instead of asserting it was terrible.
-    const rawScore = typeof parsed === 'number' ? parsed : parsed?.score;
+    // Coerce a numeric STRING rather than rejecting it. Throwing on any
+    // non-number made `{"score": "8"}` score 5 AND set _parseError, which feeds
+    // the 8% grading circuit breaker — so a judge whose only sin was quoting
+    // the number aborted the entire run at a 12.5% rate, with a message blaming
+    // malformed JSON and serviceModelMaxTokens. Both were wrong: the reply was
+    // perfectly readable. Only a score that is genuinely unrecoverable should
+    // fall through to the regex path below.
+    const raw = typeof parsed === 'number' ? parsed : parsed?.score;
+    const rawScore = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : raw;
     if (typeof rawScore !== 'number' || !Number.isFinite(rawScore)) {
       throw new Error(`judge returned no numeric score (got ${JSON.stringify(parsed?.score ?? parsed)})`);
     }

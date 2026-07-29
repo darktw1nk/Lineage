@@ -71,3 +71,29 @@ describe('a candidate cannot pick its own score', () => {
     expect(r.score).toBe(7);
   });
 });
+
+describe('a readable judge reply never counts as a parse failure', () => {
+  // Throwing on any non-number made `{"score": "8"}` score 5 AND set
+  // _parseError, which feeds the 8% circuit breaker. At a 12.5% string rate the
+  // whole run aborted with stopReason 'error' and a message blaming malformed
+  // JSON and serviceModelMaxTokens — both wrong. The reply was perfectly
+  // readable; only the type was loose.
+  for (const [reply, expected] of [
+    ['{"score": "8"}', 8],
+    ['{"score": "8.5"}', 8.5],
+    ['{"score": 8.5}', 8.5],
+    ['7', 7],
+    ['{"score": 0}', 0],
+  ] as Array<[string, number]>) {
+    it(`${reply} scores ${expected} without a parse error`, async () => {
+      const r = await grade(reply, 'PARIS');
+      expect(r.score).toBe(expected);
+      expect((r as any)._parseError).toBeFalsy();
+    });
+  }
+
+  it('a genuinely unreadable score still reports a parse error', async () => {
+    const r = await grade('{"score": "excellent"}', 'PARIS');
+    expect((r as any)._parseError).toBe(true);
+  });
+});

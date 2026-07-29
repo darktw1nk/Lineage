@@ -261,19 +261,36 @@ export function validateCliConfig(config: CliConfig): void {
   // plan (22 calls -> 14), `eliteShare: 1.5` carried nearly a whole generation
   // forward as elites, and `fitnessWeights.cost: -2` inverts the dimension it
   // weights. All exited 0 with no warning.
+  // Operator shares are RATIOS, not fractions: generation.ts divides each by
+  // their total, so {2, 1} is a valid 2:1 split behaving exactly like
+  // {0.667, 0.333}. Requiring 0..1 rejected working configs. What actually
+  // breaks the engine is a negative or non-numeric share — totalShare then
+  // goes <= 0 or NaN, EVERY operator quota becomes 0, and every child is a
+  // byte-identical carry-forward of its parent while the run exits 0
+  // reporting success.
+  const shareValue = (value: unknown, field: string) => nonNegativeNumber(value, field);
+  for (const [name, value] of Object.entries(config.operators ?? {})) {
+    if (name.endsWith('Share')) { shareValue(value, `operators.${name}`); continue; }
+    if (!value || typeof value !== 'object') continue;
+    // Nested operator objects (metaPrompting, paramVariation, ...) carry their own share.
+    if ('share' in (value as any)) { shareValue((value as any).share, `operators.${name}.share`); continue; }
+    // `operators.custom` is a MAP of plugin operators, each with its own share —
+    // it neither ends in `Share` nor has a `share` of its own, so it was skipped
+    // entirely. That is the one share surface a user hand-writes for a plugin.
+    if (name === 'custom') {
+      for (const [opName, entry] of Object.entries(value as Record<string, any>)) {
+        if (entry && typeof entry === 'object') {
+          shareValue(entry.share, `operators.custom.${opName}.share`);
+        }
+      }
+    }
+  }
   const fraction = (value: unknown, field: string) => {
     if (value === undefined) return;
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
       throw new Error(`"${field}" must be a number between 0 and 1 (got ${JSON.stringify(value)})`);
     }
   };
-  for (const [name, value] of Object.entries(config.operators ?? {})) {
-    if (name.endsWith('Share')) fraction(value, `operators.${name}`);
-    // Nested operator objects (metaPrompting, paramVariation, ...) carry their own share.
-    else if (value && typeof value === 'object' && 'share' in (value as any)) {
-      fraction((value as any).share, `operators.${name}.share`);
-    }
-  }
   fraction(config.selection?.eliteShare, 'selection.eliteShare');
   fraction(config.selection?.topP, 'selection.topP');
   positiveInt(config.selection?.topK, 'selection.topK');

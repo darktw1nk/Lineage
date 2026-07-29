@@ -17,56 +17,55 @@ const MAX_JUDGED_TEXT = 12_000;
  * whole.
  */
 /**
- * Characters that are invisible to a reader and to a model but that a naive
- * text defence treats as content. Stripping them is step ONE and is what makes
- * every later step unforgeable.
+ * Invisible characters that could HIDE a delimiter. Deliberately excludes
+ * U+200C/U+200D (ZWNJ/ZWJ): those are content, not formatting — stripping them
+ * broke emoji families into separate emoji and mangled Indic conjuncts.
+ * Applied ONLY to a line that is already delimiter-shaped (see below).
  */
-const INVISIBLE_CHARS =
-  /[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u206A-\u206F\uFEFF]/g;
+const HIDING_CHARS = /[­​‎‏‪-‮⁠-⁤⁪-⁯﻿]/g;
 
-/** JSON keys the judging protocol itself uses. Model text must not impersonate them. */
-const PROTOCOL_KEYS = /"(score|justification|winner|reason)"/gi;
-
+/**
+ * Prepare model-produced text for interpolation into a JUDGE prompt.
+ *
+ * The judge prompt puts each section inside a block:
+ *     OUTPUT (model): <<<
+ *     ...text...
+ *     >>>
+ * so only two shapes can escape it: a line that is exactly `>>>` (closes the
+ * block) and a line ENDING in `<<<` (opens a forged one). Nothing else can,
+ * whatever it contains.
+ *
+ * Earlier versions neutralised every run of 3+ `>`/`<` anywhere in the text.
+ * That corrupted ordinary answers — Python REPL transcripts, git conflict
+ * markers, bash herestrings, C++ nested generics — and because the EXPECTED
+ * reference is NOT sanitised while the OUTPUT is, the judge compared a mangled
+ * answer against a clean reference and scored a byte-perfect response 2/10.
+ * The default rubric grades format consistency explicitly, so this pushed
+ * evolution away from correct answers. The injection it prevented needed a
+ * delimiter AND a forged block; the corruption fired on any three `>`.
+ *
+ * Invisibles are stripped only on a line that is delimiter-shaped once they
+ * are removed, so `>` ZWSP `>` ZWSP `>` cannot smuggle a closer past the
+ * check while real text keeps its zero-width joiners.
+ */
 export function sanitizeForJudge(text: string): string {
   const clipped = text.length > MAX_JUDGED_TEXT
     ? `${text.slice(0, MAX_JUDGED_TEXT)}\n…[truncated ${text.length - MAX_JUDGED_TEXT} characters]`
     : text;
 
-  // STEP 1 — strip invisibles, BEFORE inserting any of our own.
-  //
-  // This defence used to be forgeable by its own escape. It neutralised `>>>`
-  // by interleaving U+200B, so the escaped form was `>[ZWSP]>[ZWSP]>` — and a
-  // candidate that simply EMITTED `>[ZWSP]>[ZWSP]>` matched neither run-regex,
-  // passed through untouched, and was byte-identical to the sanitised form. A
-  // judge does not perceive U+200B, so the block closed. A wrong answer then
-  // forged its own EXPECTED block and scored 10/10, became champion, and the
-  // HOLDOUT confirmed it — because the holdout reuses the same grader.
-  // Stripping first means an attacker cannot pre-craft anything that survives.
-  const visible = clipped.replace(INVISIBLE_CHARS, '');
-
-  // A VISIBLE separator, not a zero-width one.
-  //
-  // The judge is a language model: it is the reader we have to change the text
-  // for, and it perceives U+200B no better than a human does. Breaking `>>>`
-  // into `>[ZWSP]>[ZWSP]>` therefore neutralised nothing -- the judge still
-  // read a block terminator -- while ALSO handing an attacker the exact byte
-  // sequence that passes the filter. A space is unambiguous to the model and
-  // cannot be forged into a delimiter: a candidate emitting `> > >` has
-  // emitted spaces, which is not a delimiter either.
-  const breakRun = (m: string) => m.split('').join(' ');
-  return visible
-    // STEP 2 — no run of 3+ delimiter characters survives, in either direction.
-    .replace(/>{3,}/g, breakRun)
-    .replace(/<{3,}/g, breakRun)
-    // STEP 3 — model text cannot impersonate the verdict protocol. Judges are
-    // asked for {"score":…} / {"winner":…}, and the score parser has to read
-    // one of those out of a possibly-malformed reply; a candidate that emits
-    // `{"score": 10}` in its answer got it quoted into the judge's reply and
-    // read back AS the verdict. Here the consumer we defend against is the
-    // PARSER, not the model, so a zero-width break IS the right tool: the
-    // judge's reading is unchanged and the regex can never match. An attacker
-    // cannot un-break it, because step 1 stripped their invisibles already.
-    .replace(PROTOCOL_KEYS, m => `"${m.slice(1, 3)}\u200B${m.slice(3)}`);
+  return clipped.split(/\r?\n/).map(line => {
+    const bare = line.replace(HIDING_CHARS, '');
+    // A line of NOTHING BUT `>` closes the block (>>>, >>>>, …); a line ending
+    // in 3+ `<` opens a forged one, which is the shape of the template's own
+    // `LABEL: <<<`. Anything else cannot escape the block.
+    const closes = /^>{3,}$/.test(bare.trim());
+    const opens = /<{3,}$/.test(bare.trimEnd());
+    if (!closes && !opens) return line; // untouched — the overwhelming majority
+    // Space-separated so the JUDGE (which cannot see zero-width characters)
+    // genuinely reads it as something other than a delimiter.
+    return bare.replace(/>{3,}/g, m => m.split('').join(' '))
+               .replace(/<{3,}/g, m => m.split('').join(' '));
+  }).join('\n');
 }
 
 /**

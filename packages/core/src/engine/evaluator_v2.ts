@@ -1689,7 +1689,7 @@ async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<voi
     ...(state.run.playoffs ?? []),
     { generation: genIndex, ranking: result.ranking, decisive },
   ];
-  sendUpdate(runId, { type: 'playoff_result', generation: genIndex, ranking: result.ranking, matches: result.matches });
+  sendUpdate(runId, { type: 'playoff_result', generation: genIndex, ranking: result.ranking, matches: result.matches, decisive });
   persistRun(state);
   console.log(`[Playoff] Gen ${genIndex}: winner ${result.ranking[0].slice(0, 8)} (${result.matches} judge calls, ${result.ranking.length} contenders)`);
 }

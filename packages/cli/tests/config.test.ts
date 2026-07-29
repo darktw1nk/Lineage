@@ -419,3 +419,32 @@ describe('evaluation fidelity fields', () => {
     expect(cfg.testSet[1].holdout).toBe(true);
   });
 });
+
+describe('operator share validation matches what the engine does', () => {
+  const withOps = (operators: any) => ({ ...MINIMAL_CONFIG, operators } as any);
+
+  it('accepts shares above 1 — the engine normalises them as RATIOS', () => {
+    // generation.ts divides every share by their total, so {2, 1} is a valid
+    // 2:1 split identical in behaviour to {0.667, 0.333}. Rejecting it broke
+    // working configs, and was inconsistent with eliteShare: 1 being accepted.
+    expect(() => validateCliConfig(withOps({ mutationShare: 2, crossoverShare: 1 }))).not.toThrow();
+    expect(() => validateCliConfig(withOps({ metaPrompting: { enabled: true, share: 3 } }))).not.toThrow();
+  });
+
+  it('still rejects a negative or non-numeric share', () => {
+    // These make totalShare <= 0 or NaN, so generation.ts assigns EVERY
+    // operator a quota of 0 and every child is a byte-identical carry-forward
+    // of its parent — while the run exits 0 reporting success.
+    expect(() => validateCliConfig(withOps({ mutationShare: -1 }))).toThrow(/mutationShare/);
+    expect(() => validateCliConfig(withOps({ mutationShare: 'half' }))).toThrow(/mutationShare/);
+  });
+
+  it('validates PLUGIN operator shares under operators.custom', () => {
+    // The one operator-share surface a user hand-writes for a plugin, and the
+    // only one the new validation skipped: `custom` neither ends in `Share`
+    // nor has its own `share` key. A -5 there disabled all five built-ins too.
+    expect(() => validateCliConfig(withOps({ custom: { myop: { share: -5 } } }))).toThrow(/custom.*myop.*share/i);
+    expect(() => validateCliConfig(withOps({ custom: { myop: { share: 'half' } } }))).toThrow(/custom.*myop.*share/i);
+    expect(() => validateCliConfig(withOps({ custom: { myop: { share: 0.5 } } }))).not.toThrow();
+  });
+});
