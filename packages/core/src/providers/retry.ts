@@ -115,9 +115,14 @@ export async function fetchWithTimeout(
     // Read the FULL body under the timer: a slow-drip body (bytes trickling in
     // below undici's idle threshold) would otherwise hang past the timeout.
     // Reconstructing the Response keeps callers' .json()/.text()/.ok working
-    // unchanged — they now read from memory.
-    const body = await res.text();
-    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+    // unchanged — they now read from memory. Guarded by instanceof so plain
+    // test doubles (legacy stubs without .text) pass through untouched; real
+    // fetch always returns a Response, so production is always protected.
+    if (res instanceof Response) {
+      const body = await res.text();
+      return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+    }
+    return res;
   } catch (error: any) {
     if (controller.signal.aborted || error?.name === 'AbortError') {
       throw new RetryableError(`Request timed out after ${timeoutMs}ms`, 408);
