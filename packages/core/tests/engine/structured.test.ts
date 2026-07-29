@@ -110,6 +110,46 @@ describe('scoreJsonSchema', () => {
     expect(bothWrong.score).toBeLessThanOrEqual(2);
   });
 
+  it('an array FIELD inside the answer does not outrank the answer (bug-hunt regression)', () => {
+    // Spans were collected in two passes ({...} then [...]) and then reversed,
+    // so every array span outranked every object span — including an array
+    // nested INSIDE the answer. A prose-wrapped conforming object with any
+    // array field scored 1, the same as complete garbage.
+    const schema = {
+      type: 'object', required: ['name', 'tags'],
+      properties: { name: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } },
+    } as object;
+    const r = scoreJsonSchema('Sure! Here you go: {"name":"Ada","tags":["math","logic"]}', schema);
+    expect(r.score).toBe(5); // conforming-but-in-prose, not 1
+  });
+
+  it('picks the span that validates, not the first or last one', () => {
+    const schema = { type: 'object', required: ['name'], properties: { name: { type: 'string' } } } as object;
+    // Trailing schema-reference blob: preferring the LAST span scored this 1.
+    const trailing = scoreJsonSchema('Answer: {"name":"Ada"}\nFor reference the schema was {"type":"object"}', schema);
+    // Leading placeholder example: preferring the FIRST span scored this 1.
+    const leading = scoreJsonSchema('Example: {"foo":1}\nReal answer: {"name":"Ada"}', schema);
+    expect(trailing.score).toBe(5);
+    expect(leading.score).toBe(5);
+  });
+
+  it('one extra field is a near-miss, not indistinguishable from garbage (bug-hunt regression)', () => {
+    // penalty = otherErrors / required.length saturated at ONE error when a
+    // single key was required, so the commonest near-miss a model produces —
+    // the right answer plus a "reasoning" key — scored the same as {}.
+    const schema = {
+      type: 'object', additionalProperties: false, required: ['answer'],
+      properties: { answer: { type: 'string' } },
+    } as object;
+    const s = (out: string) => scoreJsonSchema(out, schema).score;
+
+    expect(s('{"answer":"hi"}')).toBe(10);
+    const nearMiss = s('{"answer":"hi","reasoning":"because"}');
+    expect(nearMiss).toBeGreaterThan(s('{}'));
+    expect(nearMiss).toBeGreaterThan(s('"hi"'));
+    expect(nearMiss).toBeLessThanOrEqual(5);
+  });
+
   it('extra violations outrank nothing: more broken never scores higher (bug-hunt regression)', () => {
     // satisfiedFraction measured only required-key presence, so an object with
     // every key present plus four additionalProperties violations hit the 5

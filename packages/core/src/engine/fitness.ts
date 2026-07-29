@@ -114,7 +114,11 @@ export function calculateFitness(
     const maxCost =
       (config.fitness.costNorm.mode === 'relative' && dynamicMaxCost && dynamicMaxCost > 0 ? dynamicMaxCost : undefined) ??
       (Number.isFinite(configuredMaxCost) && configuredMaxCost > 0 ? configuredMaxCost : 0.1);
-    const costNorm = Math.min(1, costUSD / maxCost);
+    // Clamp BOTH ends. Only the upper bound was clamped, so a negative cost
+    // (a bad price entry) drove costNorm arbitrarily negative and costScore
+    // arbitrarily high — a 1/10 prompt reached fitness 84003 and won every
+    // selection forever.
+    const costNorm = Math.max(0, Math.min(1, costUSD / maxCost));
     const costScore = (1 - costNorm) * 10; // Scale to 0-10 range
     const costContribution = normalizedWeights.cost * costScore;
     fitness += costContribution;
@@ -128,7 +132,7 @@ export function calculateFitness(
     const maxLatency =
       (config.fitness.latencyNorm.mode === 'relative' && dynamicMaxLatency && dynamicMaxLatency > 0 ? dynamicMaxLatency : undefined) ??
       (Number.isFinite(configuredMaxLatency) && configuredMaxLatency > 0 ? configuredMaxLatency : 30000);
-    const latencyNorm = Math.min(1, latencyMs / maxLatency);
+    const latencyNorm = Math.max(0, Math.min(1, latencyMs / maxLatency)); // clamp both ends, as with cost
     const latencyScore = (1 - latencyNorm) * 10; // Scale to 0-10 range
     const latencyContribution = normalizedWeights.latency * latencyScore;
     fitness += latencyContribution;

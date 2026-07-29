@@ -1,6 +1,6 @@
-import { BaseProviderAdapter } from './base.js';
+import { BaseProviderAdapter, normalizeContent, normalizeToolArguments } from './base.js';
 import type { Provider, ToolDef } from '../types.js';
-import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
+import { withRetry, RetryableError, fetchWithTimeout, withCause, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
 export interface OpenRouterModel {
@@ -104,7 +104,8 @@ export class OpenRouterAdapter extends BaseProviderAdapter {
         // Timeouts must stay retryable — never wrap RetryableError into a plain Error
         if (fetchError instanceof RetryableError) throw fetchError;
         console.error(`[OpenRouter] Fetch failed:`, fetchError.message);
-        throw new Error(`OpenRouter fetch failed: ${fetchError.message}`);
+        // Preserve `cause` so isRetryableError can find undici's network code.
+        throw withCause(new Error(`OpenRouter fetch failed: ${fetchError.message}`), fetchError);
       }
 
       if (!response.ok) {
@@ -132,16 +133,14 @@ export class OpenRouterAdapter extends BaseProviderAdapter {
       const message = data.choices[0]?.message;
       let toolCalls;
       if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
-        toolCalls = message.tool_calls.map((tc: any) => {
-          let args: Record<string, unknown> = {};
-          try { args = JSON.parse(tc.function?.arguments || '{}'); }
-          catch { console.warn('[OpenRouter] Unparseable tool arguments:', tc.function?.arguments); }
-          return { name: tc.function?.name ?? '', arguments: args };
-        });
+        toolCalls = message.tool_calls.map((tc: any) => ({
+          name: tc.function?.name ?? '',
+          arguments: normalizeToolArguments(tc.function?.arguments, 'OpenRouter'),
+        }));
       }
 
       return {
-        output: message?.content ?? '',
+        output: normalizeContent(message?.content),
         ...(toolCalls ? { toolCalls } : {}),
         promptTokens: data.usage?.prompt_tokens ?? 0,
         completionTokens: data.usage?.completion_tokens ?? 0,
@@ -189,6 +188,14 @@ export class OpenRouterAdapter extends BaseProviderAdapter {
         promptUSDper1k: parseFloat(m.pricing.prompt) * 1000,
         completionUSDper1k: parseFloat(m.pricing.completion) * 1000,
       }))
-      .filter(m => !isNaN(m.promptUSDper1k) && !isNaN(m.completionUSDper1k));
+      // OpenRouter publishes "-1" as a sentinel for "price varies" on its
+      // router models (openrouter/auto and friends). Syncing that verbatim
+      // stored -1000 USD per 1k tokens, which made every call earn NEGATIVE
+      // cost: fitness exploded, the worst prompt won every selection, and
+      // totals.usd ran away from budgetUSD so the cap could never trip.
+      .filter(m =>
+        Number.isFinite(m.promptUSDper1k) && m.promptUSDper1k >= 0 &&
+        Number.isFinite(m.completionUSDper1k) && m.completionUSDper1k >= 0,
+      );
   }
 }

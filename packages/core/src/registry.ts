@@ -111,13 +111,18 @@ export function registerProvider(plugin: ProviderPlugin): void {
   // window and the user cannot reach Settings to disable the plugin.
   if (plugin.models?.length) {
     for (const m of plugin.models) {
+      // Negative prices were accepted here: they produce negative spend, which
+      // inverts fitness (a worse prompt scores higher) and lets totals.usd run
+      // away from budgetUSD so the cap can never trip. Zero is legitimate — a
+      // genuinely free local model.
       const bad =
         !m || typeof m.provider !== 'string' || typeof m.model !== 'string' ||
-        !Number.isFinite(m.promptUSDper1k) || !Number.isFinite(m.completionUSDper1k);
+        !Number.isFinite(m.promptUSDper1k) || m.promptUSDper1k < 0 ||
+        !Number.isFinite(m.completionUSDper1k) || m.completionUSDper1k < 0;
       if (bad) {
         throw new Error(
           `Provider '${id}' declares an invalid model entry ` +
-          `(${JSON.stringify(m)}): provider/model must be strings and both prices finite numbers`
+          `(${JSON.stringify(m)}): provider/model must be strings and both prices finite numbers >= 0`
         );
       }
     }

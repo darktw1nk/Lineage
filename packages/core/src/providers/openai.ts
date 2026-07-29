@@ -1,6 +1,6 @@
-import { BaseProviderAdapter } from './base.js';
+import { BaseProviderAdapter, normalizeContent, normalizeToolArguments } from './base.js';
 import type { Provider, ToolDef } from '../types.js';
-import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
+import { withRetry, RetryableError, fetchWithTimeout, withCause, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
 export class OpenAIAdapter extends BaseProviderAdapter {
@@ -34,13 +34,13 @@ export class OpenAIAdapter extends BaseProviderAdapter {
     return withRetry(async () => {
       const startTime = Date.now();
       
-      // Use max_completion_tokens for newer models (o1, gpt-4, gpt-5 series)
-      const useCompletionTokens = opts.model.includes('o1') || 
-                                   opts.model.includes('gpt-4') || 
-                                   opts.model.includes('gpt-5');
-      
-      // o1 and gpt-5 models have strict temperature requirements
-      const hasTemperatureRestrictions = opts.model.includes('o1') || opts.model.includes('gpt-5');
+      // Reasoning models (o-series and gpt-5) require max_completion_tokens and
+      // reject any temperature but 1. Matching only the literal 'o1' missed
+      // o3/o3-mini/o4-mini entirely, so every o3/o4 call was sent max_tokens
+      // with a real temperature and got an immediate, non-retryable 400.
+      const isReasoningModel = /(^|[^a-z])o[1-9](-|$|[0-9])/.test(opts.model) || opts.model.includes('gpt-5');
+      const useCompletionTokens = isReasoningModel || opts.model.includes('gpt-4');
+      const hasTemperatureRestrictions = isReasoningModel;
       
       // Build message content — text-only or multimodal with images
       let messageContent: any;
@@ -114,7 +114,13 @@ export class OpenAIAdapter extends BaseProviderAdapter {
           errno: fetchError.errno,
           syscall: fetchError.syscall,
         });
-        throw new Error(`OpenAI fetch failed: ${fetchError.message} (cause: ${fetchError.cause?.message || 'unknown'})`);
+        // Keep the original as `cause`: isRetryableError walks that chain to
+        // find undici's ECONNRESET/UND_ERR_SOCKET code. Dropping it made every
+        // transient network blip permanently fail the node.
+        throw withCause(
+          new Error(`OpenAI fetch failed: ${fetchError.message} (cause: ${fetchError.cause?.message || 'unknown'})`),
+          fetchError,
+        );
       }
       
       console.log(`[OpenAI] Response status: ${response.status} ${response.statusText}`);
@@ -146,16 +152,14 @@ export class OpenAIAdapter extends BaseProviderAdapter {
       const message = data.choices[0]?.message;
       let toolCalls;
       if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
-        toolCalls = message.tool_calls.map((tc: any) => {
-          let args: Record<string, unknown> = {};
-          try { args = JSON.parse(tc.function?.arguments || '{}'); }
-          catch { console.warn('[OpenAI] Unparseable tool arguments:', tc.function?.arguments); }
-          return { name: tc.function?.name ?? '', arguments: args };
-        });
+        toolCalls = message.tool_calls.map((tc: any) => ({
+          name: tc.function?.name ?? '',
+          arguments: normalizeToolArguments(tc.function?.arguments, 'OpenAI'),
+        }));
       }
 
       return {
-        output: message?.content ?? '',
+        output: normalizeContent(message?.content),
         ...(toolCalls ? { toolCalls } : {}),
         promptTokens: data.usage?.prompt_tokens ?? 0,
         completionTokens: data.usage?.completion_tokens ?? 0,

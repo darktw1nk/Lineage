@@ -23,6 +23,20 @@ export class RetryableError extends Error {
   }
 }
 
+/**
+ * Attach the original error as `cause` when re-wrapping.
+ *
+ * Adapters that wrap a fetch failure into a friendlier Error MUST use this:
+ * Node's fetch (undici) throws a bare `TypeError: fetch failed` and hangs the
+ * real network code off `cause`, so dropping it made isRetryableError blind and
+ * no transient failure was ever retried. Assigned rather than passed to the
+ * Error constructor because this package targets ES2020.
+ */
+export function withCause<E extends Error>(error: E, cause: unknown): E {
+  (error as any).cause = cause;
+  return error;
+}
+
 export function isRetryableError(error: any): boolean {
   // Retry on network errors or specific HTTP status codes
   if (error instanceof RetryableError) return true;
@@ -40,12 +54,26 @@ export function isRetryableError(error: any): boolean {
   if (statusCode && retryableStatusCodes.includes(statusCode)) {
     return true;
   }
-  
-  // Network errors
-  if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
-    return true;
+
+  // Network errors. (see withCause below)
+  //
+  // Node's fetch (undici) does NOT put the code on the error — it throws
+  // `TypeError: fetch failed` and hangs the real cause off `error.cause`. Only
+  // checking error.code meant NO transient network failure was ever retried:
+  // one reset socket on one sample discarded every already-paid-for test
+  // result on that candidate and marked the node failed. Walk the cause chain,
+  // since adapters may wrap the error again.
+  const RETRYABLE_NETWORK_CODES = new Set([
+    'ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNABORTED', 'EPIPE',
+    'EHOSTUNREACH', 'ENETUNREACH', 'ENETRESET', 'EAI_AGAIN',
+    'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+  ]);
+  for (let node: any = error, depth = 0; node && depth < 5; node = node.cause, depth++) {
+    if (typeof node.code === 'string' && RETRYABLE_NETWORK_CODES.has(node.code)) {
+      return true;
+    }
   }
-  
+
   return false;
 }
 

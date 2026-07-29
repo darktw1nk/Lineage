@@ -83,10 +83,12 @@ export class SqlJsWrapper {
   _db: SqlJsDatabase;
   private _dbPath: string;
   private _saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private _readOnly: boolean;
 
-  constructor(db: SqlJsDatabase, dbPath: string) {
+  constructor(db: SqlJsDatabase, dbPath: string, readOnly = false) {
     this._db = db;
     this._dbPath = dbPath;
+    this._readOnly = readOnly;
   }
 
   exec(sql: string): void {
@@ -170,6 +172,14 @@ export class SqlJsWrapper {
    * zero-byte file is silently treated as a fresh install, erasing all history.
    */
   private _saveToDisk(): void {
+    // A read-only handle takes NO lock, so it cannot know what another process
+    // has committed since it opened. Every save is a whole-file export of the
+    // snapshot taken at open — so writing here silently erased runs that a
+    // lock-holding process had committed in the meantime. `--list-models` and
+    // `--estimate` were rewriting the shared desktop database on every
+    // invocation, destroying concurrent work.
+    if (this._readOnly) return;
+
     const data = Buffer.from(this._db.export());
     const tmpPath = `${this._dbPath}.tmp`;
     let fd: number | undefined;
@@ -270,10 +280,19 @@ async function acquireDbLock(dbPath: string): Promise<void> {
         alive = error?.code !== 'ESRCH';
       }
       if (!alive) {
+        // Reclaim by DELETE-then-create-exclusive, not by overwriting. A plain
+        // write let two processes that read the same dead pid both "win" — the
+        // common case being two --resume invocations after a crash, which then
+        // ran the same run twice against one file, doubling spend and clobbering
+        // each other's saves. Unlinking first means exactly one 'wx' create can
+        // succeed; the loser sees EEXIST and loops.
         console.warn(`[Database] Reclaiming stale lock from dead process ${holder.pid}`);
-        fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }));
-        lockPath = lock;
-        return;
+        try {
+          fs.unlinkSync(lock);
+        } catch (error: any) {
+          if (error?.code !== 'ENOENT') throw error; // someone else already reclaimed it
+        }
+        continue; // retry the atomic create; whoever gets there first owns it
       }
       lastReason =
         `it is in use by process ${holder.pid} (since ${holder.since}). ` +
@@ -324,7 +343,7 @@ export async function initializeDatabase(dbPath: string, options: InitializeData
   }
 
   try {
-    await openDatabase(dbPath);
+    await openDatabase(dbPath, options.readOnly === true);
   } catch (error) {
     // Anything after acquireDbLock that throws used to leave the lock behind,
     // permanently locking the user out of their own database.
@@ -333,7 +352,7 @@ export async function initializeDatabase(dbPath: string, options: InitializeData
   }
 }
 
-async function openDatabase(dbPath: string): Promise<void> {
+async function openDatabase(dbPath: string, readOnly: boolean): Promise<void> {
   // Initialize sql.js WASM engine
   const SQL = await initSqlJs();
 
@@ -359,7 +378,7 @@ async function openDatabase(dbPath: string): Promise<void> {
     sqlDb = new SQL.Database();
   }
 
-  db = new SqlJsWrapper(sqlDb, dbPath);
+  db = new SqlJsWrapper(sqlDb, dbPath, readOnly);
   db.pragma('journal_mode = WAL');
 
   // Create tables

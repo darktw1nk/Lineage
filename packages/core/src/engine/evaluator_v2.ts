@@ -699,11 +699,15 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    // Only actually pause if a Resume didn't arrive while we were draining —
-    // forcing 'paused' unconditionally silently undid that resume.
+    // A Resume that arrived DURING the drain was rejected by the re-entrancy
+    // guard (loopRunning was still true), so simply returning here left no loop
+    // running at all: the run sat at status 'running' forever, making no
+    // progress, and a second Resume was refused because it was not 'paused'.
+    // Hand the loop over explicitly instead.
     if (state.status !== 'pausing') {
-      console.log(`[Evaluator] Resume arrived during the pause drain (status=${state.status}) — not pausing`);
+      console.log(`[Evaluator] Resume arrived during the pause drain (status=${state.status}) — restarting the loop`);
       state.loopRunning = false;
+      if (state.status === 'running') startEvaluationLoop(runId);
       return;
     }
     console.log(`[Evaluator] All in-progress nodes completed, now fully paused`);
@@ -1565,14 +1569,23 @@ export function resumeEvaluation(runId: UUID): void {
     state.run.status = 'running';
     sendUpdate(runId, { type: 'status', status: 'running', totalPausedMs: state.totalPausedMs, pausedAt: undefined });
     
-    // Only start loop if there's work to do
-    // If queue is empty, the background mutation may still be in progress
-    if (state.queue.length > 0 || state.inProgress.size > 0) {
+    // An empty queue does NOT mean there is nothing to do. At every generation
+    // boundary — and immediately whenever parallelLimit >= generationSize —
+    // queue and inProgress are both 0 while the generation transition is still
+    // pending, so refusing to start the loop left the run stuck at 'paused'
+    // forever with no way to make progress.
+    //
+    // The one case where the loop must NOT start is the initial fill: gen 0
+    // nodes are still 'pending' mutation, the loop would find no work, exit,
+    // and prematurely finish the run. mutatePopulationInBackground starts the
+    // loop itself when it is done.
+    const fillInFlight = (state.run.generations[state.currentGeneration] ?? [])
+      .some(n => n.status === 'pending');
+    if (state.queue.length > 0 || state.inProgress.size > 0 || !fillInFlight) {
       console.log(`[Evaluator] Starting evaluation loop on resume`);
       startEvaluationLoop(runId);
     } else {
-      console.log(`[Evaluator] No work to resume yet (mutations may still be in progress)`);
-      // The loop will be started when mutations complete
+      console.log(`[Evaluator] Population fill still in progress — it will start the loop when done`);
     }
   }
 }

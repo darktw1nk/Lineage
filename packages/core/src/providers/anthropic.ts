@@ -74,7 +74,21 @@ export class AnthropicAdapter extends BaseProviderAdapter {
       
       const latencyMs = Date.now() - startTime;
       
-      const blocks = data.content ?? [];
+      // A 200 carrying an error body (or no content) is a provider failure, not
+      // an empty completion. Anthropic was the only adapter missing this guard,
+      // so an outage was billed as $0, graded as a bad prompt, and killed the
+      // lineage instead of being retried.
+      if (data.error) {
+        throw new RetryableError(
+          `Anthropic API returned an error body: ${data.error.message ?? JSON.stringify(data.error)}`,
+          data.error.status ?? 500,
+        );
+      }
+      if (!Array.isArray(data.content) || data.content.length === 0) {
+        throw new RetryableError('Anthropic response contained no content blocks', 500);
+      }
+
+      const blocks = data.content;
       const output = blocks.filter((b: any) => typeof b.text === 'string').map((b: any) => b.text).join('');
       const uses = blocks.filter((b: any) => b.type === 'tool_use');
       const toolCalls = uses.length > 0

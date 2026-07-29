@@ -1,6 +1,6 @@
-import { BaseProviderAdapter } from './base.js';
+import { BaseProviderAdapter, normalizeContent, normalizeToolArguments } from './base.js';
 import type { Provider, ToolDef } from '../types.js';
-import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
+import { withRetry, RetryableError, fetchWithTimeout, withCause, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
 
 export class GroqAdapter extends BaseProviderAdapter {
@@ -68,7 +68,8 @@ export class GroqAdapter extends BaseProviderAdapter {
         // Timeouts must stay retryable — never wrap RetryableError into a plain Error
         if (fetchError instanceof RetryableError) throw fetchError;
         console.error(`[Groq] Fetch failed:`, fetchError.message);
-        throw new Error(`Groq fetch failed: ${fetchError.message}`);
+        // Preserve `cause` so isRetryableError can find undici's network code.
+        throw withCause(new Error(`Groq fetch failed: ${fetchError.message}`), fetchError);
       }
 
       if (!response.ok) {
@@ -96,16 +97,14 @@ export class GroqAdapter extends BaseProviderAdapter {
       const message = data.choices[0]?.message;
       let toolCalls;
       if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
-        toolCalls = message.tool_calls.map((tc: any) => {
-          let args: Record<string, unknown> = {};
-          try { args = JSON.parse(tc.function?.arguments || '{}'); }
-          catch { console.warn('[Groq] Unparseable tool arguments:', tc.function?.arguments); }
-          return { name: tc.function?.name ?? '', arguments: args };
-        });
+        toolCalls = message.tool_calls.map((tc: any) => ({
+          name: tc.function?.name ?? '',
+          arguments: normalizeToolArguments(tc.function?.arguments, 'Groq'),
+        }));
       }
 
       return {
-        output: message?.content ?? '',
+        output: normalizeContent(message?.content),
         ...(toolCalls ? { toolCalls } : {}),
         promptTokens: data.usage?.prompt_tokens ?? 0,
         completionTokens: data.usage?.completion_tokens ?? 0,

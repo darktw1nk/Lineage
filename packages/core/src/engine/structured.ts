@@ -16,55 +16,46 @@ function stripFences(raw: string): string {
   return text;
 }
 
-/** Every balanced {...} / [...] span in the text, in the order they start. */
+/**
+ * Every TOP-LEVEL balanced {...} / [...] span, in the order they start.
+ *
+ * Both bracket types are scanned in one pass. Scanning them separately and
+ * concatenating put every array span after every object span, so an array
+ * NESTED INSIDE the answer object outranked the object itself — a prose-wrapped
+ * conforming object with any array field scored 1, the same as garbage.
+ * Advancing the cursor past each span also stops nested spans being emitted at
+ * all, which is what made that reachable.
+ */
 function balancedSpans(text: string): string[] {
   const spans: string[] = [];
-  for (const [open, close] of [['{', '}'], ['[', ']']] as const) {
-    let cursor = 0;
-    for (;;) {
-      const start = text.indexOf(open, cursor);
-      if (start === -1) break;
-      let depth = 0, inStr = false, esc = false, end = -1;
-      for (let i = start; i < text.length; i++) {
-        const ch = text[i];
-        if (inStr) {
-          if (esc) esc = false;
-          else if (ch === '\\') esc = true;
-          else if (ch === '"') inStr = false;
-          continue;
-        }
-        if (ch === '"') inStr = true;
-        else if (ch === open) depth++;
-        else if (ch === close && --depth === 0) { end = i; break; }
-      }
-      if (end === -1) break;
-      spans.push(text.slice(start, end + 1));
-      cursor = end + 1;
+  let cursor = 0;
+  while (cursor < text.length) {
+    let start = -1;
+    let open = '';
+    for (let i = cursor; i < text.length; i++) {
+      if (text[i] === '{' || text[i] === '[') { start = i; open = text[i]; break; }
     }
+    if (start === -1) break;
+
+    const close = open === '{' ? '}' : ']';
+    let depth = 0, inStr = false, esc = false, end = -1;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;
+      else if (ch === open) depth++;
+      else if (ch === close && --depth === 0) { end = i; break; }
+    }
+    if (end === -1) break; // unterminated: nothing further can be balanced
+    spans.push(text.slice(start, end + 1));
+    cursor = end + 1;
   }
   return spans;
-}
-
-/**
- * Parse candidates, best first.
- *
- * The whole text is tried first and is the only candidate that can earn a
- * perfect score. Digging JSON out of prose is a fallback, and it is deliberately
- * scored below a clean emit: a model that says "Sure! Here you go: {...}" has
- * failed the structured-output contract, and letting that reach 10 handed
- * evolution a reward-hacking gradient (an output that merely *echoed the schema
- * template* while refusing the task validated and scored a perfect 10).
- *
- * Spans are tried LAST first, so "Example: {...placeholder...} Real answer:
- * {...}" is scored on the real answer rather than the example.
- */
-function jsonCandidates(raw: string): Array<{ text: string; extracted: boolean }> {
-  const text = stripFences(raw);
-  const spans = balancedSpans(text);
-  return [
-    { text, extracted: false },
-    ...spans.reverse().map(span => ({ text: span, extracted: true })),
-  ];
 }
 
 function matchesType(value: unknown, type: unknown): boolean {
@@ -132,7 +123,12 @@ function satisfiedFraction(parsed: unknown, schema: any, errors: ReadonlyArray<a
   const explainedByMissingKey = (e: any) =>
     e.keyword === 'required' && required.includes(e.params?.missingProperty);
   const otherErrors = errors.filter(e => !explainedByMissingKey(e)).length;
-  const penalty = Math.min(1, otherErrors / required.length);
+  // Divide by required.length + 3, not required.length. The bare denominator
+  // saturated at a SINGLE error whenever one key was required, so
+  // {"answer":"hi","reasoning":"…"} — every required key correct plus one extra
+  // field, the most common near-miss a model produces — scored the same as {}
+  // or a bare string, giving evolution no signal that the answer was right.
+  const penalty = Math.min(1, otherErrors / (required.length + 3));
 
   return (ok / required.length) * (1 - penalty);
 }
@@ -159,54 +155,67 @@ export function scoreJsonSchema(
     return { passed: false, score: 0, detail: `schema error: ${error instanceof Error ? error.message : error}` };
   }
 
-  let parsed: unknown;
-  let parseError: unknown;
-  let extracted = false;
-  let found = false;
-  for (const candidate of jsonCandidates(output)) {
-    try {
-      parsed = JSON.parse(candidate.text);
-      extracted = candidate.extracted;
-      found = true;
-      break;
-    } catch (error) {
-      parseError ??= error;
-    }
-  }
-  if (!found) {
-    return { passed: false, score: 0, detail: `invalid JSON: ${parseError instanceof Error ? parseError.message : parseError}` };
-  }
+  const text = stripFences(output);
 
-  const conforms = validate(parsed);
+  // 1. The whole response. This is the only candidate that can earn a perfect
+  //    score — a model that wraps its JSON in prose has failed the
+  //    structured-output contract, and letting that reach 10 handed evolution a
+  //    reward-hacking gradient (an output that merely echoed the schema
+  //    template while refusing the task validated and scored 10).
+  let wholeTextParsed: unknown;
+  let parsed = false;
+  try {
+    wholeTextParsed = JSON.parse(text);
+    parsed = true;
+  } catch { /* fall through to extraction */ }
 
-  // Prose-wrapped JSON is a format failure, not a pass: an API consumer calling
-  // JSON.parse on this response would throw. It earns partial credit only, so
-  // clean output (10) always outranks output we had to dig out (5).
-  if (extracted) {
-    if (conforms) {
-      return { passed: false, score: 5, detail: 'valid JSON found inside prose — the response itself was not JSON' };
-    }
+  if (parsed) {
+    if (validate(wholeTextParsed)) return { passed: true, score: 10, detail: 'conforms to schema' };
     const errors = validate.errors ?? [];
-    const fraction = satisfiedFraction(parsed, schema as any, errors);
-    const score = Math.min(4, Math.max(1, Math.round(1 + 4 * fraction)));
+    // 1..5 by fraction of the schema satisfied: more nearly-correct scores
+    // higher, and a totally wrong shape lands at the floor.
+    const fraction = satisfiedFraction(wholeTextParsed, schema as any, errors);
     return {
       passed: false,
-      score,
-      detail: `JSON found inside prose, and it violates the schema (${errors.length}): ` +
+      score: Math.min(5, Math.max(1, Math.round(1 + 4 * fraction))),
+      detail: `schema violations (${errors.length}, ${Math.round(fraction * 100)}% of required satisfied): ` +
         errors.slice(0, 3).map(e => `${e.instancePath || '/'} ${e.message}`).join('; '),
     };
   }
 
-  if (conforms) return { passed: true, score: 10, detail: 'conforms to schema' };
+  // 2. Dig JSON out of prose. Score EVERY span and keep the best, rather than
+  //    picking by position: preferring the first span scored a leading
+  //    placeholder example, and preferring the last one scored a trailing
+  //    "for reference, the schema was {...}" blob. Both are common, and both
+  //    threw away the real answer sitting right next to it.
+  let best: { passed: boolean; score: number; detail: string } | null = null;
+  for (const span of balancedSpans(text)) {
+    let candidate: unknown;
+    try {
+      candidate = JSON.parse(span);
+    } catch {
+      continue;
+    }
+    const result = validate(candidate)
+      ? { passed: false, score: 5, detail: 'valid JSON found inside prose — the response itself was not JSON' }
+      : (() => {
+          const errors = validate.errors ?? [];
+          const fraction = satisfiedFraction(candidate, schema as any, errors);
+          return {
+            passed: false,
+            // Capped below a conforming extraction, so the ordering
+            // clean (10) > conforming-in-prose (5) > broken-in-prose (<=4) holds.
+            score: Math.min(4, Math.max(1, Math.round(1 + 4 * fraction))),
+            detail: `JSON found inside prose, and it violates the schema (${errors.length}): ` +
+              errors.slice(0, 3).map(e => `${e.instancePath || '/'} ${e.message}`).join('; '),
+          };
+        })();
+    if (!best || result.score > best.score) best = result;
+    if (best.score === 5) break; // nothing extracted can beat a conforming span
+  }
 
-  const errors = validate.errors ?? [];
-  // 1..5 by fraction of the schema satisfied: more nearly-correct scores higher,
-  // and a totally wrong shape lands at the floor.
-  const fraction = satisfiedFraction(parsed, schema as any, errors);
-  const score = Math.min(5, Math.max(1, Math.round(1 + 4 * fraction)));
-  const detail = `schema violations (${errors.length}, ${Math.round(fraction * 100)}% of required satisfied): ` +
-    errors.slice(0, 3).map(e => `${e.instancePath || '/'} ${e.message}`).join('; ');
-  return { passed: false, score, detail };
+  if (best) return best;
+  return { passed: false, score: 0, detail: 'invalid JSON: no parseable JSON found in the response' };
 }
 
 function deepEqual(a: unknown, b: unknown): boolean {

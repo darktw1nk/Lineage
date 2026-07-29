@@ -39,8 +39,15 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [syncingModels, setSyncingModels] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
 
+  // The key inputs render EMPTY until the async load lands, and an empty key
+  // means "delete" on save. Saving inside that window silently wiped every
+  // provider key from the encrypted store the CLI also reads — no confirmation,
+  // no undo, and the fields looked exactly the same as "I have no keys yet".
+  const [keysLoaded, setKeysLoaded] = useState(false);
+
   // Load API keys when modal opens
   useEffect(() => {
+    let cancelled = false;
     const loadKeys = async () => {
       try {
         const [openaiKey, anthropicKey, geminiKey, openrouterKey] = await Promise.all([
@@ -49,6 +56,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           window.electronAPI.keys.get('gemini'),
           window.electronAPI.keys.get('openrouter'),
         ]);
+        if (cancelled) return;
 
         setApiKeys({
           openai: openaiKey || '',
@@ -56,11 +64,15 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           gemini: geminiKey || '',
           openrouter: openrouterKey || '',
         });
+        setKeysLoaded(true);
       } catch (error) {
         console.error('Failed to load API keys:', error);
+        // Deliberately leave keysLoaded false: a failed read must never let a
+        // save overwrite keys we could not see.
       }
     };
     loadKeys();
+    return () => { cancelled = true; };
   }, []);
 
   const [localSettings, setLocalSettings] = useState<AppSettings>({
@@ -367,6 +379,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 const patchRow = (patch: Partial<ModelCostEntry>) => {
                   setLocalCosts(prev => prev.map((row, i) => (i === originalIdx ? { ...row, ...patch } : row)));
                 };
+                // A negative price produces negative spend, which inverts
+                // fitness and disarms the budget cap — never let one be typed in.
+                const priceFromInput = (raw: string) => Math.max(0, parseFloat(raw) || 0) / 1000;
                 return (
                   <div key={originalIdx} className="grid grid-cols-12 gap-2 items-center px-3 py-2 border-b hover:bg-muted/50">
                     <div className="col-span-3">
@@ -395,7 +410,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         type="number"
                         step="0.01"
                         value={(cost.promptUSDper1k * 1000).toFixed(2)}
-                        onChange={(e) => patchRow({ promptUSDper1k: (parseFloat(e.target.value) || 0) / 1000 })}
+                        onChange={(e) => patchRow({ promptUSDper1k: priceFromInput(e.target.value) })}
                       />
                     </div>
                     <div className="col-span-3">
@@ -404,7 +419,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         type="number"
                         step="0.01"
                         value={(cost.completionUSDper1k * 1000).toFixed(2)}
-                        onChange={(e) => patchRow({ completionUSDper1k: (parseFloat(e.target.value) || 0) / 1000 })}
+                        onChange={(e) => patchRow({ completionUSDper1k: priceFromInput(e.target.value) })}
                       />
                     </div>
                     <div className="col-span-1 flex justify-center">
@@ -449,8 +464,13 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={() => saveSettings.mutate()}>
-            Save Settings
+          {/* Everything the save WRITES must first have been READ, or the save
+              persists placeholder state over real data. */}
+          <Button
+            onClick={() => saveSettings.mutate()}
+            disabled={!keysLoaded || !settings || !costs || saveSettings.isPending}
+          >
+            {saveSettings.isPending ? 'Saving…' : !keysLoaded || !settings ? 'Loading…' : 'Save Settings'}
           </Button>
         </div>
       </DialogContent>

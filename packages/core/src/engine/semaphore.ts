@@ -41,9 +41,12 @@ class Semaphore {
 
   release(): void {
     this.inUse = Math.max(0, this.inUse - 1);
-    // Never hand back more than the ceiling: an unconditional ++ combined with
-    // a re-init while calls are in flight permanently inflates concurrency.
-    this.permits = Math.min(this.limit, this.permits + 1);
+    // Never hand back more than the ceiling MINUS what is still held: clamping
+    // to the bare limit meant that after LOWERING it mid-flight, every
+    // completion immediately re-issued a permit and concurrency never came
+    // down. startEvaluation re-inits the semaphore on every run, so starting a
+    // low-concurrency run beside a high-concurrency one kept the old ceiling.
+    this.permits = Math.max(0, Math.min(this.limit - this.inUse, this.permits + 1));
 
     if (this.permits > 0 && this.queue.length > 0) {
       const next = this.queue.shift();

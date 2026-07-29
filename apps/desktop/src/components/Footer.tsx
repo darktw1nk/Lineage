@@ -33,6 +33,30 @@ function formatCost(cost: number): string {
   return `$${cost.toExponential(2)}`;
 }
 
+/**
+ * A stopReason is recorded on EVERY terminal run, including successful ones —
+ * an ordinary completion sets 'generations'. Checking it before the status made
+ * every finished run read "Stopped: generations", and a run that genuinely hit
+ * its quality bar read "Stopped: target". Only the reasons that mean the run
+ * was cut short deserve "Stopped".
+ */
+const CUT_SHORT: Record<string, string> = {
+  budget: 'Stopped: budget reached',
+  time: 'Stopped: time limit',
+  manual: 'Stopped manually',
+  error: 'Stopped: error',
+  exhausted: 'Stopped: no candidates left',
+};
+
+function statusLabel(status: string | undefined, stopReason: string | undefined, isPaused: boolean): string {
+  if (stopReason && CUT_SHORT[stopReason]) return CUT_SHORT[stopReason];
+  if (status === 'finished') return stopReason === 'target' ? 'Finished (target reached)' : 'Finished';
+  if (status === 'pausing') return 'Pausing...';
+  if (status === 'stopped') return 'Stopped';
+  if (isPaused) return 'Paused';
+  return 'Running';
+}
+
 export function Footer({ evaluationId, onShowConfig }: FooterProps) {
   const [isStopping, setIsStopping] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
@@ -120,15 +144,7 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
         <div>
           <div className="text-xs text-muted-foreground">Status</div>
           <div className="text-sm font-medium">
-            {evaluation.stopReason
-              ? `Stopped: ${evaluation.stopReason}`
-              : status === 'finished'
-              ? 'Finished'
-              : status === 'pausing'
-              ? 'Pausing...'
-              : isPaused
-              ? 'Paused'
-              : 'Running'}
+            {statusLabel(status, evaluation.stopReason, isPaused)}
           </div>
         </div>
         
