@@ -48,6 +48,16 @@ describe('scoreJsonSchema', () => {
     expect(r.score).toBe(0);
     expect(r.detail).toMatch(/no schema/i);
   });
+
+  it('re-validates when the schema changes under the same cache key (edited test)', () => {
+    // Review-caught bug: caching by test id served the OLD compiled schema after
+    // the user edited a test's schema in a long-lived process.
+    const first = scoreJsonSchema('{"a":1}', { type: 'object', required: ['a'] } as object, 'stable-id');
+    expect(first.score).toBe(10);
+    const second = scoreJsonSchema('{"a":1}', { type: 'object', required: ['b'] } as object, 'stable-id');
+    expect(second.score).toBeLessThan(10); // must validate against the NEW schema
+    expect(second.detail).toMatch(/b/);
+  });
 });
 
 const CALL = (name: string, args: Record<string, unknown>) => [{ name, arguments: args }];

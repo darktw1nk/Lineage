@@ -51,6 +51,7 @@ interface EvaluationState {
   pairwiseEnabled: boolean;   // opt-in pairwise playoff
   pairwiseContenders: number; // resolved + clamped (2..8) from config
   costContext: 'evolution' | 'holdout'; // routes accruals to holdout labels during the final evaluation
+  finishing: boolean;         // idempotency latch: finishEvaluation must run exactly once
   pausedAt?: number; // Timestamp when paused (if currently paused)
   totalPausedMs: number; // Total time spent paused
   gradingTotal: number; // Total grading calls completed
@@ -205,6 +206,7 @@ export async function startEvaluation(
     pairwiseEnabled,
     pairwiseContenders,
     costContext: 'evolution',
+    finishing: false,
     totalPausedMs: 0,
     gradingTotal: 0,
     gradingFailures: 0,
@@ -475,31 +477,45 @@ async function evaluationLoop(runId: UUID): Promise<void> {
     processNextNode();
   }
   
-  // Wait for all active processing to complete
-  while (activePromises.size > 0 || state.queue.length > 0) {
+  // Wait for all active processing to complete. do..while (not while): a run
+  // resumed from a checkpoint taken AT a generation boundary arrives here with
+  // an empty queue and a fully terminal generation — the body must still run
+  // once to perform the generation transition instead of finishing prematurely.
+  do {
     if (state.status !== 'running') {
       console.log(`[Evaluator] Status changed to ${state.status}, stopping node initiation`);
       break;
     }
-    
+
+    // A tripped stop condition (e.g. resumed with restored spend already over
+    // budget) blocks processNextNode from ever starting work — without this
+    // exit the loop would spin forever on a non-empty queue.
+    if (shouldStop(state) && activePromises.size === 0) {
+      console.log(`[Evaluator] Stop condition tripped with ${state.queue.length} queued nodes — skipping them`);
+      for (const queued of state.queue) queued.status = 'skipped';
+      state.queue = [];
+      await finishEvaluation(runId, state);
+      return;
+    }
+
     // Wait a bit before checking again
     await new Promise(resolve => setTimeout(resolve, 100));
-    
+
     // Check if generation is complete
     const currentGen = state.run.generations[state.currentGeneration];
-    const allFinished = currentGen.every(n => 
+    const allFinished = currentGen.every(n =>
       n.status === 'finished' || n.status === 'failed' || n.status === 'skipped'
     );
-    
+
     if (allFinished && state.queue.length === 0 && activePromises.size === 0) {
       console.log(`[Evaluator] Generation ${state.currentGeneration} complete`);
-      
+
       // Check stopping conditions
       if (shouldStop(state)) {
         await finishEvaluation(runId, state);
         return;
       }
-      
+
       // Check if we would exceed maxGenerations by creating the next one
       if (state.config.targets.maxGenerations) {
         if (state.currentGeneration + 1 >= state.config.targets.maxGenerations) {
@@ -509,10 +525,10 @@ async function evaluationLoop(runId: UUID): Promise<void> {
           return;
         }
       }
-      
+
       // Move to next generation
       await moveToNextGeneration(runId, state);
-      
+
       // Start processing nodes from the new generation
       const newInitialBatchSize = Math.min(state.config.parallelLimit, state.queue.length);
       console.log(`[Evaluator] Starting ${newInitialBatchSize} nodes from new generation`);
@@ -520,7 +536,7 @@ async function evaluationLoop(runId: UUID): Promise<void> {
         processNextNode();
       }
     }
-  }
+  } while (activePromises.size > 0 || state.queue.length > 0);
   
   console.log(`[Evaluator] Evaluation loop exited (status=${state.status}, queue=${state.queue.length}, inProgress=${state.inProgress.size})`);
   
@@ -1193,6 +1209,19 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
 }
 
 async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<void> {
+  // Idempotency latch: the circuit-breaker path can invoke this from several
+  // failing nodes concurrently — playoff/holdout spend must not run twice.
+  if (state.finishing) return;
+  state.finishing = true;
+
+  // Drain in-flight nodes first (manual stop leaves them running): their
+  // accruals must land under evolution labels BEFORE costContext flips to
+  // holdout, and the final persisted run must include their results.
+  // Bounded: every call now carries an abort timeout.
+  while (state.inProgress.size > 0) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
   // The final generation never reaches moveToNextGeneration — run its playoff here
   // so the champion (and the holdout below) reflect the last generation's ranking.
   await maybeRunPlayoff(runId, state);
@@ -1220,7 +1249,12 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   console.log(`[Evaluator] Evaluation ${runId.slice(0, 8)} finished`);
 }
 
-/** Cache key: hash(prompt, model, temperature, harness, fitness-test signature). */
+/**
+ * Cache key: hash(prompt, model, temperature, harness, fitness-test signature).
+ * params.seed is deliberately NOT part of the key: children inherit their
+ * parent's seed under the current policy, so key components co-vary. If seeds
+ * ever become per-child, add seed here or the cache will serve cross-seed hits.
+ */
 function computeCacheKey(node: CandidateNode, state: EvaluationState): string {
   const testSetSig = state.fitnessTests.map(t => t.id).join(',');
   return createHash('sha256')

@@ -49,18 +49,18 @@ function decisionSignature(run: any) {
   })));
 }
 
-async function runToCompletion(run: any): Promise<any> {
+async function runToCompletion(run: any, config: any = CONFIG): Promise<any> {
   const tmpDb = path.join(os.tmpdir(), `pe-rs-${process.pid}-${Math.random().toString(36).slice(2)}.db`);
   await initializeDatabase(tmpDb);
   const db = getDatabase();
   db.prepare('INSERT INTO evaluation_configs (id, name, config_json, created_at) VALUES (?, ?, ?, ?)')
-    .run(CONFIG.id, CONFIG.name, JSON.stringify(CONFIG), Date.now());
+    .run(config.id, config.name, JSON.stringify(config), Date.now());
   db.prepare('INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version) VALUES (?, ?, ?, ?, ?)')
     .run(run.id, run.configId, run.startedAt, JSON.stringify(run), run.version);
   const done = new Promise<void>(res => setSendUpdate((_id, d) => {
     if (d.type === 'status' && d.status === 'finished') res();
   }));
-  await startEvaluation(run.id, CONFIG, run);
+  await startEvaluation(run.id, config, run);
   await done;
   const finalRun = JSON.parse((db.prepare('SELECT run_json FROM evaluation_runs WHERE id = ?').get(run.id) as any).run_json);
   closeDatabase();
@@ -129,6 +129,50 @@ describe('resume from checkpoint', () => {
     await expect(startEvaluation(again.id, CONFIG, again)).rejects.toThrow(/already finished/);
     closeDatabase();
     fs.rmSync(tmpDb, { force: true });
+  }, 60000);
+
+  it('resumes a run checkpointed AT a generation boundary and continues evolving', async () => {
+    // Review-caught bug: a checkpoint taken between generation completion and
+    // the next generation's creation (playoff/operator window) resumed into an
+    // empty queue and finished prematurely with too few generations.
+    registerDet();
+    const full = await runToCompletion(freshRun());
+    expect(full.generations.length).toBe(3);
+
+    const boundary = JSON.parse(JSON.stringify(full));
+    boundary.id = 'rs-boundary';
+    boundary.status = 'running';
+    delete boundary.finishedAt; delete boundary.stopReason;
+    boundary.generations = boundary.generations.slice(0, 2); // gens 0-1 fully terminal, no gen 2 yet
+
+    resetRegistry(); registerDet();
+    const resumed = await runToCompletion(boundary);
+    expect(resumed.status).toBe('finished');
+    expect(resumed.generations.length).toBe(3); // gen 2 was created, not skipped
+    expect(decisionSignature(resumed)).toEqual(decisionSignature(full)); // seeded continuation matches
+  }, 60000);
+
+  it('resumes an already-over-budget run to a clean finish instead of hanging', async () => {
+    registerDet();
+    const budgetConfig = { ...CONFIG, id: 'rs-budget-cfg', targets: { maxGenerations: 3, budgetUSD: 0.0005 } };
+    const run: any = freshRun();
+    run.status = 'running';
+    run.totals = { tokensPrompt: 100, tokensCompletion: 100, usd: 0.001, calls: 10 }; // over budget already
+    run.generations = [[
+      { id: 'b0', generation: 0, lineageParents: [], status: 'finished', prompt: 'RS SEED',
+        params: { model: { provider: 'det', model: 'm' }, temperature: 0, seed: 1 },
+        metrics: { fitness: 5, quality: 5 },
+        tests: [{ testId: 't1', passed: false, score: 5, promptTokens: 1, completionTokens: 1, latencyMs: 1, outputText: 'x' }],
+        changeLog: [{ label: 'MUTATION', text: 'Seed prompt (baseline)' }] },
+      { id: 'b1', generation: 0, lineageParents: [], status: 'awaiting', prompt: 'VARIANT B1',
+        params: { model: { provider: 'det', model: 'm' }, temperature: 0, seed: 2 },
+        changeLog: [{ label: 'MUTATION', text: 'mutated' }] },
+    ]];
+    const resumed = await runToCompletion(run, budgetConfig);
+    expect(resumed.status).toBe('finished'); // reaching here at all proves no hang
+    expect(resumed.stopReason).toBe('budget');
+    const b1 = resumed.generations[0].find((n: any) => n.id === 'b1');
+    expect(b1.status).toBe('skipped'); // queued work skipped, not silently dropped
   }, 60000);
 
   it('resumes a run interrupted during the initial fill (pending gen-0 mutations)', async () => {

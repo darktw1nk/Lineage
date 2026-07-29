@@ -59,10 +59,15 @@ function parseVerdict(raw: string): 'A' | 'B' | 'tie' {
     text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
   }
 
-  // 1) Direct JSON, or a JSON object embedded in surrounding prose
+  // 1) Direct JSON, or a JSON object embedded in surrounding prose.
+  // Greedy match: a non-greedy one truncates at the first '}' when the
+  // reason field itself contains braces. Try greedy first, then non-greedy
+  // (covers prose AFTER the JSON object).
   const jsonCandidates = [text];
-  const embedded = text.match(/\{[\s\S]*?\}/);
-  if (embedded) jsonCandidates.push(embedded[0]);
+  const greedy = text.match(/\{[\s\S]*\}/);
+  if (greedy) jsonCandidates.push(greedy[0]);
+  const lazy = text.match(/\{[\s\S]*?\}/);
+  if (lazy && lazy[0] !== greedy?.[0]) jsonCandidates.push(lazy[0]);
   for (const candidate of jsonCandidates) {
     try {
       const winner = String(JSON.parse(candidate).winner ?? '').toLowerCase();

@@ -91,7 +91,10 @@ export async function estimateRunCost(
     if (calls > 0) breakdown.push({ label, calls, low: calls * lowPer, high: calls * highPer });
   };
 
-  if (N0 > 1) add(COST_LABELS.fill, (N0 - 1) * 2, per(svc, svcPromptTok, 100), per(svc, svcPromptTok, maxOut));
+  // Manual populations supply their own prompts — no fill mutations happen
+  if (N0 > 1 && config.population.fill !== 'manual') {
+    add(COST_LABELS.fill, (N0 - 1) * 2, per(svc, svcPromptTok, 100), per(svc, svcPromptTok, maxOut));
+  }
   add(COST_LABELS.candidates, nodes * F * S, per(cand, candPromptTok, 30), per(cand, candPromptTok, maxOut));
   add(COST_LABELS.grading, nodes * L * S, per(svc, judgePromptTok, 60), per(svc, judgePromptTok, 250));
 

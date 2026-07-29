@@ -25,10 +25,14 @@ export function scoreJsonSchema(
 
   let validate: ValidateFunction | undefined;
   try {
-    validate = cacheKey ? validatorCache.get(cacheKey) : undefined;
+    // Cache key must include the schema CONTENT: test ids are stable across
+    // edits, and this module outlives runs in the Electron main process — an
+    // id-only key would keep scoring against a stale compiled schema.
+    const key = cacheKey ? `${cacheKey}:${JSON.stringify(schema)}` : undefined;
+    validate = key ? validatorCache.get(key) : undefined;
     if (!validate) {
       validate = ajv.compile(schema);
-      if (cacheKey) validatorCache.set(cacheKey, validate);
+      if (key) validatorCache.set(key, validate);
     }
   } catch (error) {
     return { passed: false, score: 0, detail: `schema error: ${error instanceof Error ? error.message : error}` };
