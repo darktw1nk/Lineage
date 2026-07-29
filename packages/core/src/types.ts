@@ -146,7 +146,16 @@ export interface EvaluationRun {
     champion?: { score: number; perTest: Array<{ testId: UUID; score: number }> };
     skipped?: 'budget' | 'no-champion' | 'manual';
   };
-  playoffs?: Array<{ generation: number; ranking: UUID[] }>; // pairwise playoff rankings, best first
+  /**
+   * Pairwise playoff rankings, best first.
+   *
+   * `decisive` is whether the top two were separated by a clear win. A
+   * non-decisive playoff is a coin flip and must NOT pick the champion or
+   * override fitness — it is kept only so the report can show what was judged.
+   * Absent on runs checkpointed before the flag existed; treat as decisive
+   * there, which is what those runs actually did.
+   */
+  playoffs?: Array<{ generation: number; ranking: UUID[]; decisive?: boolean }>;
   costBreakdown?: Record<string, { calls: number; promptTokens: number; completionTokens: number; usd: number }>; // COST_LABELS keys + model:<provider>/<model> keys
   pricingUnknown?: string[]; // models with no catalogued price: their calls count as $0, so spend is a lower bound
   estimate?: { calls: number; low: number; high: number; breakdown: Array<{ label: string; calls: number; low: number; high: number }> }; // preflight snapshot

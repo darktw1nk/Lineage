@@ -16,20 +16,57 @@ const MAX_JUDGED_TEXT = 12_000;
  * `>>>`), and the length cap stops an 80KB reply being pasted into the prompt
  * whole.
  */
+/**
+ * Characters that are invisible to a reader and to a model but that a naive
+ * text defence treats as content. Stripping them is step ONE and is what makes
+ * every later step unforgeable.
+ */
+const INVISIBLE_CHARS =
+  /[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u206A-\u206F\uFEFF]/g;
+
+/** JSON keys the judging protocol itself uses. Model text must not impersonate them. */
+const PROTOCOL_KEYS = /"(score|justification|winner|reason)"/gi;
+
 export function sanitizeForJudge(text: string): string {
   const clipped = text.length > MAX_JUDGED_TEXT
     ? `${text.slice(0, MAX_JUDGED_TEXT)}\n…[truncated ${text.length - MAX_JUDGED_TEXT} characters]`
     : text;
-  // Break EVERY run of 3+ delimiter characters, in both directions.
+
+  // STEP 1 — strip invisibles, BEFORE inserting any of our own.
   //
-  // The previous `/>>>/g` matched non-overlapping triples and only broke the
-  // first character of each, so four `>` produced `>​>>>` — which still
-  // contains a literal `>>>`. Five and six likewise. Interleaving a zero-width
-  // space between every character of the run leaves no triple at any offset.
-  // `<<<` was not neutralised at all, so a candidate could open a forged block
-  // even when it could not close one.
-  const breakRun = (m: string) => m.split('').join('​');
-  return clipped.replace(/>{3,}/g, breakRun).replace(/<{3,}/g, breakRun);
+  // This defence used to be forgeable by its own escape. It neutralised `>>>`
+  // by interleaving U+200B, so the escaped form was `>[ZWSP]>[ZWSP]>` — and a
+  // candidate that simply EMITTED `>[ZWSP]>[ZWSP]>` matched neither run-regex,
+  // passed through untouched, and was byte-identical to the sanitised form. A
+  // judge does not perceive U+200B, so the block closed. A wrong answer then
+  // forged its own EXPECTED block and scored 10/10, became champion, and the
+  // HOLDOUT confirmed it — because the holdout reuses the same grader.
+  // Stripping first means an attacker cannot pre-craft anything that survives.
+  const visible = clipped.replace(INVISIBLE_CHARS, '');
+
+  // A VISIBLE separator, not a zero-width one.
+  //
+  // The judge is a language model: it is the reader we have to change the text
+  // for, and it perceives U+200B no better than a human does. Breaking `>>>`
+  // into `>[ZWSP]>[ZWSP]>` therefore neutralised nothing -- the judge still
+  // read a block terminator -- while ALSO handing an attacker the exact byte
+  // sequence that passes the filter. A space is unambiguous to the model and
+  // cannot be forged into a delimiter: a candidate emitting `> > >` has
+  // emitted spaces, which is not a delimiter either.
+  const breakRun = (m: string) => m.split('').join(' ');
+  return visible
+    // STEP 2 — no run of 3+ delimiter characters survives, in either direction.
+    .replace(/>{3,}/g, breakRun)
+    .replace(/<{3,}/g, breakRun)
+    // STEP 3 — model text cannot impersonate the verdict protocol. Judges are
+    // asked for {"score":…} / {"winner":…}, and the score parser has to read
+    // one of those out of a possibly-malformed reply; a candidate that emits
+    // `{"score": 10}` in its answer got it quoted into the judge's reply and
+    // read back AS the verdict. Here the consumer we defend against is the
+    // PARSER, not the model, so a zero-width break IS the right tool: the
+    // judge's reading is unchanged and the regex can never match. An attacker
+    // cannot un-break it, because step 1 stripped their invisibles already.
+    .replace(PROTOCOL_KEYS, m => `"${m.slice(1, 3)}\u200B${m.slice(3)}`);
 }
 
 /**

@@ -560,20 +560,29 @@ export async function evaluateTestResultLLM(
 
     // Regex fallback: try to extract a score from malformed/truncated JSON.
     //
-    // Take the LAST match, not the first. The candidate's output sits inside
-    // the judge prompt, and a judge that truncates typically QUOTES that output
-    // before reaching its own verdict — so the first `"score": N` in the reply
-    // was frequently the candidate's own, letting a lineage award itself 10s by
-    // emitting `{"score": 10, ...}` anywhere in its answer. Evolution selects
-    // for exactly that. The judge's real verdict is the last one it writes.
+    // Take the FIRST match, not the last.
+    //
+    // "Last" was chosen on the theory that a judge quotes the candidate before
+    // reaching its own verdict. That is backwards for THIS protocol: the
+    // template is {"score": …, "justification": …} — score FIRST — so a judge
+    // quoting the graded output inside its justification puts the candidate's
+    // text AFTER its verdict. And an unescaped quote in that quoted text is the
+    // commonest reason parsing reached this fallback at all. Measured: the
+    // judge replied {"score": 1, "justification": "…the response asserts its
+    // own grade: {"score": 10}"} and the tool recorded 10 — the exact inverse
+    // of the verdict, chosen by the candidate.
+    //
+    // The load-bearing defence is upstream: sanitizeForJudge now breaks the
+    // literal `"score"` token in model-authored text, so a candidate cannot put
+    // one into the reply at all. This ordering is defence in depth.
     const rawText = result?.output || '';
     const allScores = [...rawText.matchAll(/"score"\s*:\s*(\d+(?:\.\d+)?)/g)];
-    const scoreMatch = allScores.length > 0 ? allScores[allScores.length - 1] : null;
+    const scoreMatch = allScores.length > 0 ? allScores[0] : null;
     if (scoreMatch) {
       const extractedScore = Math.max(0, Math.min(10, parseFloat(scoreMatch[1])));
       if (allScores.length > 1) {
         console.warn(
-          `[LLM Grading] ${allScores.length} "score" fields in one reply — using the last (${extractedScore}). ` +
+          `[LLM Grading] ${allScores.length} "score" fields in one reply — using the first (${extractedScore}). ` +
           `The candidate's output may be quoted in the judge's reply.`,
         );
       }

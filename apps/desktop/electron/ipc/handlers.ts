@@ -353,28 +353,45 @@ async function listEvaluations(): Promise<EvaluationRun[]> {
       const blob = db.prepare('SELECT run_json FROM evaluation_runs WHERE id = ?')
         .get(row.id) as { run_json: string } | undefined;
       if (!blob) continue;
-      let run: EvaluationRun;
+      // ONE try around parse AND the walk. The walk used to sit outside it, so
+      // a run whose `generations` held a non-array element (`[{}]`, `[null]`,
+      // `[5]` — all accepted by eval:import, which only checked the OUTER
+      // array) threw "generation is not iterable" out of eval:list. The
+      // sidebar polls that every 2s, so one bad import froze the list and, on
+      // the next cold start, emptied it completely — including the poison row,
+      // leaving no UI to delete it with. LeftSidebar is the one panel App.tsx
+      // does not wrap in an ErrorBoundary.
+      //
+      // A run we cannot summarise still gets a ROW, so it stays visible and
+      // deletable rather than vanishing.
       try {
-        run = JSON.parse(blob.run_json);
-      } catch {
-        console.error(`[IPC] Skipping run ${row.id.slice(0, 8)} in list: unparseable run_json`);
-        continue;
-      }
-      let best = -Infinity;
-      let nodeCount = 0;
-      for (const generation of run.generations ?? []) {
-        for (const node of generation) {
-          nodeCount++;
-          const f = node.metrics?.fitness;
-          if (f !== undefined && f > best) best = f;
+        const run: EvaluationRun = JSON.parse(blob.run_json);
+        let best = -Infinity;
+        let nodeCount = 0;
+        const generations = Array.isArray(run.generations) ? run.generations : [];
+        for (const generation of generations) {
+          if (!Array.isArray(generation)) continue;
+          for (const node of generation) {
+            nodeCount++;
+            const f = node?.metrics?.fitness;
+            if (typeof f === 'number' && f > best) best = f;
+          }
         }
+        const { generations: _drop, ...scalars } = run;
+        summary = {
+          ...scalars,
+          generations: [],
+          ...( { bestScore: Number.isFinite(best) ? best : null, generationCount: generations.length, nodeCount } as any ),
+        } as EvaluationRun;
+      } catch (error) {
+        console.error(`[IPC] Run ${row.id.slice(0, 8)} could not be summarised:`, error);
+        summary = {
+          id: row.id, generations: [], startedAt: 0,
+          totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 0, calls: 0 },
+          cacheHits: 0, version: 'unknown', status: 'stopped', stopReason: 'error',
+          ...( { bestScore: null, generationCount: 0, nodeCount: 0, corrupt: true } as any ),
+        } as unknown as EvaluationRun;
       }
-      const { generations: _drop, ...scalars } = run;
-      summary = {
-        ...scalars,
-        generations: [],
-        ...( { bestScore: Number.isFinite(best) ? best : null, generationCount: (run.generations ?? []).length, nodeCount } as any ),
-      } as EvaluationRun;
       summaryCache.set(row.id, { len: row.len, summary });
     }
     // Recomputed every poll: liveness is process state, not row state.
@@ -567,6 +584,13 @@ async function importEvaluation(filePath: string): Promise<EvaluationRun> {
 
   if (!Array.isArray(run.generations)) {
     throw new Error('Invalid export file: "run.generations" must be an array.');
+  }
+  // Each generation must be an array too. Checking only the outer one let
+  // `[{}]`, `[null]` and `[5]` through, and every later consumer iterates the
+  // inner arrays — eval:list threw on each poll and took the whole sidebar
+  // down with it.
+  if (!run.generations.every(g => Array.isArray(g))) {
+    throw new Error('Invalid export file: every entry in "run.generations" must itself be an array of nodes.');
   }
   if (typeof run.startedAt !== 'number' || !run.version) {
     throw new Error('Invalid export file: "run" is missing startedAt or version.');

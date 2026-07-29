@@ -23,7 +23,7 @@ export interface ChampionChoice<T> {
  */
 export function selectChampion<T extends { id: UUID; generation?: number; metrics?: CandidateNode['metrics'] }>(
   finished: readonly T[],
-  playoffs: ReadonlyArray<{ generation: number; ranking: UUID[] }> | undefined,
+  playoffs: ReadonlyArray<{ generation: number; ranking: UUID[]; decisive?: boolean }> | undefined,
   generationOf: (node: T) => number,
 ): ChampionChoice<T> {
   const byFitness = [...finished].sort((a, b) => (b.metrics?.fitness ?? -Infinity) - (a.metrics?.fitness ?? -Infinity));
@@ -31,6 +31,17 @@ export function selectChampion<T extends { id: UUID; generation?: number; metric
 
   const latestPlayoff = [...(playoffs ?? [])].sort((a, b) => b.generation - a.generation)[0];
   if (!latestPlayoff) return { champion: bestByFitness, staleplayoffIgnored: false };
+
+  // A playoff the engine declared non-decisive must not pick the champion.
+  // maybeRunPlayoff withholds playoffRank in that case and logs that selection
+  // stays fitness-based — but the ranking was recorded anyway and this function
+  // took ranking[0] from it regardless, so the champion came from a ranking the
+  // run had explicitly discarded. `decisive === undefined` means a checkpoint
+  // written before the flag existed; those runs did act on the ranking, so
+  // honouring it keeps them reproducible.
+  if (latestPlayoff.decisive === false) {
+    return { champion: bestByFitness, staleplayoffIgnored: false };
+  }
 
   const newestEvaluatedGeneration = finished.reduce(
     (max, node) => Math.max(max, generationOf(node)),

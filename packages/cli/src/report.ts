@@ -356,7 +356,15 @@ export function generateReport(
     const newestGeneration = result.generations
       .filter(g => g.nodes.some(n => n.status === 'finished' && n.metrics?.fitness !== undefined))
       .reduce((max, g) => Math.max(max, g.generation), -1);
-    if (lastPlayoff.generation === newestGeneration) {
+    if (lastPlayoff.generation === newestGeneration && (lastPlayoff as any).decisive === false) {
+      // The playoff ran but its top two were too close to act on, so selection
+      // stayed fitness-based. Saying "selected by pairwise playoff" here put a
+      // 5.000 champion three lines under a table reading "Best Fitness 10.000".
+      lines.push(
+        `*Champion selected by fitness. A pairwise playoff ran (${lastPlayoff.ranking.length} contenders) ` +
+        `but its top two were too close to separate, so it did not override fitness.*`,
+      );
+    } else if (lastPlayoff.generation === newestGeneration) {
       lines.push(`*Champion selected by pairwise playoff (${lastPlayoff.ranking.length} contenders, both-orders judging).*`);
     } else {
       // Claiming a playoff picked the champion when the final generation never

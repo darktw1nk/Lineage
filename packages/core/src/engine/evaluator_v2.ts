@@ -1623,7 +1623,17 @@ async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<voi
       `not decisive enough to override fitness. Ranking recorded for reference; selection stays fitness-based.`,
     );
   }
-  state.run.playoffs = [...(state.run.playoffs ?? []), { generation: genIndex, ranking: result.ranking }];
+  // Record `decisive` WITH the ranking. It used to be recorded bare, so
+  // selectChampion took ranking[0] from a playoff this function had just
+  // declared "not decisive enough to override fitness" — the champion the user
+  // takes away, and the prompt the holdout measures, came from the discarded
+  // ranking while selection used fitness. Measured: a run whose report said
+  // "Champion selected by pairwise playoff / Fitness 5.000" three lines under a
+  // generation table reading "Best Fitness 10.000".
+  state.run.playoffs = [
+    ...(state.run.playoffs ?? []),
+    { generation: genIndex, ranking: result.ranking, decisive },
+  ];
   sendUpdate(runId, { type: 'playoff_result', generation: genIndex, ranking: result.ranking, matches: result.matches });
   persistRun(state);
   console.log(`[Playoff] Gen ${genIndex}: winner ${result.ranking[0].slice(0, 8)} (${result.matches} judge calls, ${result.ranking.length} contenders)`);
