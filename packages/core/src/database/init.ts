@@ -371,19 +371,39 @@ async function acquireDbLock(dbPath: string): Promise<void> {
         alive = error?.code !== 'ESRCH';
       }
       if (!alive) {
-        // Reclaim by DELETE-then-create-exclusive, not by overwriting. A plain
-        // write let two processes that read the same dead pid both "win" — the
-        // common case being two --resume invocations after a crash, which then
-        // ran the same run twice against one file, doubling spend and clobbering
-        // each other's saves. Unlinking first means exactly one 'wx' create can
-        // succeed; the loser sees EEXIST and loops.
+        // Reclaim by CLAIM-then-VERIFY.
+        //
+        // Two earlier designs were both wrong. A plain overwrite let two
+        // processes that read the same dead pid both "win". Unlink-then-create
+        // fixed that on POSIX but crashed on Windows: a concurrent unlink
+        // leaves the file delete-pending, so unlink returns EPERM and the
+        // following exclusive create returns EPERM rather than EEXIST — and
+        // both rethrew straight out of initializeDatabase, killing the process
+        // instead of politely waiting.
+        //
+        // Writing our pid and then re-reading it needs no unlink, so it cannot
+        // hit that failure, and the loser of a simultaneous reclaim sees
+        // someone else's pid and goes back to waiting.
         console.warn(`[Database] Reclaiming stale lock from dead process ${holder.pid}`);
         try {
-          fs.unlinkSync(lock);
+          fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }));
         } catch (error: any) {
-          if (error?.code !== 'ENOENT') throw error; // someone else already reclaimed it
+          // Another process is mid-reclaim. Treat it as held and keep waiting.
+          lastReason = `${lock} could not be reclaimed (${error?.code ?? error})`;
+          if (Date.now() >= deadline) break;
+          await new Promise(resolve => setTimeout(resolve, LOCK_POLL_MS));
+          continue;
         }
-        continue; // retry the atomic create; whoever gets there first owns it
+        // Settle, then confirm the claim is still ours.
+        await new Promise(resolve => setTimeout(resolve, LOCK_POLL_MS));
+        const confirmed = readHolder();
+        if (confirmed?.pid === process.pid) {
+          lockPath = lock;
+          return;
+        }
+        lastReason = `another process reclaimed ${lock} first (now held by ${confirmed?.pid ?? 'unknown'})`;
+        if (Date.now() >= deadline) break;
+        continue;
       }
       lastReason =
         `it is in use by process ${holder.pid} (since ${holder.since}). ` +

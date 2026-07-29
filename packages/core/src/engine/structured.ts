@@ -17,43 +17,58 @@ function stripFences(raw: string): string {
 }
 
 /**
- * Every TOP-LEVEL balanced {...} / [...] span, in the order they start.
+ * Every TOP-LEVEL balanced {...} / [...] span, ordered by where it starts.
  *
- * Both bracket types are scanned in one pass. Scanning them separately and
- * concatenating put every array span after every object span, so an array
- * NESTED INSIDE the answer object outranked the object itself — a prose-wrapped
- * conforming object with any array field scored 1, the same as garbage.
- * Advancing the cursor past each span also stops nested spans being emitted at
- * all, which is what made that reachable.
+ * Each bracket type is scanned independently, then the results are merged in
+ * START order and spans contained inside another are dropped. Both halves
+ * matter, and each was a bug on its own:
+ *
+ * - Concatenating the two passes (objects then arrays) put EVERY array span
+ *   after every object span, so an array nested inside the answer object
+ *   outranked the object — a prose-wrapped conforming object with any array
+ *   field scored 1, the same as garbage.
+ * - Merging them into a single left-to-right pass fixed that but made ONE
+ *   unterminated bracket abort all extraction: `if (x) { return;` earlier in
+ *   the reply hid a perfectly good `["alpha","beta"]` later in it.
+ *
+ * Scanning per type keeps an unbalanced `{` from blocking `[…]`, and stopping
+ * that type at its first unterminated opener keeps the cost linear.
  */
 function balancedSpans(text: string): string[] {
-  const spans: string[] = [];
-  let cursor = 0;
-  while (cursor < text.length) {
-    let start = -1;
-    let open = '';
-    for (let i = cursor; i < text.length; i++) {
-      if (text[i] === '{' || text[i] === '[') { start = i; open = text[i]; break; }
-    }
-    if (start === -1) break;
+  const found: Array<{ start: number; end: number }> = [];
 
-    const close = open === '{' ? '}' : ']';
-    let depth = 0, inStr = false, esc = false, end = -1;
-    for (let i = start; i < text.length; i++) {
-      const ch = text[i];
-      if (inStr) {
-        if (esc) esc = false;
-        else if (ch === '\\') esc = true;
-        else if (ch === '"') inStr = false;
-        continue;
+  for (const [open, close] of [['{', '}'], ['[', ']']] as const) {
+    let cursor = 0;
+    while (cursor < text.length) {
+      const start = text.indexOf(open, cursor);
+      if (start === -1) break;
+      let depth = 0, inStr = false, esc = false, end = -1;
+      for (let i = start; i < text.length; i++) {
+        const ch = text[i];
+        if (inStr) {
+          if (esc) esc = false;
+          else if (ch === '\\') esc = true;
+          else if (ch === '"') inStr = false;
+          continue;
+        }
+        if (ch === '"') inStr = true;
+        else if (ch === open) depth++;
+        else if (ch === close && --depth === 0) { end = i; break; }
       }
-      if (ch === '"') inStr = true;
-      else if (ch === open) depth++;
-      else if (ch === close && --depth === 0) { end = i; break; }
+      if (end === -1) break; // this TYPE cannot balance further; the other still might
+      found.push({ start, end });
+      cursor = end + 1;
     }
-    if (end === -1) break; // unterminated: nothing further can be balanced
-    spans.push(text.slice(start, end + 1));
-    cursor = end + 1;
+  }
+
+  found.sort((a, b) => a.start - b.start);
+
+  const spans: string[] = [];
+  let lastEnd = -1;
+  for (const span of found) {
+    if (span.start <= lastEnd) continue; // nested inside a span we already took
+    spans.push(text.slice(span.start, span.end + 1));
+    lastEnd = span.end;
   }
   return spans;
 }

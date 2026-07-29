@@ -132,6 +132,8 @@ export interface EvaluationRun {
   finishedAt?: number;
   /** When the run was last checkpointed. Used to credit process downtime against timeLimitMs on resume. */
   lastCheckpointAt?: number;
+  /** Set when holdoutShare was requested but produced no held-out tests. */
+  holdoutSkippedReason?: 'share-rounds-to-zero';
   stopReason?: 'time' | 'budget' | 'target' | 'generations' | 'manual' | 'exhausted' | 'error';
   status?: 'running' | 'paused' | 'stopped' | 'pausing' | 'finished';
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };

@@ -355,10 +355,45 @@ export function generateReport(
   }
 
   // ---- Improvement Summary ----
-  lines.push('## Improvement Summary');
+  //
+  // This table is the number users quote, and on its own it is not evidence.
+  // The champion was SELECTED for scoring highest on these very tests, out of
+  // ~popSize x generations measurements; the seed got one. Against a judge with
+  // a couple of points of per-call noise, that max-of-N vs single-draw
+  // comparison reported an average +3.0 "improvement" in 20 of 20 runs where
+  // the true improvement was measured to be exactly zero. Elitism then freezes
+  // the lucky draw, so the number never regresses.
+  const usesJudge = config.testSet.some(t => (t.mode ?? 'llm_grade') === 'llm_grade');
+  const holdoutRan = !!(result.holdout?.seed && result.holdout?.champion);
+
+  lines.push('## Improvement Summary (training tests — selected-for)');
   lines.push('');
+  lines.push(
+    '> These are the tests evolution optimized against, and the champion was chosen for scoring well on them. ' +
+    'Treat this as "what was selected", not as measured improvement.',
+  );
+  lines.push('');
+  if (usesJudge && !holdoutRan) {
+    lines.push(
+      '> ⚠️ **No holdout ran, and this run is graded by an LLM judge.** With a noisy judge, picking the best of many ' +
+      'measurements produces a positive delta here even when nothing actually improved. Add held-out tests ' +
+      '(`"holdout": true`, or `holdoutShare`) and quote the Generalization number instead.',
+    );
+    lines.push('');
+  }
 
   if (seedNode?.tests && bestNode?.tests && seedNode.tests.length > 0) {
+    // The per-sample scores are collected and were then thrown away. A result
+    // of 3.4 from samples [5,3,7,2,0] renders identically to a rock-solid 3.4,
+    // and the spread is the one number that tells a user the measurement means
+    // nothing. Show it whenever more than one sample was taken.
+    const spreadOf = (test: any): string => {
+      const samples: number[] = Array.isArray(test?.samples) ? test.samples : [];
+      if (samples.length < 2) return '';
+      return ` ±${((Math.max(...samples) - Math.min(...samples)) / 2).toFixed(1)}`;
+    };
+    const anySamples = seedNode.tests.some((t: any) => Array.isArray(t?.samples) && t.samples.length > 1);
+
     lines.push('| # | Test | Seed Score | Best Score | Delta |');
     lines.push('|---|------|-----------|-----------|-------|');
 
@@ -381,7 +416,10 @@ export function generateReport(
       seedTotal += seedScore;
       bestTotal += bestScore;
       count++;
-      lines.push(`| ${count} | ${escapeMarkdown(testName)} | ${seedScore.toFixed(1)} | ${bestScore.toFixed(1)} | ${deltaStr} |`);
+      lines.push(
+        `| ${count} | ${escapeMarkdown(testName)} | ${seedScore.toFixed(1)}${spreadOf(seedTest)} ` +
+        `| ${bestScore.toFixed(1)}${spreadOf(bestTest)} | ${deltaStr} |`,
+      );
     }
 
     const seedAvg = count > 0 ? seedTotal / count : 0;
@@ -390,6 +428,10 @@ export function generateReport(
     const avgDeltaStr = avgDelta > 0 ? `+${avgDelta.toFixed(1)}` : avgDelta.toFixed(1);
     lines.push(`| | **Average** | **${seedAvg.toFixed(1)}** | **${bestAvg.toFixed(1)}** | **${avgDeltaStr}** |`);
     lines.push('');
+    if (anySamples) {
+      lines.push('*± is half the observed spread across samples of the same test. A delta smaller than the spread is not a result.*');
+      lines.push('');
+    }
   } else {
     lines.push('*Insufficient data for comparison.*');
     lines.push('');

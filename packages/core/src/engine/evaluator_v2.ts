@@ -210,13 +210,28 @@ export async function startEvaluation(
     console.warn(`[Evaluator] samplesPerTest clamped from ${rawSamples} to ${samplesPerTest}`);
   }
   const { partitionTestSet } = await import('./holdout.js');
-  // Holdout split precedence: explicit holdoutSeed > run seed > 42
-  const { fitnessTests, holdoutTests } = partitionTestSet(config.testSet, config.holdoutShare ?? 0, config.holdoutSeed ?? config.seed ?? 42);
+  // Holdout split: explicit holdoutSeed, else a FIXED 42 — deliberately NOT
+  // config.seed. Coupling them silently re-partitioned the holdout whenever the
+  // run seed changed, so the documented paired-run method (same config, two
+  // seeds) compared two arms scored on DIFFERENT held-out tests, which makes
+  // the comparison meaningless. docs/cli.md already documents the default as 42.
+  const holdoutShare = config.holdoutShare ?? 0;
+  const { fitnessTests, holdoutTests } = partitionTestSet(config.testSet, holdoutShare, config.holdoutSeed ?? 42);
   if (fitnessTests.length === 0) {
     throw new Error('Holdout configuration leaves no fitness tests');
   }
   if (holdoutTests.length > 0) {
     console.log(`[Evaluator] Holdout: ${holdoutTests.length} test(s) reserved (${holdoutTests.map(t => t.name).join(', ')})`);
+  } else if (holdoutShare > 0) {
+    // floor(tests * share) rounds down to zero on small test sets — the user
+    // asked for a generalization check, got none, and the report simply omitted
+    // the section. The holdout is the ONLY defence against reading a
+    // selected-for training delta as a real improvement, so say so loudly.
+    console.warn(
+      `[Evaluator] holdoutShare ${holdoutShare} over ${config.testSet.length} test(s) rounds down to ZERO held-out tests — ` +
+      `no generalization check will run. Add more tests, raise holdoutShare, or mark a test "holdout": true explicitly.`,
+    );
+    run.holdoutSkippedReason = 'share-rounds-to-zero';
   }
   const pairwiseEnabled = config.pairwise?.enabled === true;
   const rawContenders = config.pairwise?.contenders ?? 4;
@@ -258,7 +273,7 @@ export async function startEvaluation(
     // instantly with stopReason 'time' having done zero work. Credit that gap
     // as paused time; `finishedAt ?? lastCheckpointAt` is the best evidence we
     // have of when the process actually stopped.
-    totalPausedMs: (run.totalPausedMs ?? 0) + (isResume ? downtimeSinceCheckpoint(run) : 0),
+    totalPausedMs: resumeAdjustedPausedMs(run, isResume),
     gradingTotal: 0,
     gradingFailures: 0,
   };
@@ -1565,6 +1580,22 @@ function accrueCost(
 function downtimeSinceCheckpoint(run: EvaluationRun): number {
   const lastAlive = run.lastCheckpointAt ?? run.startedAt;
   return Math.max(0, Date.now() - lastAlive);
+}
+
+/**
+ * Paused-time total for a starting run, crediting process downtime on resume —
+ * and WRITING IT BACK TO THE RUN.
+ *
+ * Crediting it only into the in-memory state was not enough: persistRun
+ * serialises `run`, whose totalPausedMs was only ever touched by the live pause
+ * path. So the credit vanished at the first checkpoint and the SECOND resume
+ * was killed on arrival by timeLimitMs — the exact failure this was written to
+ * prevent, one resume later.
+ */
+function resumeAdjustedPausedMs(run: EvaluationRun, isResume: boolean): number {
+  const total = (run.totalPausedMs ?? 0) + (isResume ? downtimeSinceCheckpoint(run) : 0);
+  run.totalPausedMs = total;
+  return total;
 }
 
 function persistRun(state: EvaluationState): void {

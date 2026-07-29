@@ -123,6 +123,27 @@ describe('scoreJsonSchema', () => {
     expect(r.score).toBe(5); // conforming-but-in-prose, not 1
   });
 
+  it('an unbalanced bracket earlier in the reply does not hide the answer (bug-hunt regression)', () => {
+    // Merging both bracket types into one left-to-right pass made ONE
+    // unterminated opener abort all extraction, so a code snippet before the
+    // answer took the score from 5 to 0.
+    const schema = { type: 'array', items: { type: 'string' } } as object;
+    const r = scoreJsonSchema('Use a guard: if (x) { return;\n\nMy answer: ["alpha","beta"]', schema);
+    expect(r.score).toBe(5); // recovered from prose, not 0
+
+    const objSchema = { type: 'object', required: ['answer'], properties: { answer: { type: 'string' } } } as object;
+    const r2 = scoreJsonSchema('Consider the list [1, 2, 3 (oops).\nAnswer: {"answer":"hi"}', objSchema);
+    expect(r2.score).toBe(5);
+  });
+
+  it('stays fast on pathological bracket soup', () => {
+    const schema = { type: 'object', required: ['a'] } as object;
+    const start = Date.now();
+    scoreJsonSchema('{'.repeat(200_000), schema);
+    scoreJsonSchema('{}'.repeat(100_000), schema);
+    expect(Date.now() - start).toBeLessThan(3000);
+  });
+
   it('picks the span that validates, not the first or last one', () => {
     const schema = { type: 'object', required: ['name'], properties: { name: { type: 'string' } } } as object;
     // Trailing schema-reference blob: preferring the LAST span scored this 1.

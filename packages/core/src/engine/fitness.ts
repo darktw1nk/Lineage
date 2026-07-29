@@ -91,8 +91,39 @@ export function calculateFitness(
   const latencyMs = node.metrics?.latencyMs;
   const stability = weights.stability ? calculateStabilityScore(node) : undefined;
   
+  // A weighted dimension with NO normalization configured is disabled, and its
+  // weight is dropped from the denominator so it cannot cap the score.
+  //
+  // Two wrong versions preceded this. Originally the term was skipped but the
+  // weight still counted in the denominator, so {quality:0.7, cost:0.3} with no
+  // costNorm capped a flawless candidate at 7/10 and made targetFitness above
+  // that unreachable. Then the term was made to always apply using hardcoded
+  // defaults ($0.10/call, 30s) the user never chose — which silently re-ranked
+  // every existing config, including all ten in this repo's experiments/ folder
+  // (quality .85 / cost .05 / latency .1, no norms), and invalidated any
+  // targetFitness calibrated against the old numbers.
+  //
+  // Disabling it preserves the previous RANKING (the dimension contributed
+  // nothing to any candidate before either) while removing the cap. The warning
+  // is what makes it not-silent.
+  const effectiveWeights = { ...weights };
+  if (effectiveWeights.cost && !config.fitness.costNorm) {
+    console.warn(
+      '[Fitness] A "cost" weight is set but fitness.costNorm is missing — the cost dimension is DISABLED. ' +
+      'Add fitness.costNorm ({ mode, maxUSDPerCall }) to enable it.',
+    );
+    effectiveWeights.cost = 0;
+  }
+  if (effectiveWeights.latency && !config.fitness.latencyNorm) {
+    console.warn(
+      '[Fitness] A "latency" weight is set but fitness.latencyNorm is missing — the latency dimension is DISABLED. ' +
+      'Add fitness.latencyNorm ({ mode, maxMs }) to enable it.',
+    );
+    effectiveWeights.latency = 0;
+  }
+
   // Normalize weights
-  const normalizedWeights = normalizeWeights(weights);
+  const normalizedWeights = normalizeWeights(effectiveWeights);
   
   // Calculate scalar fitness
   let fitness = normalizedWeights.quality * quality;
