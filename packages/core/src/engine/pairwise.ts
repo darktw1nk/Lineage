@@ -7,7 +7,7 @@
 import type { CandidateNode, TestCase, EvaluationConfig, UUID } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
-import { fillTemplate } from '../utils/text.js';
+import { fillTemplate, sanitizeForJudge } from '../utils/text.js';
 
 export interface PlayoffOptions {
   contenders: CandidateNode[];
@@ -60,32 +60,42 @@ function parseVerdict(raw: string): 'A' | 'B' | 'tie' {
     text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
   }
 
-  // 1) Direct JSON, or a JSON object embedded in surrounding prose.
-  // Greedy match: a non-greedy one truncates at the first '}' when the
-  // reason field itself contains braces. Try greedy first, then non-greedy
-  // (covers prose AFTER the JSON object).
-  const jsonCandidates = [text];
-  const greedy = text.match(/\{[\s\S]*\}/);
-  if (greedy) jsonCandidates.push(greedy[0]);
-  const lazy = text.match(/\{[\s\S]*?\}/);
-  if (lazy && lazy[0] !== greedy?.[0]) jsonCandidates.push(lazy[0]);
-  for (const candidate of jsonCandidates) {
+  const asVerdict = (candidate: string): 'A' | 'B' | 'tie' | null => {
     try {
       const winner = String(JSON.parse(candidate).winner ?? '').toLowerCase();
       if (winner === 'a') return 'A';
       if (winner === 'b') return 'B';
       if (winner === 'tie') return 'tie';
-    } catch {
-      // try next candidate
-    }
-  }
+    } catch { /* not a verdict */ }
+    return null;
+  };
 
-  // 2) Prose fallback — judges sometimes answer in plain text despite the
-  //    JSON-only instruction (observed live with gemini flash-lite)
+  // 1) The whole reply is the verdict. Unambiguous, so it wins outright.
+  const direct = asVerdict(text);
+  if (direct) return direct;
+
+  // 2) The judge's OWN WORDING, before any scavenging for JSON.
+  //
+  // Order matters. The candidates' outputs sit inside the judge prompt, so a
+  // judge that answers in prose while quoting a candidate produces a reply
+  // containing that candidate's JSON — and scavenging it first let a candidate
+  // emitting `{"winner": "A"}` decide its own matches. Measured lifting the
+  // WORST of four contenders from last to second while stealing half a point
+  // from every rival; evolution finds that immediately because it is free.
+  // Prose written by the judge cannot be forged by a candidate this way.
   const prose =
     text.match(/output\s*([ab])\s+is\s+(?:better|superior|preferred|stronger)/i) ??
     text.match(/winner\s*(?:is|:)?\s*"?(?:output\s*)?([ab])\b/i);
   if (prose) return prose[1].toUpperCase() as 'A' | 'B';
+
+  // 3) Last resort: a JSON object embedded in prose ("Verdict follows: {...}").
+  //    Take the LAST one — the judge writes its own conclusion after anything
+  //    it quotes.
+  const embedded = [...text.matchAll(/\{[^{}]*\}/g)].map(m => m[0]).reverse();
+  for (const candidate of embedded) {
+    const verdict = asVerdict(candidate);
+    if (verdict) return verdict;
+  }
 
   console.warn('[Playoff] Unparseable verdict, counting as tie:', raw.slice(0, 120));
   return 'tie';
@@ -111,8 +121,9 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
     const prompt = fillTemplate(template, {
       testPrompt: test.prompt,
       expectedBlock,
-      outputA: first,
-      outputB: second,
+      // Both outputs are model-produced and sit inside <<< >>> blocks.
+      outputA: sanitizeForJudge(first),
+      outputB: sanitizeForJudge(second),
     });
     try {
       const result = await adapter.call({ model: config.serviceModel.model, prompt, temperature: 0.3, maxTokens, timeoutMs: config.callTimeoutMs });

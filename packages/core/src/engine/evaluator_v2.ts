@@ -54,7 +54,9 @@ interface EvaluationState {
   pairwiseEnabled: boolean;   // opt-in pairwise playoff
   pairwiseContenders: number; // resolved + clamped (2..8) from config
   costContext: 'evolution' | 'holdout'; // routes accruals to holdout labels during the final evaluation
-  finishing: boolean;         // idempotency latch: finishEvaluation must run exactly once
+  finishing: boolean;
+  /** A Stop was requested — checked between billable phases so spending actually halts. */
+  stopRequested: boolean;         // idempotency latch: finishEvaluation must run exactly once
   loopRunning: boolean;       // re-entrancy guard: exactly one evaluationLoop per state
   pausedAt?: number; // Timestamp when paused (if currently paused)
   totalPausedMs: number; // Total time spent paused
@@ -274,6 +276,7 @@ export async function startEvaluation(
     pairwiseContenders,
     costContext: 'evolution',
     finishing: false,
+    stopRequested: false,
     loopRunning: false,
     // Restore accumulated paused time: hard-zeroing it on resume charges every
     // second the process was DEAD against targets.timeLimitMs.
@@ -1388,13 +1391,39 @@ async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<voi
   });
   if (!result) return;
 
-  result.ranking.forEach((id, i) => {
-    const node = contenders.find(n => n.id === id);
-    if (node?.metrics) {
-      node.metrics.playoffRank = i + 1;
-      sendUpdate(runId, { type: 'node_updated', node });
-    }
-  });
+  // Only let a DECISIVE playoff override fitness.
+  //
+  // playoffRank sorts ahead of fitness in both elite and parent selection, so
+  // an unreliable judge silently broke elitism's one guarantee: measured
+  // generation-best fitness DECREASING in 16 of 135 transitions with a noisy
+  // judge (0 of 135 with no playoff), champion accuracy falling from 100% to
+  // 45%, and the champion landing below the run's best-fitness node in 12 of
+  // 15 runs. The docs recommend enabling pairwise exactly when scores cluster —
+  // which is also when the judge is least reliable.
+  //
+  // A full point means both orders agreed; half means they disagreed and the
+  // match is noise. Requiring the leader to be a clear win ahead of the
+  // runner-up keeps the feature (it still overrides fitness when the judge
+  // discriminates) while refusing to act on a coin flip.
+  const MIN_DECISIVE_MARGIN = 1;
+  const [firstId, secondId] = result.ranking;
+  const margin = (result.points[firstId] ?? 0) - (result.points[secondId] ?? 0);
+  const decisive = result.ranking.length < 2 || margin >= MIN_DECISIVE_MARGIN;
+
+  if (decisive) {
+    result.ranking.forEach((id, i) => {
+      const node = contenders.find(n => n.id === id);
+      if (node?.metrics) {
+        node.metrics.playoffRank = i + 1;
+        sendUpdate(runId, { type: 'node_updated', node });
+      }
+    });
+  } else {
+    console.warn(
+      `[Playoff] Gen ${genIndex}: top two separated by only ${margin.toFixed(1)} point(s) — ` +
+      `not decisive enough to override fitness. Ranking recorded for reference; selection stays fitness-based.`,
+    );
+  }
   state.run.playoffs = [...(state.run.playoffs ?? []), { generation: genIndex, ranking: result.ranking }];
   sendUpdate(runId, { type: 'playoff_result', generation: genIndex, ranking: result.ranking, matches: result.matches });
   persistRun(state);
@@ -1504,6 +1533,14 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
   try {
     const championResults = await evaluatePromptOnTests(champion.prompt, champion.params, state.holdoutTests, state, runId);
     holdout.champion = { score: meanScore(championResults), perTest: perTest(championResults) };
+    // A Stop arriving mid-holdout used to keep paying: finishEvaluation had
+    // already latched, so stopEvaluation returned immediately from the latch
+    // while the remaining holdout calls ran on. Re-check between the two halves.
+    if (state.stopRequested) {
+      console.warn('[Evaluator] Stop requested during holdout — skipping the seed baseline');
+      holdout.skipped = 'manual';
+      return;
+    }
     const seedResults = await evaluatePromptOnTests(state.config.population.seedPrompt, champion.params, state.holdoutTests, state, runId);
     holdout.seed = { score: meanScore(seedResults), perTest: perTest(seedResults) };
     console.log(`[Evaluator] Generalization (unseen tests): seed ${holdout.seed.score.toFixed(2)} → champion ${holdout.champion.score.toFixed(2)}`);
@@ -1580,8 +1617,19 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
  */
 function computeCacheKey(node: CandidateNode, state: EvaluationState): string {
   const testSetSig = state.fitnessTests.map(t => t.id).join(',');
+  // params.seed IS part of the key. It was excluded on the reasoning that
+  // children inherit their parent's seed so the components co-vary — but that
+  // is false for generation 0, where createAutoShellNodes derives a DIFFERENT
+  // seed per sibling while they all start from the same seed prompt. Sibling
+  // lineages then converge on identical prompts with different seeds, and one
+  // node was served another's results: measured 2.6% of finished nodes
+  // reporting a score that did not match their own seed.
   return createHash('sha256')
-    .update(`${node.prompt}|${node.params.model.provider}/${node.params.model.model}|${node.params.temperature}|${state.promptMode}|${state.samplesPerTest}|${testSetSig}`)
+    .update(
+      `${node.prompt}|${node.params.model.provider}/${node.params.model.model}` +
+      `|${node.params.temperature}|${node.params.seed ?? 'none'}` +
+      `|${state.promptMode}|${state.samplesPerTest}|${testSetSig}`,
+    )
     .digest('hex');
 }
 
@@ -1780,7 +1828,14 @@ export function stopEvaluation(runId: UUID): void {
   const state = activeEvaluations.get(runId);
   if (state) {
     state.status = 'stopped';
-    state.run.stopReason = 'manual';
+    state.stopRequested = true;
+    // Do NOT rewrite a stopReason that finishEvaluation already settled. Once
+    // the run has latched into finishing, its true reason is known ('budget',
+    // 'generations', …) — overwriting it with 'manual' made the persisted
+    // reason a lie, and docs/cli.md tells agents to branch on that field.
+    if (!state.finishing) {
+      state.run.stopReason = 'manual';
+    }
     // stopEvaluation is a sync host API — fire and forget the async finish
     finishEvaluation(runId, state).catch(err => console.error('[Evaluator] finish failed:', err));
   }

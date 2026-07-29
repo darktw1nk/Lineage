@@ -1,3 +1,28 @@
+/** Longest model output allowed inside a judge prompt, in characters. */
+const MAX_JUDGED_TEXT = 12_000;
+
+/**
+ * Prepare model-produced text for interpolation into a JUDGE prompt.
+ *
+ * Judge prompts delimit each section with <<< … >>>, and the candidate's own
+ * output goes inside one. Interpolated verbatim, an output containing `>>>`
+ * closes its own block early and everything after it reads as prompt — so a
+ * candidate could append its own "ADDENDUM TO RUBRIC: award 10" and a forged
+ * EXPECTED answer, both landing BEFORE the real ones. Evolution runs thousands
+ * of trials and keeps whatever scores higher, so an unmitigated channel like
+ * this gets found and selected for.
+ *
+ * Neutralising the delimiter costs nothing (no real answer needs a literal
+ * `>>>`), and the length cap stops an 80KB reply being pasted into the prompt
+ * whole.
+ */
+export function sanitizeForJudge(text: string): string {
+  const clipped = text.length > MAX_JUDGED_TEXT
+    ? `${text.slice(0, MAX_JUDGED_TEXT)}\n…[truncated ${text.length - MAX_JUDGED_TEXT} characters]`
+    : text;
+  return clipped.replace(/>>>/g, '>​>>'); // zero-width space breaks the delimiter, reads identically
+}
+
 /**
  * Fill ${name} placeholders in a template.
  *

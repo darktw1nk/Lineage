@@ -367,7 +367,7 @@ export async function createNextGeneration(
         if (ra !== rb) return ra - rb;
         return b.metrics!.fitness! - a.metrics!.fitness!;
       });
-      
+
       // Take top N elites from last generation
       const elites = lastGenFinishedNodes.slice(0, Math.min(numElite, lastGenFinishedNodes.length));
       

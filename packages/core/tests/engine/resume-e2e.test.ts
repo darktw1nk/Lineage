@@ -105,10 +105,27 @@ describe('resume from checkpoint', () => {
     expect(decisionSignature(resumed)).toEqual(fullSig); // seeded resume == uninterrupted run
     expect(resumed.totals.usd).toBeGreaterThan(baseUsd); // spend accumulated, not reset
 
-    // Finished nodes were NOT re-evaluated: gen 0 prompts and the kept gen-1 node
-    // never hit the adapter again (cache may also shield them — either way, no calls)
-    expect(evalPrompts).not.toContain(keptFinishedPrompt);
-    for (const n of full.generations[0]) expect(evalPrompts).not.toContain(n.prompt);
+    // Finished nodes keep their checkpointed results — none was re-run.
+    //
+    // Asserted on the NODES, not on prompt strings. The cache key now includes
+    // params.seed (generation 0 derives a different seed per sibling), so a
+    // later child that converges on the same prompt under a DIFFERENT seed is a
+    // genuinely different configuration and is evaluated rather than served
+    // another node's results — that sharing was measured giving 2.6% of
+    // finished nodes a score that did not match their own seed. So a prompt
+    // string reappearing at the adapter is expected; a finished node losing or
+    // changing its stored results is not.
+    void keptFinishedPrompt;
+    for (const [g, gen] of full.generations.entries()) {
+      if (g > 1) break; // only generations present in the checkpoint
+      for (const original of gen) {
+        if (original.status !== 'finished') continue;
+        const after = resumed.generations[g].find((n: any) => n.id === original.id);
+        expect(after?.status).toBe('finished');
+        expect(after?.tests).toEqual(original.tests);
+        expect(after?.metrics?.fitness).toBe(original.metrics?.fitness);
+      }
+    }
 
     // Cost breakdown survives resume and keeps its sums-equal-totals invariant
     const rbd = resumed.costBreakdown;

@@ -1,6 +1,6 @@
 import type { CandidateNode, EvaluationConfig } from '../types.js';
 import { levenshteinScore0to10, jsonDiffScore0to10, numericAbsScore0to10 } from '../utils/distance.js';
-import { fillTemplate } from '../utils/text.js';
+import { fillTemplate, sanitizeForJudge } from '../utils/text.js';
 import { store } from '../store.js';
 
 const DEFAULT_LLM_GRADING_PROMPT = `SYSTEM: You are a strict evaluator. Return ONLY a JSON object.
@@ -247,7 +247,7 @@ export async function evaluateSafetyGuardrails(
   for (const guardrail of guardrails) {
     let rawOutput: string | undefined;
     try {
-      const safetyPrompt = fillTemplate(promptTemplate, { guardrail, modelOutput });
+      const safetyPrompt = fillTemplate(promptTemplate, { guardrail, modelOutput: sanitizeForJudge(modelOutput) });
 
       const result = await adapter.call({
         model: serviceModel.model,
@@ -465,9 +465,12 @@ export async function evaluateTestResultLLM(
   
   const promptTemplate = getLLMGradingPromptTemplate();
   const evaluationPrompt = fillTemplate(promptTemplate, {
-    candidatePrompt,
+    // candidatePrompt and modelOutput are both model-produced and both land
+    // inside <<< >>> blocks — sanitize so neither can close its own block and
+    // append instructions to the judge.
+    candidatePrompt: sanitizeForJudge(candidatePrompt),
     testPrompt,
-    modelOutput,
+    modelOutput: sanitizeForJudge(modelOutput),
     expectedOutput: testCase.expected || '(none)',
   });
 

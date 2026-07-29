@@ -144,7 +144,7 @@ export interface EvaluationRun {
     samplesPerTest: number;
     seed?: { score: number; perTest: Array<{ testId: UUID; score: number }> };
     champion?: { score: number; perTest: Array<{ testId: UUID; score: number }> };
-    skipped?: 'budget' | 'no-champion';
+    skipped?: 'budget' | 'no-champion' | 'manual';
   };
   playoffs?: Array<{ generation: number; ranking: UUID[] }>; // pairwise playoff rankings, best first
   costBreakdown?: Record<string, { calls: number; promptTokens: number; completionTokens: number; usd: number }>; // COST_LABELS keys + model:<provider>/<model> keys
