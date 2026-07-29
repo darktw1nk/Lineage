@@ -1,4 +1,4 @@
-import { IpcMain } from 'electron';
+import { IpcMain, app } from 'electron';
 import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from '@promptengine/core';
 import { getDatabase, store, OpenRouterAdapter, isEvaluationActive } from '@promptengine/core';
 import { v4 as uuidv4 } from 'uuid';
@@ -128,7 +128,11 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
   });
 
   // Dev Tools (only in development)
-  if (process.env.NODE_ENV !== 'production') {
+  // `app.isPackaged`, NOT NODE_ENV: nothing sets NODE_ENV, and
+  // vite-plugin-electron's `define: { 'process.env': 'process.env' }` blocks
+  // static replacement, so the built artifact still read it at runtime and
+  // `undefined !== 'production'` shipped the handler.
+  if (!app.isPackaged) {
     ipcMain.handle('dev:createTestEvals', async (_event, count: number) => {
       const { createTestEvaluations } = await import('../dev-tools/createTestEvaluations.js');
       return createTestEvaluations(count);
@@ -315,7 +319,7 @@ async function stopEvaluation(runId: string): Promise<void> {
  * the summary was built: a finished run's blob never changes again, so after the
  * first poll it is never re-read or re-parsed.
  */
-const summaryCache = new Map<string, { len: number; summary: EvaluationRun }>();
+const summaryCache = new Map<string, { key: string; summary: EvaluationRun }>();
 
 /**
  * Sidebar list rows: scalars plus a precomputed best score. NOT the full runs.
@@ -332,11 +336,13 @@ const summaryCache = new Map<string, { len: number; summary: EvaluationRun }>();
 async function listEvaluations(): Promise<EvaluationRun[]> {
   const db = getDatabase();
   const rows = db.prepare(`
-    SELECT r.id, LENGTH(r.run_json) as len, c.name as config_name
+    SELECT r.id, LENGTH(r.run_json) as len,
+           COALESCE(r.finished_at, 0) as fin, COALESCE(r.stop_reason, '') as stop,
+           c.name as config_name
     FROM evaluation_runs r
     LEFT JOIN evaluation_configs c ON r.config_id = c.id
     ORDER BY r.started_at DESC
-  `).all() as { id: string; len: number; config_name: string }[];
+  `).all() as { id: string; len: number; fin: number; stop: string; config_name: string }[];
 
   const live = new Set(rows.map(r => r.id));
   for (const id of summaryCache.keys()) {
@@ -345,9 +351,16 @@ async function listEvaluations(): Promise<EvaluationRun[]> {
 
   const out: EvaluationRun[] = [];
   for (const row of rows) {
+    // Length ALONE was the key, and equal-length rewrites are ordinary in this
+    // schema: "running"/"stopped"/"pausing" are all 7 characters, stop reasons
+    // "target"/"budget" both 6, and any metric edit that keeps its digit count
+    // (fitness 3.1 -> 9.9) is invisible. A stale summary then survived for the
+    // whole app session: the sidebar showed the wrong status, the wrong best
+    // score and a wrong Resume badge. Fold in the columns persistRun writes.
+    const rowKey = `${row.len}:${row.fin}:${row.stop}`;
     const cached = summaryCache.get(row.id);
     let summary: EvaluationRun;
-    if (cached && cached.len === row.len) {
+    if (cached && cached.key === rowKey) {
       summary = cached.summary;
     } else {
       const blob = db.prepare('SELECT run_json FROM evaluation_runs WHERE id = ?')
@@ -392,7 +405,7 @@ async function listEvaluations(): Promise<EvaluationRun[]> {
           ...( { bestScore: null, generationCount: 0, nodeCount: 0, corrupt: true } as any ),
         } as unknown as EvaluationRun;
       }
-      summaryCache.set(row.id, { len: row.len, summary });
+      summaryCache.set(row.id, { key: rowKey, summary });
     }
     // Recomputed every poll: liveness is process state, not row state.
     out.push({
@@ -550,8 +563,11 @@ async function exportEvaluation(runId: string): Promise<string> {
     filters: [{ name: 'JSON Files', extensions: ['json'] }],
   });
   
+  // Cancelling a save dialog is a normal choice, not an error. Throwing made
+  // the renderer alert "Export failed: Error invoking remote method
+  // 'eval:export': Error: Export canceled" at a user who simply pressed Cancel.
   if (result.canceled || !result.filePath) {
-    throw new Error('Export canceled');
+    return null;
   }
   
   // Write file

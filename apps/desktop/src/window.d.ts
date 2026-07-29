@@ -38,7 +38,8 @@ export interface ElectronAPI {
     get: (runId: string) => Promise<(EvaluationRun & { configName?: string; interrupted?: boolean }) | null>;
     /** Absolute path of a dropped File — webUtils on Electron 32+, File.path before. */
     pathForFile: (file: File) => string | null;
-    export: (runId: string) => Promise<string>;
+    /** Resolves to the written path, or null when the user cancels the save dialog. */
+    export: (runId: string) => Promise<string | null>;
     import: (filePath: string) => Promise<EvaluationRun>;
     delete: (runId: string) => Promise<void>;
     getConfig: (runId: string) => Promise<EvaluationConfig | null>;

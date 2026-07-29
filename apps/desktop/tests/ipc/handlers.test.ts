@@ -8,7 +8,14 @@ import os from 'os';
 import fs from 'fs';
 
 // Mock the electron shell (logger imports BrowserWindow; handlers dynamic-import dialog/app only for export/import, which we don't test here)
-vi.mock('electron', () => ({ BrowserWindow: class {}, ipcMain: {} }));
+// `app.isPackaged` gates the dev-only IPC handler (NODE_ENV cannot be used —
+// vite-plugin-electron blocks its static replacement, so the check survived
+// into packaged builds). Report packaged so tests exercise the shipped surface.
+vi.mock('electron', () => ({
+  BrowserWindow: class {},
+  ipcMain: {},
+  app: { isPackaged: true, getPath: () => '/tmp' },
+}));
 
 // Partial-mock core: real database + costs, mocked store + evaluator entry points
 // (vi.hoisted because the vi.mock factory is hoisted above normal declarations)

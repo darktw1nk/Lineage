@@ -121,7 +121,8 @@ export function LeftSidebar({
       return await window.electronAPI.eval.export(runId);
     },
     onSuccess: (filePath) => {
-      alert(`Exported to: ${filePath}`);
+      if (!filePath) return; // the user cancelled the save dialog — say nothing
+      toast.success(`Exported to ${filePath}`);
     },
     onError: (error: any) => {
       alert(`Export failed: ${error.message}`);
@@ -242,8 +243,13 @@ export function LeftSidebar({
         // Open modal with imported config
         onImportConfig(parsed);
         toast.success('Config imported successfully');
-      } catch (error) {
-        toast.error('Failed to import config');
+      } catch (error: any) {
+        // Show what actually went wrong. The handler produces precise messages
+        // ('"run.generations" must be an array', 'expected an object with
+        // "run" and "config"', the JSON parse position) and all of them were
+        // replaced by the same seven words, with the real reason going only to
+        // a console the Logs panel does not show by default.
+        toast.error(error?.message ? `Import failed: ${error.message}` : 'Failed to import config');
         console.error(error);
       }
     };
