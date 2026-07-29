@@ -431,6 +431,15 @@ async function mutatePopulationInBackground(
     } catch (error) {
       console.error(`[Evaluator] Mutation failed for ${node.id.slice(0, 8)}:`, error);
       
+      // Calls made before the failure were still billed — account for them
+      const { partialCostOf } = await import('./operator-cost.js');
+      const spent = partialCostOf(error);
+      if (spent.calls > 0) {
+        console.warn(`[Evaluator] Failed mutation still spent $${spent.usd.toFixed(6)} over ${spent.calls} call(s) — accounting for it`);
+        accrueCost(state, COST_LABELS.fill, state.config.serviceModel, spent);
+        sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+      }
+
       // Mark as failed
       node.status = 'failed';
       node.error = `Mutation failed: ${error instanceof Error ? error.message : String(error)}`;

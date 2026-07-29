@@ -185,12 +185,74 @@ export class SqlJsWrapper {
 // ---------------------------------------------------------------------------
 
 let db: SqlJsWrapper | null = null;
+let lockPath: string | null = null;
 
 export function getDatabase(): SqlJsWrapper {
   if (!db) {
     throw new Error('Database not initialized');
   }
   return db;
+}
+
+/**
+ * Take an exclusive lock on the database file.
+ *
+ * Saves are whole-file writes of an in-memory snapshot taken at open, so two
+ * processes on one file silently erase each other's committed work — and the
+ * CLI defaults to the desktop's database, making that the NORMAL case rather
+ * than an exotic one. A stale lock (previous crash) is reclaimed by checking
+ * whether the recorded pid is still alive.
+ */
+function acquireDbLock(dbPath: string): void {
+  const lock = `${dbPath}.lock`;
+  const readHolder = (): { pid: number; since: string } | null => {
+    try {
+      return JSON.parse(fs.readFileSync(lock, 'utf-8'));
+    } catch {
+      return null;
+    }
+  };
+
+  try {
+    // 'wx' fails if the file already exists — atomic create-or-fail
+    fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }), { flag: 'wx' });
+    lockPath = lock;
+    return;
+  } catch (error: any) {
+    if (error?.code !== 'EEXIST') throw error;
+  }
+
+  const holder = readHolder();
+  if (holder && holder.pid !== process.pid) {
+    let alive = true;
+    try {
+      process.kill(holder.pid, 0); // signal 0 only tests existence
+    } catch {
+      alive = false;
+    }
+    if (alive) {
+      throw new Error(
+        `Database ${dbPath} is in use by process ${holder.pid} (since ${holder.since}). ` +
+        `Two processes writing this file would erase each other's runs. ` +
+        `Close the other instance, or pass a separate --db path.`
+      );
+    }
+    console.warn(`[Database] Reclaiming stale lock from dead process ${holder.pid}`);
+  }
+
+  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }));
+  lockPath = lock;
+}
+
+function releaseDbLock(): void {
+  if (!lockPath) return;
+  try {
+    const holder = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+    if (holder?.pid === process.pid) fs.rmSync(lockPath, { force: true });
+  } catch {
+    // Lock already gone or unreadable — nothing to release
+  }
+  lockPath = null;
 }
 
 export async function initializeDatabase(dbPath: string): Promise<void> {
@@ -200,6 +262,9 @@ export async function initializeDatabase(dbPath: string): Promise<void> {
 
   // Ensure directory exists
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+  // Exclusive access: whole-file saves make concurrent writers destructive
+  acquireDbLock(dbPath);
 
   // Initialize sql.js WASM engine
   const SQL = await initSqlJs();
@@ -247,6 +312,7 @@ export function closeDatabase(): void {
     db.close();
     db = null;
   }
+  releaseDbLock();
 }
 
 function createTables(db: SqlJsWrapper): void {

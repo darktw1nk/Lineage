@@ -9,6 +9,7 @@ import type { EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
 import { stripPromptDelimiters, extractJsonArray } from '../utils/text.js';
+import { withPartialCost } from './operator-cost.js';
 
 /**
  * Default Mutation Strategy Catalog
@@ -170,7 +171,9 @@ export async function mutateNode(
   let totalCompletionTokens = 0;
   let totalUsd = 0;
   let totalCalls = 0;
-  
+
+  try {
+
   // Select 1-3 random mutation strategies (once, reused across retries)
   const numStrategies = Math.floor(rng() * 3) + 1;
   const selectedStrategies = selectRandomStrategies(numStrategies, rng);
@@ -269,7 +272,7 @@ export async function mutateNode(
   }));
   
   console.log(`[Mutation] Success! Total cost: $${totalUsd.toFixed(6)}, ${totalCalls} calls`);
-  
+
   return {
     prompt: newPrompt,
     changeLog,
@@ -280,5 +283,16 @@ export async function mutateNode(
       calls: totalCalls,
     },
   };
+
+  } catch (error) {
+    // Calls already made are already billed — hand the spend to the caller
+    // instead of discarding it with the exception.
+    throw withPartialCost(error, {
+      promptTokens: totalPromptTokens,
+      completionTokens: totalCompletionTokens,
+      usd: totalUsd,
+      calls: totalCalls,
+    });
+  }
 }
 

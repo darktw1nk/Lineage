@@ -54,6 +54,7 @@ import type {
 } from '../types.js';
 import { getOperator } from '../registry.js';
 import { rngFor } from './rng.js';
+import { partialCostOf } from './operator-cost.js';
 
 export interface GenerationResult {
   newNodes: CandidateNode[];
@@ -400,13 +401,20 @@ export async function createNextGeneration(
     const parentFitness = parent.metrics?.fitness || 0;
 
     const childPromise = (async () => {
-      const carry = (label: 'CARRY' | 'ERROR', text: string) => ({
+      const carry = (
+        label: 'CARRY' | 'ERROR',
+        text: string,
+        // A failed operator has usually already made (and been billed for)
+        // several LLM calls — carrying zero cost hides that spend from totals,
+        // the breakdown, and the budget check.
+        cost = { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 },
+      ) => ({
         prompt: parent.prompt,
         changeLog: [{ label, text }] as ChangeLogLine[],
         lineageParents: [parent.id],
         params: { ...parent.params },
         operatorType: null as string | null,
-        cost: { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 },
+        cost,
       });
 
       if (!operatorName) {
@@ -434,7 +442,11 @@ export async function createNextGeneration(
         };
       } catch (error) {
         console.error(`[Generation] Operator '${operatorName}' failed for child ${i}:`, error);
-        return carry('ERROR', `Operator '${operatorName}' failed, using parent`);
+        const spent = partialCostOf(error);
+        if (spent.calls > 0) {
+          console.warn(`[Generation] Failed '${operatorName}' still spent $${spent.usd.toFixed(6)} over ${spent.calls} call(s) — accounting for it`);
+        }
+        return carry('ERROR', `Operator '${operatorName}' failed, using parent`, spent);
       }
     })().then(result => ({ index: i, parent, parentFitness, result }));
 
