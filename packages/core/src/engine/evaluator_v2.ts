@@ -55,6 +55,8 @@ interface EvaluationState {
   pairwiseContenders: number; // resolved + clamped (2..8) from config
   costContext: 'evolution' | 'holdout'; // routes accruals to holdout labels during the final evaluation
   finishing: boolean;
+  /** Warn once, not per node, when stability is weighted but unmeasurable. */
+  warnedStabilityNeedsSamples: boolean;
   /** A Stop was requested — checked between billable phases so spending actually halts. */
   stopRequested: boolean;         // idempotency latch: finishEvaluation must run exactly once
   loopRunning: boolean;       // re-entrancy guard: exactly one evaluationLoop per state
@@ -276,6 +278,7 @@ export async function startEvaluation(
     pairwiseContenders,
     costContext: 'evolution',
     finishing: false,
+    warnedStabilityNeedsSamples: false,
     stopRequested: false,
     loopRunning: false,
     // Restore accumulated paused time: hard-zeroing it on resume charges every
@@ -886,36 +889,22 @@ async function processNode(
       });
     }
     
-    // Stability (if enabled)
+    // Stability, read from the samples this node already produced. It used to
+    // make 3 EXTRA candidate calls per node — 26% of a run's calls — to measure
+    // the variance of reply LENGTH, which is not reliability. Free now.
     let stabilityScore: number | undefined = undefined;
     if (state.config.fitness.weights.stability) {
-      const { calculateStabilityAcrossSeeds } = await import('./fitness.js');
-      const adapter = getProviderAdapter(node.params.model.provider);
-      
-      const stabilityResult = await calculateStabilityAcrossSeeds(
-        node.prompt,
-        node.params,
-        state.config,
-        state.config.testSet,
-        adapter,
-        3 // numSeeds
-      );
-      
-      stabilityScore = stabilityResult.score;
-      
-      // Track candidate model costs from stability runs
-      accrueCost(state, COST_LABELS.stability, node.params.model, {
-        usd: stabilityResult.totalCost, promptTokens: stabilityResult.totalPromptTokens,
-        completionTokens: stabilityResult.totalCompletionTokens, calls: stabilityResult.calls,
-      });
-      
-      sendUpdate(runId, {
-        type: 'totals',
-        totals: state.run.totals,
-        cacheHits: state.run.cacheHits,
-      });
+      const { calculateStabilityFromSamples } = await import('./fitness.js');
+      stabilityScore = calculateStabilityFromSamples(node);
+      if (stabilityScore === undefined && !state.warnedStabilityNeedsSamples) {
+        state.warnedStabilityNeedsSamples = true;
+        console.warn(
+          '[Evaluator] A "stability" weight is set but samplesPerTest is 1, so there is no repeat ' +
+          'measurement to compare — the stability dimension is inactive. Set samplesPerTest to 2 or more.',
+        );
+      }
     }
-    
+
     // Set metrics before calculating fitness
     node.metrics = {
       costUSD: totalCost,

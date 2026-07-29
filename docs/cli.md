@@ -253,6 +253,19 @@ Controls how the composite fitness score is calculated. Each weight multiplies i
 
 Only `quality` is enabled by default (weight 1.0). Set a weight to enable that fitness dimension.
 
+| Dimension | What it measures | Requires |
+|---|---|---|
+| `quality` | Mean test score | — |
+| `safety` | Guardrail compliance, judged per guardrail | `guardrails` (costs one judge call each) |
+| `cost` | Spend per candidate, normalised | `costNorm` — without it the dimension is disabled with a warning |
+| `latency` | Wall time per candidate, normalised | `latencyNorm` — same |
+| `stability` | How much a candidate's score MOVES when the same test is run again | `samplesPerTest` ≥ 2 |
+
+`stability` is free: it reads the per-sample scores `samplesPerTest` already
+produces. It scores 10 when repeat runs agree and 0 when they disagree by the
+full range. With `samplesPerTest: 1` there is no repeat measurement, so the
+dimension is inactive and the run warns.
+
 ### Guardrails
 
 Safety check prompts evaluated against every candidate output:

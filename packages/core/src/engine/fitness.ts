@@ -312,60 +312,45 @@ function calculateStabilityScore(node: CandidateNode): number {
   return node.metrics?.stability ?? 10;
 }
 
-export async function calculateStabilityAcrossSeeds(
-  prompt: string,
-  params: any,
-  config: any,
-  _testSet: any[],
-  adapter: any,
-  numSeeds: number = 3
-): Promise<{ score: number; totalCost: number; totalPromptTokens: number; totalCompletionTokens: number; calls: number }> {
-  // Run the same prompt with different seeds
-  const results: number[] = [];
-  const maxTokens = (config as any).serviceModelMaxTokens || 20000;
-  let totalCost = 0;
-  let totalPromptTokens = 0;
-  let totalCompletionTokens = 0;
-  let calls = 0;
-  
-  for (let i = 0; i < numSeeds; i++) {
-    try {
-      const result = await adapter.call({
-        model: params.model.model,
-        prompt,
-        temperature: params.temperature,
-        seed: 1000 + i, // Different seeds
-        maxTokens, // Use configurable max tokens
-        timeoutMs: config.callTimeoutMs,
-      });
-      
-      // Track costs
-      totalCost += result.usd || 0;
-      totalPromptTokens += result.promptTokens || 0;
-      totalCompletionTokens += result.completionTokens || 0;
-      calls++;
-      
-      // Get quality score for this run
-      // For simplicity, use output length as proxy for consistency
-      results.push(result.output.length);
-    } catch (error) {
-      console.error('Stability test failed:', error);
-    }
+/**
+ * Stability from the per-sample SCORES the run already collected.
+ *
+ * Replaces a measurement that was both wrong and expensive. The old version
+ * made `numSeeds` extra candidate-model calls per node — 26% of an entire
+ * run's calls in one audit — sent the prompt as a bare user message with no
+ * system prompt and no test input, and then scored `1 - CV(output LENGTH)`.
+ * So three contradictory answers of similar length scored 6.3, while three
+ * correct answers where one was phrased differently scored 0.0, the worst
+ * possible. It measured verbosity consistency, not reliability.
+ *
+ * `samplesPerTest > 1` already runs each test several times and stores every
+ * sample's score. Their spread is exactly what "stability" should mean: does
+ * this prompt score the same when you run it again? Reading it costs nothing.
+ *
+ * Returns undefined when there is nothing to measure (fewer than two samples
+ * on every test), so the caller can leave the dimension out rather than
+ * inventing a 10.
+ */
+export function calculateStabilityFromSamples(node: CandidateNode): number | undefined {
+  const spreads: number[] = [];
+
+  for (const test of node.tests ?? []) {
+    const samples = test.samples;
+    if (!Array.isArray(samples) || samples.length < 2) continue;
+    const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+    const variance = samples.reduce((sum, v) => sum + (v - mean) ** 2, 0) / samples.length;
+    const stdDev = Math.sqrt(variance);
+    // Normalise against the 0-10 score range rather than the mean: a CV blows
+    // up as the mean approaches zero, so a prompt scoring 0,0,1 would look
+    // wildly unstable while 8,8,9 looked rock solid for the same absolute
+    // spread. Half the range is a full-scale disagreement.
+    spreads.push(Math.min(1, stdDev / 5));
   }
-  
-  if (results.length < 2) {
-    return { score: 10, totalCost, totalPromptTokens, totalCompletionTokens, calls }; // Can't measure variance
-  }
-  
-  // Calculate coefficient of variation (inverse = stability)
-  const mean = results.reduce((a, b) => a + b, 0) / results.length;
-  const variance = results.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / results.length;
-  const stdDev = Math.sqrt(variance);
-  const cv = mean > 0 ? stdDev / mean : 0; // Coefficient of variation
-  
-  // Convert to 0-10 score (lower CV = higher stability)
-  const stabilityScore = Math.max(0, Math.min(10, 10 * (1 - cv)));
-  return { score: stabilityScore, totalCost, totalPromptTokens, totalCompletionTokens, calls };
+
+  if (spreads.length === 0) return undefined;
+
+  const meanSpread = spreads.reduce((a, b) => a + b, 0) / spreads.length;
+  return Math.max(0, Math.min(10, 10 * (1 - meanSpread)));
 }
 
 function normalizeWeights(weights: {
