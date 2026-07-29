@@ -1,4 +1,20 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+
+/**
+ * Absolute path of a dropped File.
+ *
+ * `File.path` is an Electron extension that still works on 28 but was REMOVED
+ * in Electron 32 in favour of `webUtils.getPathForFile`. Drag-and-drop import
+ * would have started failing silently on the next major bump; try the new API
+ * first and fall back, so both eras work.
+ */
+function pathForFile(file: File): string | null {
+  try {
+    const viaWebUtils = webUtils?.getPathForFile?.(file);
+    if (viaWebUtils) return viaWebUtils;
+  } catch { /* not available on this Electron */ }
+  return (file as File & { path?: string }).path ?? null;
+}
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
@@ -12,6 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stop: (runId) => ipcRenderer.invoke('eval:stop', runId),
     list: () => ipcRenderer.invoke('eval:list'),
     get: (runId) => ipcRenderer.invoke('eval:get', runId),
+    pathForFile,
     export: (runId) => ipcRenderer.invoke('eval:export', runId),
     import: (filePath) => ipcRenderer.invoke('eval:import', filePath),
     delete: (runId) => ipcRenderer.invoke('eval:delete', runId),

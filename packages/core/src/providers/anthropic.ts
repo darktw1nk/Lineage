@@ -5,7 +5,13 @@ import { store } from '../store.js';
 
 export class AnthropicAdapter extends BaseProviderAdapter {
   name: Provider = 'anthropic';
-  
+
+  // The Messages API has no seed parameter, so callAPI never sends one. Saying
+  // so lets the result cache stop partitioning on a value that cannot change
+  // any output here — generation 0 gives siblings different seeds, and with an
+  // identical prompt those calls are genuinely the same computation.
+  readonly supportsSeed = false;
+
   estimateTokens(input: string): { prompt: number; completion?: number } {
     // Rough approximation: ~4 chars per token
     const prompt = Math.ceil(input.length / 4);

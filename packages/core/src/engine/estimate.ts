@@ -277,6 +277,25 @@ export async function estimateRunCost(
         : `NOT PRICED: ${list} — their calls are estimated at $0, so the figures above exclude them. Run --sync-models, or pick a catalogued model.`,
     );
   }
+  // Preflight is exactly where a misconfigured holdout should surface: the
+  // engine either THROWS on it after the run has been created, or runs the
+  // whole thing and quietly skips the generalization check. Neither is
+  // something to discover after paying.
+  if (F === 0) {
+    warnings.push(
+      'holdout leaves NO fitness tests — the run will fail to start. ' +
+      'Lower holdoutShare, add tests, or un-mark some "holdout": true tests.',
+    );
+  } else if ((config.holdoutShare ?? 0) > 0 && H === 0) {
+    warnings.push(
+      `holdoutShare ${config.holdoutShare} over ${config.testSet.length} test(s) rounds down to ZERO held out — ` +
+      'no generalization check will run, so the report can only quote the training delta the run selected for. ' +
+      'Add tests, raise holdoutShare, or mark a test "holdout": true explicitly.',
+    );
+  }
+  if (config.pairwise?.enabled && L === 0) {
+    warnings.push('pairwise is enabled but no FITNESS test uses mode "llm_grade" — no playoff will run');
+  }
   warnings.push('cache hits and early stops reduce actual spend');
 
   return { calls, low, high, perGeneration, breakdown, warnings };

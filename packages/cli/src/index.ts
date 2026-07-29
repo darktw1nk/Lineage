@@ -13,6 +13,7 @@
 
 import { format } from 'node:util';
 import fsSync from 'node:fs';
+import nodePath from 'node:path';
 import { loadCliConfig, toEvaluationConfig, extractConfigKeys } from './config.js';
 import { installStoreShim } from './engine.js';
 import { resolveApiKey, saveApiKey } from './store.js';
@@ -105,6 +106,7 @@ USAGE:
   promptengine [OPTIONS]
 
 OPTIONS:
+  --init [path]                Write a starter config (default: evolution.json) and exit
   --config <path>              Run evolution from a JSON config file
   --output <path>              Write JSON results to file (default: stdout)
   --db <path>                  Use a specific database file
@@ -139,6 +141,10 @@ SYSTEM PROMPTS:
     metapromptApplyPrompt
 
 EXAMPLES:
+  # Start from scratch
+  promptengine --init
+  promptengine --estimate --config evolution.json
+
   # Run an evolution
   promptengine --config evolution.json
 
@@ -168,6 +174,7 @@ function parseArgs(argv: string[]): {
   estimate: boolean;
   archiveRuns?: string;
   pruneRuns?: number;
+  init?: string;
 } {
   const args = argv.slice(2);
   const result = {
@@ -185,6 +192,7 @@ function parseArgs(argv: string[]): {
     estimate: false,
     archiveRuns: undefined as string | undefined,
     pruneRuns: undefined as number | undefined,
+    init: undefined as string | undefined,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -243,6 +251,11 @@ function parseArgs(argv: string[]): {
       }
       case '--estimate':
         result.estimate = true;
+        break;
+      case '--init':
+        // Optional filename: `--init` alone writes evolution.json. A bare
+        // `--init --db x` must not swallow the next flag as its value.
+        result.init = (args[i + 1] && !args[i + 1].startsWith('-')) ? args[++i] : 'evolution.json';
         break;
       case '--seed': {
         const raw = args[++i];
@@ -303,6 +316,51 @@ async function handleSetKey(provider: Provider, key: string): Promise<void> {
   saveApiKey(provider, key);
   const masked = key.length > 4 ? '***' + key.slice(-4) : '****';
   emit(`Saved ${provider} key (${masked})`);
+}
+
+/**
+ * Write a starter config.
+ *
+ * The config is the entire interface to this tool, and the only way to obtain a
+ * working one was to copy it out of docs/cli.md by hand — so the first thing a
+ * new user did was hand-transcribe JSON and get a validation error. Every model
+ * named here is in the fresh-install catalog, so `--estimate` on the result
+ * quotes real prices rather than $0.
+ */
+function handleInit(targetPath: string): void {
+  const resolved = nodePath.resolve(targetPath);
+  if (fsSync.existsSync(resolved)) {
+    console.error(`Refusing to overwrite ${resolved} — it already exists.`);
+    process.exit(1);
+  }
+
+  const starter = {
+    name: 'My First Evolution',
+    seedPrompt: 'You are a helpful assistant. Answer the question concisely.',
+    models: ['openai/gpt-5-mini'],
+    serviceModel: 'openai/gpt-4o-mini',
+    populationSize: 4,
+    generationSize: 4,
+    maxGenerations: 3,
+    // A budget from the very first run: the cap is what makes experimenting safe.
+    budget: 1.00,
+    holdoutShare: 0.25,
+    testSet: [
+      { name: 'Capital', mode: 'exact_match', prompt: 'What is the capital of France?', expected: 'Paris' },
+      { name: 'Arithmetic', mode: 'exact_match', prompt: 'What is 17 * 23?', expected: '391' },
+      { name: 'Tone', mode: 'llm_grade', prompt: 'Explain recursion to a beginner.' },
+      { name: 'Refusal', mode: 'llm_grade', prompt: 'Summarise this in one sentence: the meeting was postponed to Friday.' },
+    ],
+    fitnessWeights: { quality: 1.0 },
+  };
+
+  fsSync.writeFileSync(resolved, `${JSON.stringify(starter, null, 2)}\n`);
+  console.error(`Wrote ${resolved}`);
+  console.error('');
+  console.error('Next:');
+  console.error('  1. Set a key:      promptengine --set-key openai <key>');
+  console.error(`  2. Price the run:  promptengine --estimate --config ${targetPath}`);
+  console.error(`  3. Run it:         promptengine --config ${targetPath} --report`);
 }
 
 async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath?: string): Promise<void> {
@@ -700,6 +758,12 @@ async function main(): Promise<void> {
     : null;
   if (utilityCommand && (args.config || args.resume)) {
     process.stderr.write(`note: ${utilityCommand} takes precedence — --config/--resume are ignored\n`);
+  }
+
+  // Before everything else: --init needs no database, no keys and no config.
+  if (args.init) {
+    handleInit(args.init);
+    return;
   }
 
   if (args.archiveRuns || args.pruneRuns !== undefined) {

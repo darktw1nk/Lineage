@@ -94,3 +94,51 @@ describe('duplicate prompts in one generation are evaluated once', () => {
     expect(parallel.cacheHits).toBeGreaterThan(0);
   }, 60000);
 });
+
+describe('a seed only partitions the cache where it can reach the provider', () => {
+  /** Same counting adapter, but registered under a chosen provider name. */
+  function registerAs(name: string, supportsSeed?: boolean) {
+    candidateCalls = 0;
+    registerProvider({
+      adapter: {
+        name,
+        ...(supportsSeed === undefined ? {} : { supportsSeed }),
+        estimateTokens: () => ({ prompt: 1 }),
+        call: async (opts: any) => {
+          const base = { promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0.01 };
+          const p: string = opts.prompt;
+          if (p.includes('mutations to improve')) return { ...base, output: '[{"label":"MUTATION","edit":"x"}]' };
+          if (p.includes('Produce the NEW prompt ONLY')) return { ...base, output: 'IDENTICAL VARIANT' };
+          candidateCalls++;
+          return { ...base, output: opts.system ?? p };
+        },
+      } as any,
+    });
+  }
+
+  const seededConfig = (provider: string) => ({
+    ...makeConfig(4),
+    id: `cd-seed-${provider}`,
+    enabledModels: [{ provider, model: 'm' }],
+    serviceModel: { provider, model: 'm' },
+    seed: 99, // gives generation-0 siblings DIFFERENT params.seed values
+  });
+
+  it('an adapter that forwards seed keeps it in the key', async () => {
+    // Generation 0 derives a different seed per sibling from the same seed
+    // prompt, so identical prompts with different seeds are genuinely
+    // different work — one node must not be served another's results.
+    registerAs('seedy'); // no declaration => treated as forwarding
+    const withSeed = await run(seededConfig('seedy'));
+    expect(withSeed.calls).toBeGreaterThan(0);
+
+    resetRegistry();
+    registerAs('seedless', false);
+    const ignored = await run(seededConfig('seedless'));
+
+    // The adapter cannot act on the seed, so those calls ARE the same
+    // computation and must collapse: strictly fewer calls, more cache hits.
+    expect(ignored.calls).toBeLessThan(withSeed.calls);
+    expect(ignored.cacheHits).toBeGreaterThan(withSeed.cacheHits);
+  }, 60000);
+});

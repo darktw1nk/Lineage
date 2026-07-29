@@ -156,6 +156,35 @@ describe('estimateRunCost matches what the engine will actually do', () => {
   });
 });
 
+describe('estimateRunCost surfaces misconfiguration before you pay', () => {
+  it('warns when the holdout leaves no fitness tests', async () => {
+    // The engine throws 'Holdout configuration leaves no fitness tests' AFTER
+    // the run row has been created. Preflight is where that belongs.
+    const e = await estimateRunCost(base({ holdoutShare: 1 }), flatCost);
+    expect(e.warnings.some(w => w.includes('NO fitness tests'))).toBe(true);
+  });
+
+  it('warns when holdoutShare rounds down to zero held-out tests', async () => {
+    // Silent otherwise: the run completes and the report can only quote the
+    // training delta it selected for, which reads as a real improvement.
+    const e = await estimateRunCost(base({ holdoutShare: 0.1 }), flatCost);
+    expect(e.warnings.some(w => w.includes('rounds down to ZERO'))).toBe(true);
+  });
+
+  it('warns when pairwise is enabled but no fitness test is judged', async () => {
+    const e = await estimateRunCost(base({
+      pairwise: { enabled: true, contenders: 4 },
+      testSet: [{ id: 't1', name: 'a', mode: 'exact_match', prompt: 'P', expected: 'x' }],
+    }), flatCost);
+    expect(e.warnings.some(w => w.includes('no playoff will run'))).toBe(true);
+  });
+
+  it('stays quiet when the holdout is configured sensibly', async () => {
+    const e = await estimateRunCost(base({ holdoutShare: 0.5 }), flatCost);
+    expect(e.warnings.some(w => /NO fitness tests|rounds down to ZERO/.test(w))).toBe(false);
+  });
+});
+
 describe('estimateRunCost dollar band', () => {
   it('does not cap the high side at a token count the config never chose', async () => {
     // The high side was Math.min(serviceModelMaxTokens, 1024) — an assumption

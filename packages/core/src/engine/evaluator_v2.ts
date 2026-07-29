@@ -1826,10 +1826,22 @@ function computeCacheKey(node: CandidateNode, state: EvaluationState): string {
   // lineages then converge on identical prompts with different seeds, and one
   // node was served another's results: measured 2.6% of finished nodes
   // reporting a score that did not match their own seed.
+  //
+  // ...but only where the seed can actually reach the provider. An adapter
+  // that accepts `seed` and drops it (Anthropic's Messages API has no such
+  // parameter) makes identical prompts look like distinct work: measured 38
+  // calls / 4 cache hits seeded versus 30 / 6 unseeded on the same config.
+  let seedPart = `${node.params.seed ?? 'none'}`;
+  try {
+    if (getProviderAdapter(node.params.model.provider)?.supportsSeed === false) {
+      seedPart = 'ignored';
+    }
+  } catch { /* unknown provider: keep the seed in the key, the safe direction */ }
+
   return createHash('sha256')
     .update(
       `${node.prompt}|${node.params.model.provider}/${node.params.model.model}` +
-      `|${node.params.temperature}|${node.params.seed ?? 'none'}` +
+      `|${node.params.temperature}|${seedPart}` +
       `|${state.promptMode}|${state.samplesPerTest}|${testSetSig}`,
     )
     .digest('hex');

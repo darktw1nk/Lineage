@@ -36,6 +36,8 @@ export interface ElectronAPI {
       bestScore?: number | null; generationCount?: number; nodeCount?: number;
     }>>;
     get: (runId: string) => Promise<(EvaluationRun & { configName?: string; interrupted?: boolean }) | null>;
+    /** Absolute path of a dropped File — webUtils on Electron 32+, File.path before. */
+    pathForFile: (file: File) => string | null;
     export: (runId: string) => Promise<string>;
     import: (filePath: string) => Promise<EvaluationRun>;
     delete: (runId: string) => Promise<void>;

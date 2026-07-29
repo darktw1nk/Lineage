@@ -8,6 +8,7 @@
 ## Usage
 
 ```bash
+npm run cli -- --init [path]                # Write a starter config (default: evolution.json)
 npm run cli -- --config <path>              # Run evolution from JSON config
 npm run cli -- --output <path>              # Write JSON results to file (default: stdout)
 npm run cli -- --db <path>                  # Use a specific database file
@@ -22,6 +23,10 @@ npm run cli -- --archive-runs <dir>         # Write every run to <dir>/<runId>.j
 npm run cli -- --prune-runs <keep>          # Delete all but the <keep> most recent runs
 npm run cli -- --help                       # Show help
 ```
+
+Starting from nothing: `--init` writes a runnable config (four tests, a $1 budget, a 25% holdout, and models that are all in the fresh-install price catalog) so `--estimate` on it quotes real numbers. It refuses to overwrite an existing file.
+
+Every invocation prints `Database: <path>` to stderr. Without `--db` the CLI shares the **desktop app's** database when its data directory exists, and uses `~/.promptengine/evolution.db` otherwise — so it is worth reading that line before wondering where a run went.
 
 Progress and all engine logs go to stderr; stdout carries exactly the JSON result. **When capturing stdout, add `--silent` to `npm run`** — without it npm prints its own two-line banner to stdout ahead of the payload, and `JSON.parse` fails on it:
 
@@ -338,6 +343,7 @@ Each entry in `testSet`:
 | `schema` | object | - | JSON Schema for `json_schema` mode. |
 | `tools` | array | - | Tool definitions (OpenAI shape) offered in `tool_call` mode. |
 | `expectedTool` | object | - | `{ name, args?, argsMode? }` — what a `tool_call` test expects. |
+| `image` | string | - | Path to an image sent with the prompt, resolved relative to the config file. PNG/JPEG/GIF/WebP, 20 MB max. The model must be vision-capable. |
 | `grading.strictZeroOnDeviation` | boolean | - | For exact_match: score 0 if not equal. |
 | `grading.distanceMetric` | string | - | `"levenshtein"`, `"json_diff"`, or `"numeric_abs"`. |
 

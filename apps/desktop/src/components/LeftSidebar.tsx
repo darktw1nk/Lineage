@@ -221,7 +221,7 @@ export function LeftSidebar({
         // config — so an exported run could never be read back in. eval:import
         // existed and was wired through preload, with no caller anywhere.
         if (parsed?.run && parsed?.config) {
-          const filePath = (file as File & { path?: string }).path;
+          const filePath = window.electronAPI.eval.pathForFile(file);
           if (!filePath) {
             toast.error('Could not read that file’s path — try File › Import again');
             return;

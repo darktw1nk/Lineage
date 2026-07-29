@@ -238,6 +238,15 @@ export interface ProviderAdapter {
    * key needed", with `No API key found for provider: ollama`.
    */
   requiresApiKey?: boolean;
+  /**
+   * Whether this adapter actually FORWARDS `seed` to the provider.
+   *
+   * Defaults to true (treat the seed as meaningful). An adapter that accepts
+   * `seed` in its options and drops it must set this false, or the seed
+   * partitions the result cache while being unable to change any output —
+   * pure lost dedup. Anthropic is the case in point.
+   */
+  supportsSeed?: boolean;
   estimateTokens(input: string): { prompt: number; completion?: number };
   call(opts: {
     model: string;

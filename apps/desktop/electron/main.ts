@@ -58,6 +58,13 @@ const createWindow = () => {
 };
 
 app.whenReady().then(async () => {
+  // `app.quit()` above is asynchronous, so whenReady still fires for the losing
+  // instance and runs this body until its first await — constructing an
+  // electron-store against the same file the winner owns. It happened not to
+  // reach loadPlugins or initializeDatabase, but only by timing. Make it a
+  // guarantee.
+  if (!gotTheLock) return;
+
   // Inject platform services into the engine (host-provided: store, update sender, db path)
   const electronStore = new Store({ encryptionKey: 'prompt-evolution-secure-key' }) as unknown as StoreInterface;
   setStore(electronStore);
