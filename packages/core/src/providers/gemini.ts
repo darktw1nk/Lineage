@@ -1,4 +1,4 @@
-import { BaseProviderAdapter } from './base.js';
+import { BaseProviderAdapter, logSafeBody } from './base.js';
 import type { Provider, ToolDef } from '../types.js';
 import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 
@@ -64,7 +64,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
         body.systemInstruction = { parts: [{ text: opts.system }] };
       }
       
-      console.log(`[Gemini] REQUEST:`, JSON.stringify(body, null, 2));
+      console.log(`[Gemini] REQUEST:`, logSafeBody(body));
       
       const response = await fetchWithTimeout(
         `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent`,
@@ -90,7 +90,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
       }
       
       const data = await response.json();
-      console.log(`[Gemini] RESPONSE:`, JSON.stringify(data, null, 2));
+      console.log(`[Gemini] RESPONSE:`, logSafeBody(data));
       
       const latencyMs = Date.now() - startTime;
       

@@ -1,4 +1,4 @@
-import { BaseProviderAdapter, normalizeContent, normalizeToolArguments } from './base.js';
+import { BaseProviderAdapter, normalizeContent, normalizeToolArguments, logSafeBody } from './base.js';
 import type { Provider, ToolDef } from '../types.js';
 import { withRetry, RetryableError, fetchWithTimeout, withCause, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
@@ -91,7 +91,7 @@ export class OpenAIAdapter extends BaseProviderAdapter {
         body.tool_choice = 'auto';
       }
 
-      console.log(`[OpenAI] REQUEST:`, JSON.stringify(body, null, 2));
+      console.log(`[OpenAI] REQUEST:`, logSafeBody(body));
 
       let response;
       try {
@@ -135,7 +135,7 @@ export class OpenAIAdapter extends BaseProviderAdapter {
       }
       
       const data = await response.json();
-      console.log(`[OpenAI] RESPONSE:`, JSON.stringify(data, null, 2));
+      console.log(`[OpenAI] RESPONSE:`, logSafeBody(data));
       
       const latencyMs = Date.now() - startTime;
       

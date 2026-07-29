@@ -164,3 +164,31 @@ export function normalizeToolArguments(raw: unknown, providerLabel: string): Rec
     return {};
   }
 }
+
+/**
+ * Compact a request/response body for logging.
+ *
+ * These were logged in full at every call. A test image is a multi-megabyte
+ * base64 string, so one vision run flooded the CLI's stderr and the desktop's
+ * 1000-entry log buffer (which is broadcast to the renderer) — and duplicated
+ * the file's contents into the log stream. Long strings are elided; nothing
+ * else about the shape changes.
+ */
+export function logSafeBody(value: unknown, maxStringLength = 500): string {
+  const seen = new WeakSet<object>();
+  const replacer = (_key: string, val: unknown): unknown => {
+    if (typeof val === 'string' && val.length > maxStringLength) {
+      return `${val.slice(0, maxStringLength)}…[${val.length - maxStringLength} more chars]`;
+    }
+    if (val && typeof val === 'object') {
+      if (seen.has(val as object)) return '[circular]';
+      seen.add(val as object);
+    }
+    return val;
+  };
+  try {
+    return JSON.stringify(value, replacer, 2) ?? String(value);
+  } catch {
+    return '[unserialisable]';
+  }
+}

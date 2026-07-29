@@ -154,3 +154,31 @@ describe('numericAbsScore0to10', () => {
     expect(score).toBe(10);
   });
 });
+
+describe('levenshtein memory (bug-hunt regression)', () => {
+  it('handles a huge output against a short reference without exhausting memory', () => {
+    // The full (m+1)x(n+1) matrix took 777 MB for a 30-char reference against a
+    // 3 MB output, and OOM-killed the process for a longer reference. Rolling
+    // rows make it O(min(m,n)).
+    const gold = 'the quick brown fox jumps over';
+    const pred = 'x'.repeat(2_000_000);
+    const before = process.memoryUsage().heapUsed;
+    const start = Date.now();
+    const score = levenshteinScore0to10(gold, pred);
+    const grew = (process.memoryUsage().heapUsed - before) / 1e6;
+
+    expect(score).toBe(0);                       // wildly different
+    expect(Date.now() - start).toBeLessThan(10_000);
+    expect(grew).toBeLessThan(100);              // was ~500+ MB for this shape
+  });
+
+  it('still computes the same distances as before', () => {
+    expect(levenshtein('kitten', 'sitting')).toBe(3);
+    expect(levenshtein('', 'abc')).toBe(3);
+    expect(levenshtein('abc', '')).toBe(3);
+    expect(levenshtein('same', 'same')).toBe(0);
+    expect(levenshtein('a', 'b')).toBe(1);
+    // Argument order must not matter
+    expect(levenshtein('short', 'a much longer string')).toBe(levenshtein('a much longer string', 'short'));
+  });
+});

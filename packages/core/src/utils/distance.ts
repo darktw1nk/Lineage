@@ -1,24 +1,42 @@
 // Distance calculation utilities for exact-match grading
 
+/**
+ * Levenshtein distance in O(min(m,n)) memory.
+ *
+ * The full (m+1)x(n+1) matrix allocated ~8.3 bytes per cell, so a 30-character
+ * expected value against a 3 MB model output took 777 MB — and a longer
+ * reference against a max-tokens reply is enough to OOM-kill the process.
+ * Only the previous row is ever read, so two rolling Int32Arrays suffice, and
+ * indexing the SHORTER string keeps the rows small.
+ */
 export function levenshtein(a: string, b: string): number {
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
-  
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  
-  for (let i = 1; i <= m; i++) {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  // Iterate rows over the longer string, columns over the shorter one.
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  const n = short.length;
+
+  let prev = new Int32Array(n + 1);
+  let curr = new Int32Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+
+  for (let i = 1; i <= long.length; i++) {
+    curr[0] = i;
+    const li = long[i - 1];
     for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,      // deletion
-        dp[i][j - 1] + 1,      // insertion
-        dp[i - 1][j - 1] + cost // substitution
+      const cost = li === short[j - 1] ? 0 : 1;
+      curr[j] = Math.min(
+        prev[j] + 1,          // deletion
+        curr[j - 1] + 1,      // insertion
+        prev[j - 1] + cost,   // substitution
       );
     }
+    const swap = prev; prev = curr; curr = swap;
   }
-  
-  return dp[m][n];
+
+  return prev[n];
 }
 
 export function levenshteinScore0to10(gold: string, pred: string): number {

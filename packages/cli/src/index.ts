@@ -476,6 +476,19 @@ async function handleEstimate(configPath: string, dbPath?: string, seedOverride?
   const configDir = pathMod.dirname(pathMod.resolve(configPath));
   // Plugin providers must be registered before validation, or estimating a
   // config that runs fine fails with 'Unknown provider "…"'.
+  //
+  // But a plugin's top-level code executes on import, and --estimate is
+  // documented as "no run" — so a CONFIG FILE could make the one command whose
+  // purpose is "look before you spend" execute arbitrary local code. Say so
+  // before doing it: the trust boundary is meant to be around plugins the user
+  // installs, not around a config they were handed.
+  const pluginRefs = [...(cliConfig.plugins ?? []), ...pluginDirs];
+  if (pluginRefs.length > 0) {
+    process.stderr.write(
+      `note: this config loads ${pluginRefs.length} plugin(s) — ${pluginRefs.join(', ')}\n` +
+      `      Plugins are unsandboxed local JavaScript and their module code runs now, even for --estimate.\n`,
+    );
+  }
   const { loadCliPlugins } = await import('./plugins.js');
   await loadCliPlugins({ configDir, configPlugins: cliConfig.plugins ?? [], flagDirs: pluginDirs });
   const evalConfig = toEvaluationConfig(cliConfig, configDir);

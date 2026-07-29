@@ -1,4 +1,4 @@
-import { BaseProviderAdapter } from './base.js';
+import { BaseProviderAdapter, logSafeBody } from './base.js';
 import type { Provider, ToolDef } from '../types.js';
 import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
 import { store } from '../store.js';
@@ -47,7 +47,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
         body.tools = opts.tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters ?? { type: 'object' } }));
       }
 
-      console.log(`[Anthropic] REQUEST:`, JSON.stringify(body, null, 2));
+      console.log(`[Anthropic] REQUEST:`, logSafeBody(body));
       
       const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -70,7 +70,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
       }
       
       const data = await response.json();
-      console.log(`[Anthropic] RESPONSE:`, JSON.stringify(data, null, 2));
+      console.log(`[Anthropic] RESPONSE:`, logSafeBody(data));
       
       const latencyMs = Date.now() - startTime;
       

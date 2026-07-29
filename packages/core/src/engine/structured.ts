@@ -272,6 +272,19 @@ export function scoreToolCall(
   return {
     passed: false,
     score: 6,
-    detail: `called ${expected.name} but args differ (${mode}): expected ${JSON.stringify(expected.args)}, got ${JSON.stringify(call.arguments)}`,
+    // JSON.parse accepts nesting far deeper than JSON.stringify can emit
+    // (~156k vs ~819), so a deeply-nested tool argument was ACCEPTED and then
+    // threw RangeError here — marking the node failed and wasting the call that
+    // had already been billed. Formatting a diff must never fail the scoring.
+    detail: `called ${expected.name} but args differ (${mode}): expected ${safeStringify(expected.args)}, got ${safeStringify(call.arguments)}`,
   };
+}
+
+/** JSON.stringify that degrades instead of throwing on pathological input. */
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return '[too deeply nested to display]';
+  }
 }
