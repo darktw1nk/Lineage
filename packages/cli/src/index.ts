@@ -533,6 +533,26 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
     requiredProviders.add(model.provider);
   }
   requiredProviders.add(evalConfig.serviceModel.provider);
+
+  // A checkpointed config can reference a provider that a PLUGIN registered.
+  // Without --config (or --plugins) that plugin never loads, and the run does
+  // not fail — it grinds through every remaining node with "Unknown provider",
+  // marks itself finished, exits 0, and can never be resumed again. Refuse
+  // before spending anything.
+  const { listProviders } = await import('@promptengine/core');
+  const available = new Set(listProviders());
+  const missing = [...requiredProviders].filter(p => !available.has(p));
+  if (missing.length > 0) {
+    console.error(`Cannot resume ${runId}: provider(s) not registered: ${missing.join(', ')}`);
+    console.error(
+      missing.length === 1 && configPath === undefined
+        ? 'That provider comes from a plugin. Re-run with --config <the original config> (or --plugins <dir>) so it loads.'
+        : 'Pass --config <the original config> or --plugins <dir> so the plugin providers load.',
+    );
+    console.error('The run is untouched and can still be resumed once the provider is available.');
+    process.exit(1);
+  }
+
   for (const provider of requiredProviders) {
     const key = resolveApiKey(provider, configKeys);
     if (!key) {
