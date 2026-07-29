@@ -57,6 +57,8 @@ interface EvaluationState {
   finishing: boolean;
   /** Warn once, not per node, when stability is weighted but unmeasurable. */
   warnedStabilityNeedsSamples: boolean;
+  /** Models already warned about reporting $0 for real tokens. */
+  warnedZeroCostModels: Set<string>;
   /** A Stop was requested — checked between billable phases so spending actually halts. */
   stopRequested: boolean;         // idempotency latch: finishEvaluation must run exactly once
   loopRunning: boolean;       // re-entrancy guard: exactly one evaluationLoop per state
@@ -159,10 +161,36 @@ export async function startEvaluation(
   run: EvaluationRun
 ): Promise<void> {
   console.log(`[Evaluator] Starting evaluation ${runId.slice(0, 8)}`);
-  
-  if (activeEvaluations.has(runId)) {
+
+  // Claim the id SYNCHRONOUSLY, before any await.
+  //
+  // The guard used to check `activeEvaluations` and then register the state
+  // several awaits later (dynamic imports, a model-cost lookup, the holdout
+  // partition). Two starts for one run id landing in adjacent event-loop turns
+  // therefore both passed, both built a state, and the second overwrote the
+  // first — producing a double population, double fill spend, and a run wedged
+  // at 'running' forever because the surviving loop was waiting on the
+  // discarded state's queue. Reproduced 4/4 at <2ms separation, which is
+  // reachable from two programmatic or IPC starts (not a human double-click).
+  if (startingRuns.has(runId) || activeEvaluations.has(runId)) {
     throw new Error('Evaluation already running');
   }
+  startingRuns.add(runId);
+  try {
+    await startEvaluationInner(runId, config, run);
+  } finally {
+    startingRuns.delete(runId);
+  }
+}
+
+/** Run ids between the start request and their state being registered. */
+const startingRuns = new Set<UUID>();
+
+async function startEvaluationInner(
+  runId: UUID,
+  config: EvaluationConfig,
+  run: EvaluationRun
+): Promise<void> {
 
   // A loaded run with generations is a checkpoint — resume it instead of starting fresh
   const isResume = run.generations.length > 0;
@@ -248,6 +276,16 @@ export async function startEvaluation(
     run.holdoutSkippedReason = 'share-rounds-to-zero';
   }
   const pairwiseEnabled = config.pairwise?.enabled === true;
+  // A playoff judges stored outputs head-to-head, which only makes sense for
+  // llm_grade tests — the deterministic modes already give a crisp score. With
+  // none, maybeRunPlayoff returned early and NOTHING was logged, so an enabled
+  // playoff simply never happened and the user had no way to notice.
+  if (pairwiseEnabled && !config.testSet.some(t => (t.mode ?? 'llm_grade') === 'llm_grade')) {
+    console.warn(
+      '[Playoff] pairwise is enabled but no test uses mode "llm_grade" — the playoff needs judged ' +
+      'outputs to compare, so it will not run. Deterministic modes already produce a precise score.',
+    );
+  }
   const rawContenders = config.pairwise?.contenders ?? 4;
   const pairwiseContenders = Math.min(Math.max(Math.floor(rawContenders), 2), 8);
   if (pairwiseEnabled && pairwiseContenders !== rawContenders) {
@@ -279,6 +317,7 @@ export async function startEvaluation(
     costContext: 'evolution',
     finishing: false,
     warnedStabilityNeedsSamples: false,
+    warnedZeroCostModels: new Set(),
     stopRequested: false,
     loopRunning: false,
     // Restore accumulated paused time: hard-zeroing it on resume charges every
@@ -1667,6 +1706,23 @@ function accrueCost(
   model: ModelRef,
   c: { usd: number; promptTokens: number; completionTokens: number; calls: number },
 ): void {
+  // Warn once when a CATALOGUED model reports zero spend for real tokens.
+  //
+  // Budget enforcement runs off totals.usd, which is whatever the adapter
+  // self-reported. BaseProviderAdapter computes it from the catalog, but a
+  // plain-object plugin adapter (the shape docs/plugins.md documents) returns
+  // its own — and one returning `usd: 0` spends without limit while
+  // `budgetUSD` never trips. The pricingUnknown preflight cannot see this: it
+  // inspects the catalog, and the catalog is fine.
+  if (c.usd === 0 && (c.promptTokens > 0 || c.completionTokens > 0) && !state.warnedZeroCostModels.has(`${model.provider}/${model.model}`)) {
+    state.warnedZeroCostModels.add(`${model.provider}/${model.model}`);
+    console.warn(
+      `[Evaluator] ${model.provider}/${model.model} reported $0 for a call that used ` +
+      `${c.promptTokens + c.completionTokens} tokens. If that is not a genuinely free model, budgetUSD ` +
+      `cannot be enforced for it — a provider adapter must return a real "usd" value.`,
+    );
+  }
+
   state.run.totals.usd += c.usd;
   state.run.totals.tokensPrompt += c.promptTokens;
   state.run.totals.tokensCompletion += c.completionTokens;

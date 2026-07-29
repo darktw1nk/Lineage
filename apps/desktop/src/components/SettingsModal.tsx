@@ -110,9 +110,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       await window.electronAPI.settings.set(localSettings);
 
       // Save costs
-      for (const cost of localCosts) {
-        await window.electronAPI.costs.set(cost);
-      }
+      // One transaction, not one IPC round-trip per row. After an OpenRouter
+      // sync that loop was 300+ separate calls, each scheduling its own
+      // whole-file database save.
+      await window.electronAPI.costs.setMany(localCosts);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });

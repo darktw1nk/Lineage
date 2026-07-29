@@ -96,6 +96,10 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('costs:set', async (_event, entry: ModelCostEntry) => {
     return setModelCost(entry);
   });
+
+  ipcMain.handle('costs:setMany', async (_event, entries: ModelCostEntry[]) => {
+    return setModelCosts(entries);
+  });
   
   ipcMain.handle('costs:getAll', async () => {
     return getAllModelCosts();
@@ -305,8 +309,8 @@ async function deleteEvaluation(runId: string): Promise<void> {
     // Get config_id before deleting the run
     const runRow = db.prepare('SELECT config_id FROM evaluation_runs WHERE id = ?').get(runId) as { config_id: string } | undefined;
     
-    // Delete child tables first (all tables with FOREIGN KEY to evaluation_runs)
-    db.prepare('DELETE FROM candidate_nodes WHERE run_id = ?').run(runId);
+    // Delete child tables first (all tables with FOREIGN KEY to evaluation_runs).
+    // candidate_nodes was dropped in migration 5 — it was never written.
     db.prepare('DELETE FROM raw_blobs WHERE run_id = ?').run(runId);
     
     // Now delete the run itself
@@ -673,11 +677,15 @@ async function getModelCost(modelRef: ModelRef): Promise<ModelCostEntry | null> 
   };
 }
 
-async function setModelCost(entry: ModelCostEntry): Promise<void> {
-  // Validate before writing. The handler accepted anything: a string price was
-  // stored verbatim into a REAL NOT NULL column and read back as a string,
-  // Infinity round-tripped as null, and a NEGATIVE price inverts fitness and
-  // disarms the budget cap. The CLI and the estimator read this same table.
+/**
+ * Reject anything that would poison the cost table.
+ *
+ * The handler accepted anything: a string price was stored verbatim into a
+ * REAL NOT NULL column and read back as a string, Infinity round-tripped as
+ * null, and a NEGATIVE price inverts fitness and disarms the budget cap. The
+ * CLI and the estimator read this same table.
+ */
+function validateModelCost(entry: ModelCostEntry): void {
   if (!entry || typeof entry.provider !== 'string' || !entry.provider || typeof entry.model !== 'string' || !entry.model) {
     throw new Error('Model cost entry needs a non-empty provider and model');
   }
@@ -687,11 +695,37 @@ async function setModelCost(entry: ModelCostEntry): Promise<void> {
       throw new Error(`Model cost "${field}" must be a finite number >= 0 (got ${JSON.stringify(value)})`);
     }
   }
+}
+
+async function setModelCost(entry: ModelCostEntry): Promise<void> {
+  validateModelCost(entry);
   const db = getDatabase();
   db.prepare(`
     INSERT OR REPLACE INTO model_costs (provider, model, prompt_usd_per_1k, completion_usd_per_1k)
     VALUES (?, ?, ?, ?)
   `).run(entry.provider, entry.model, entry.promptUSDper1k, entry.completionUSDper1k);
+}
+
+/**
+ * Write many cost rows in ONE transaction.
+ *
+ * Settings' Save looped `costs.set` per row, so after an OpenRouter sync that
+ * was 300+ separate IPC round-trips, each validating, writing and scheduling
+ * its own whole-file save — with the Save button live throughout.
+ */
+async function setModelCosts(entries: ModelCostEntry[]): Promise<void> {
+  if (!Array.isArray(entries)) throw new Error('costs:setMany expects an array');
+  for (const entry of entries) validateModelCost(entry);
+  const db = getDatabase();
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO model_costs (provider, model, prompt_usd_per_1k, completion_usd_per_1k)
+    VALUES (?, ?, ?, ?)
+  `);
+  db.transaction(() => {
+    for (const entry of entries) {
+      insert.run(entry.provider, entry.model, entry.promptUSDper1k, entry.completionUSDper1k);
+    }
+  })();
 }
 
 async function getAllModelCosts(): Promise<ModelCostEntry[]> {

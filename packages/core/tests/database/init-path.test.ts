@@ -18,12 +18,12 @@ describe('model catalog seeding', () => {
     fs.rmSync(tmpDb, { force: true });
   });
 
-  it('seeds a fresh database at schema v4 without retired models', async () => {
+  it('seeds a fresh database at the latest schema without retired models', async () => {
     await initializeDatabase(tmpDb);
     const db = getDatabase();
 
     const version = db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get() as any;
-    expect(version.version).toBe(4);
+    expect(version.version).toBe(5);
 
     const retired = db.prepare("SELECT COUNT(*) as n FROM model_costs WHERE model LIKE 'gemini-2.0%'").get() as any;
     expect(retired.n).toBe(0);
@@ -51,7 +51,7 @@ describe('model catalog seeding', () => {
 
     expect((db.prepare("SELECT COUNT(*) as n FROM model_costs WHERE model = 'gemini-2.0-flash'").get() as any).n).toBe(0);
     expect((db.prepare("SELECT COUNT(*) as n FROM model_costs WHERE provider = 'openrouter'").get() as any).n).toBe(1);
-    expect((db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get() as any).version).toBe(4);
+    expect((db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get() as any).version).toBe(5);
   });
 
   it('migration 4 drops the legacy cost_ledger table', async () => {
@@ -70,7 +70,7 @@ describe('model catalog seeding', () => {
 
     const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cost_ledger'").get();
     expect(table).toBeUndefined();
-    expect((db.prepare('SELECT version FROM schema_version').get() as any).version).toBe(4);
+    expect((db.prepare('SELECT version FROM schema_version').get() as any).version).toBe(5);
   });
 
   it('migration 3 survives legacy multi-row schema_version tables ([1],[2] like real desktop DBs)', async () => {
@@ -88,6 +88,6 @@ describe('model catalog seeding', () => {
     db = getDatabase();
 
     const rows = db.prepare('SELECT version FROM schema_version ORDER BY version').all() as any[];
-    expect(rows).toEqual([{ version: 4 }]);
+    expect(rows).toEqual([{ version: 5 }]);
   });
 });

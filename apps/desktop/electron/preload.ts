@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   costs: {
     get: (modelRef) => ipcRenderer.invoke('costs:get', modelRef),
     set: (entry) => ipcRenderer.invoke('costs:set', entry),
+    setMany: (entries) => ipcRenderer.invoke('costs:setMany', entries),
     getAll: () => ipcRenderer.invoke('costs:getAll'),
   },
 

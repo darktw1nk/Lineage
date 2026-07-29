@@ -123,6 +123,8 @@ export class SqlJsWrapper {
   private _consecutiveSaveFailures = 0;
   /** Duration of the last successful save, used to pace the next one. */
   private _lastSaveDurationMs = 5;
+  /** Nesting depth, so an inner transaction uses a SAVEPOINT rather than BEGIN. */
+  private _txDepth = 0;
 
   constructor(db: SqlJsDatabase, dbPath: string, readOnly = false) {
     this._db = db;
@@ -177,7 +179,14 @@ export class SqlJsWrapper {
     const wrapper = this;
     const wrapped = ((...args: unknown[]) => {
       let result: unknown;
-      wrapper._db.run('BEGIN');
+      // Nested transactions use SAVEPOINTs, as better-sqlite3 does. A plain
+      // BEGIN inside a transaction fails ("cannot start a transaction within a
+      // transaction"), and the inner ROLLBACK then killed the OUTER one — so
+      // the caller got an error naming neither problem and the outer
+      // transaction's work vanished.
+      const depth = wrapper._txDepth++;
+      const savepoint = depth > 0 ? `pe_sp_${depth}` : null;
+      wrapper._db.run(savepoint ? `SAVEPOINT ${savepoint}` : 'BEGIN');
       try {
         result = fn(...args);
         // An async callback would COMMIT the instant its promise was created,
@@ -185,20 +194,23 @@ export class SqlJsWrapper {
         // and every write persisted. better-sqlite3 refuses these outright;
         // so do we, rather than pretending to be transactional.
         if (result && typeof (result as any).then === 'function') {
-          wrapper._db.run('ROLLBACK');
           throw new Error(
             'transaction() callbacks must be synchronous — a promise-returning callback commits before its work runs. ' +
             'Do the async work first, then call transaction() with the synchronous writes.',
           );
         }
-        wrapper._db.run('COMMIT');
+        wrapper._db.run(savepoint ? `RELEASE ${savepoint}` : 'COMMIT');
       } catch (err) {
         try {
-          wrapper._db.run('ROLLBACK');
+          // Roll back only OUR level. `ROLLBACK` unwinds everything, which is
+          // how an inner failure used to destroy the outer transaction's work.
+          wrapper._db.run(savepoint ? `ROLLBACK TO ${savepoint}; RELEASE ${savepoint}` : 'ROLLBACK');
         } catch {
           // Already rolled back, or never began — keep the ORIGINAL error.
         }
         throw err;
+      } finally {
+        wrapper._txDepth = depth;
       }
       // Durability flush lives OUTSIDE the try: it runs after COMMIT, so a disk
       // error here used to land in the catch and issue a ROLLBACK against a
@@ -206,7 +218,9 @@ export class SqlJsWrapper {
       // transaction is active" and destroying the real ENOSPC/EPERM cause,
       // while the change stayed committed in memory with nothing scheduled to
       // save it. flush() re-arms the retry and reports rather than throwing.
-      wrapper.flush();
+      // Only the OUTERMOST commit is durable — an inner savepoint release has
+      // not committed anything yet.
+      if (depth === 0) wrapper.flush();
       return result;
     }) as unknown as T;
     return wrapped;
@@ -607,18 +621,9 @@ function createTables(db: SqlJsWrapper): void {
     );
   `);
 
-  // Candidate nodes (for querying)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS candidate_nodes (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      generation INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      fitness REAL,
-      node_json TEXT NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES evaluation_runs(id)
-    );
-  `);
+  // (candidate_nodes was created here and never written by any production
+  // code — nodes live inside evaluation_runs.run_json. Migration 5 drops it
+  // from existing databases.)
 
   // Raw response blobs
   db.exec(`
@@ -686,7 +691,7 @@ function insertDefaultModelCosts(db: SqlJsWrapper): void {
 }
 
 /** The schema version this build understands. Bump with every new migration. */
-const LATEST_SCHEMA_VERSION = 4;
+const LATEST_SCHEMA_VERSION = 5;
 
 function runMigrations(db: SqlJsWrapper): void {
   // Check current schema version
@@ -751,8 +756,20 @@ function runMigrations(db: SqlJsWrapper): void {
     version = 4;
   }
 
+  // Migration 5: Drop the never-written candidate_nodes table. Nodes live
+  // inside evaluation_runs.run_json; this table was created on every install
+  // and never written by any production code, so it was pure confusion for
+  // anyone reading the schema.
+  if (version === 4) {
+    console.log('Running migration 5: Dropping unused candidate_nodes table...');
+    db.exec('DROP TABLE IF EXISTS candidate_nodes');
+    setVersion(5);
+    console.log('Migration 5 completed');
+    version = 5;
+  }
+
   // Future migrations go here
-  // if (version === 4) { ... }
+  // if (version === 5) { ... }
 
   // A database written by a NEWER build than this one must not be touched:
   // runMigrations simply fell through anything it did not recognise, so an

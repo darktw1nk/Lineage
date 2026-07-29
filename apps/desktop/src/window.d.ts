@@ -47,6 +47,8 @@ export interface ElectronAPI {
   costs: {
     get: (modelRef: ModelRef) => Promise<ModelCostEntry | null>;
     set: (entry: ModelCostEntry) => Promise<void>;
+    /** Write many rows in one transaction — Save used to loop `set` per row. */
+    setMany: (entries: ModelCostEntry[]) => Promise<void>;
     getAll: () => Promise<ModelCostEntry[]>;
   };
   models: {

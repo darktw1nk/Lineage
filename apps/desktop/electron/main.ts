@@ -15,6 +15,22 @@ initLogger();
 
 let mainWindow: BrowserWindow | null = null;
 
+// One instance only. Without this a second launch — double-clicking the icon —
+// raced the first for the database lock and died with a dialog that blamed
+// plugins, which is both wrong and unactionable. Focus the existing window
+// instead, which is what the user meant.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -78,12 +94,15 @@ app.whenReady().then(async () => {
   // model catalog) leaves the app running with NO window and NO error — the
   // user cannot even reach Settings to disable the offending plugin.
   console.error('[Main] Startup failed:', error);
-  dialog.showErrorBox(
-    'PromptEngine.AI failed to start',
-    `${error instanceof Error ? error.message : String(error)}\n\n` +
-    `If you recently added a plugin, remove it from the plugins folder and restart:\n` +
-    `${path.join(app.getPath('userData'), 'plugins')}`
-  );
+  const message = error instanceof Error ? error.message : String(error);
+  // Tailor the advice to the actual failure. Blaming plugins for a database
+  // lock — the commonest cause, and the one a second launch produces — sent
+  // the user to delete plugins that were not the problem.
+  const advice = /in use by process|could not be read/i.test(message)
+    ? 'Another PromptEngine process has the database open. Close it and try again, ' +
+      'or start this one with a different --db path.'
+    : `If you recently added a plugin, remove it from the plugins folder and restart:\n${path.join(app.getPath('userData'), 'plugins')}`;
+  dialog.showErrorBox('PromptEngine.AI failed to start', `${message}\n\n${advice}`);
   app.quit();
 });
 

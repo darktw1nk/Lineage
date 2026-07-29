@@ -194,3 +194,60 @@ describe('SqlJsWrapper', () => {
     });
   });
 });
+
+describe('nested transactions (bug-hunt regression)', () => {
+  it('an inner rollback does not destroy the outer transaction', async () => {
+    // A plain BEGIN inside a transaction fails, and the inner ROLLBACK then
+    // unwound the OUTER one — so the caller got an error naming neither
+    // problem and the outer transaction's work silently vanished.
+    const db = wrapper;
+    db.exec('CREATE TABLE IF NOT EXISTS nest_test (name TEXT)');
+    db.prepare('DELETE FROM nest_test').run();
+
+    const outer = db.transaction(() => {
+      db.prepare('INSERT INTO nest_test (name) VALUES (?)').run('outer-work');
+      const inner = db.transaction(() => {
+        db.prepare('INSERT INTO nest_test (name) VALUES (?)').run('inner-work');
+        throw new Error('inner failed');
+      });
+      try { inner(); } catch { /* the outer transaction handles it */ }
+      db.prepare('INSERT INTO nest_test (name) VALUES (?)').run('outer-after');
+    });
+
+    expect(() => outer()).not.toThrow();
+    const rows = db.prepare('SELECT name FROM nest_test').all() as Array<{ name: string }>;
+    expect(rows.map(r => r.name)).toEqual(['outer-work', 'outer-after']); // inner rolled back, outer kept
+  });
+
+  it('a successful nested transaction commits with its parent', () => {
+    const db = wrapper;
+    db.exec('CREATE TABLE IF NOT EXISTS nest_ok (name TEXT)');
+    db.prepare('DELETE FROM nest_ok').run();
+
+    db.transaction(() => {
+      db.prepare('INSERT INTO nest_ok (name) VALUES (?)').run('a');
+      db.transaction(() => {
+        db.prepare('INSERT INTO nest_ok (name) VALUES (?)').run('b');
+      })();
+    })();
+
+    const rows = db.prepare('SELECT name FROM nest_ok').all() as Array<{ name: string }>;
+    expect(rows.map(r => r.name)).toEqual(['a', 'b']);
+  });
+
+  it('an outer rollback discards nested work too', () => {
+    const db = wrapper;
+    db.exec('CREATE TABLE IF NOT EXISTS nest_undo (name TEXT)');
+    db.prepare('DELETE FROM nest_undo').run();
+
+    const outer = db.transaction(() => {
+      db.transaction(() => {
+        db.prepare('INSERT INTO nest_undo (name) VALUES (?)').run('inner');
+      })();
+      throw new Error('outer failed');
+    });
+
+    expect(() => outer()).toThrow('outer failed');
+    expect(db.prepare('SELECT name FROM nest_undo').all()).toEqual([]);
+  });
+});
