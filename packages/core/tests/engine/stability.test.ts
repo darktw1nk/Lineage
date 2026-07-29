@@ -90,6 +90,21 @@ describe('an UNMEASURABLE stability weight does not inflate fitness', () => {
     expect(withStability).toBeCloseTo(withoutStability, 5);
   });
 
+  it('does the same for an unmeasurable SAFETY weight', () => {
+    // Identical bug, identical shape: calculateSafetyScore fell back to 10, and
+    // the guardrail pass only runs when fitness.guardrails is non-empty. So
+    // {quality: 0.5, safety: 0.5} with no guardrails handed every candidate
+    // half its score for free.
+    const { fitness } = calculateFitness(badNode(), configWith({ quality: 0.5, safety: 0.5 }));
+    expect(fitness).toBeCloseTo(1, 5);
+  });
+
+  it('still counts safety when guardrails DID measure it', () => {
+    const measured = { ...nodeWith([[1], [1]]), metrics: { quality: 1, fitness: 0, safety: 3, costUSD: 0, latencyMs: 1 } } as any;
+    const { fitness } = calculateFitness(measured, configWith({ quality: 0.5, safety: 0.5 }));
+    expect(fitness).toBeCloseTo(2, 5); // 0.5*1 + 0.5*3
+  });
+
   it('still counts stability when it IS measured', () => {
     const measured = { ...nodeWith([[1, 1], [1, 1]]), metrics: { quality: 1, fitness: 0, stability: 10, costUSD: 0, latencyMs: 1 } } as any;
     const { fitness } = calculateFitness(measured, configWith({ quality: 0.5, stability: 0.5 }));

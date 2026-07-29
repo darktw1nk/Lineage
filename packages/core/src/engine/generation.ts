@@ -617,7 +617,12 @@ export async function createNextGeneration(
         if (spent.calls > 0) {
           console.warn(`[Generation] Failed '${operatorName}' still spent $${spent.usd.toFixed(6)} over ${spent.calls} call(s) — accounting for it`);
         }
-        return carry('ERROR', `Operator '${operatorName}' failed, using parent`, spent);
+        // Name the actual cause. "failed, using parent" alone sent the reason
+        // to a console.error the desktop hides by default, so a run where every
+        // operator failed showed a generation of identical carried prompts with
+        // no on-screen explanation anywhere.
+        const why = error instanceof Error ? error.message : String(error);
+        return carry('ERROR', `Operator '${operatorName}' failed, using parent — ${why}`, spent);
       }
     })();
     childResults[i] = { index: i, parent, parentFitness, result: outcome };

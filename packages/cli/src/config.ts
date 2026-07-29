@@ -330,9 +330,21 @@ export function validateCliConfig(config: CliConfig): void {
   }
   const TEST_KEYS = [
     'id', 'name', 'prompt', 'expected', 'mode', 'holdout', 'schema', 'tools',
-    'expectedTool', 'grading', 'image', 'weight',
+    'expectedTool', 'grading', 'image',
   ];
-  config.testSet.forEach((test, i) => warnUnknown(test, TEST_KEYS, `testSet[${i}]`));
+  config.testSet.forEach((test, i) => {
+    warnUnknown(test, TEST_KEYS, `testSet[${i}]`);
+    // `weight` was in the accepted-keys list, so it passed validation in
+    // silence — but quality is a plain unweighted average of test scores
+    // (fitness.ts calculateQualityScore) and nothing ever read it. A user
+    // weighting their most important test got no warning and no effect.
+    if ((test as any).weight !== undefined) {
+      console.warn(
+        `[Config] testSet[${i}].weight is not implemented — every test contributes equally to quality. ` +
+        `Remove it, or duplicate the test to weight it more heavily.`,
+      );
+    }
+  });
 }
 
 export function toEvaluationConfig(config: CliConfig, configDir?: string): EvaluationConfig {

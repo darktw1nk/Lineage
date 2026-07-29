@@ -146,6 +146,13 @@ export function calculateFitness(
     );
     effectiveWeights.latency = 0;
   }
+  if (effectiveWeights.safety && safety === undefined) {
+    warnOnce('safety',
+      '[Fitness] A "safety" weight is set but fitness.guardrails is empty — the safety dimension is DISABLED. ' +
+      'Add fitness.guardrails (a list of rules the output must satisfy) to enable it.',
+    );
+    effectiveWeights.safety = 0;
+  }
   if (effectiveWeights.stability && !stabilityMeasured) {
     warnOnce('stability',
       '[Fitness] A "stability" weight is set but this candidate has no test with 2+ samples — the stability ' +
@@ -246,12 +253,13 @@ function calculateQualityScore(node: CandidateNode): number {
   return totalScore / node.tests.length;
 }
 
-function calculateSafetyScore(node: CandidateNode): number {
-  // Safety score will be calculated separately via guardrails
-  // This function returns the pre-calculated safety metric.
-  // ?? not ||: safety 0 is the WORST score, not "missing" — coercing it to 10
-  // would make a maximally-unsafe candidate look perfect.
-  return node.metrics?.safety ?? 10;
+function calculateSafetyScore(node: CandidateNode): number | undefined {
+  // Measured by the guardrail pass, which only runs when guardrails are
+  // configured. Undefined means UNMEASURED, which disables the dimension —
+  // it used to fall back to 10, so `{quality: 0.5, safety: 0.5}` with no
+  // fitness.guardrails handed every candidate half its score for free, exactly
+  // like the stability bug. A measured 0 is still the worst score, not missing.
+  return node.metrics?.safety;
 }
 
 export async function evaluateSafetyGuardrails(

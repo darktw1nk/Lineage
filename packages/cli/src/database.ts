@@ -59,6 +59,15 @@ export async function initCliDatabase(explicitPath?: string, options: { readOnly
   const dbPath = resolveDbPath(explicitPath);
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
+  // Say which database, always. Without --db the CLI silently adopts the
+  // DESKTOP app's database when its userData directory exists, and a
+  // CLI-specific file under ~/.promptengine otherwise — so "my runs are
+  // missing" and "the desktop shows runs I never started there" both have the
+  // same invisible cause. stderr, so --output/JSON capture is unaffected.
+  process.stderr.write(
+    `Database: ${dbPath}${explicitPath ? '' : ' (default — pass --db to choose)'}\n`,
+  );
+
   // Import the engine's database init — it accepts an optional dbPath
   const { initializeDatabase } = await import('@promptengine/core');
   await initializeDatabase(dbPath, { readOnly: options.readOnly });
