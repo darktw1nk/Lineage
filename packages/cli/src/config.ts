@@ -129,18 +129,32 @@ export function loadCliConfig(configPath: string): CliConfig {
   if (!fs.existsSync(configPath)) {
     throw new Error(`Config file not found: ${configPath}`);
   }
-  const raw = fs.readFileSync(configPath, 'utf-8');
+  // A directory produced a raw "EISDIR: illegal operation on a directory".
+  if (fs.statSync(configPath).isDirectory()) {
+    throw new Error(`Config path is a directory, not a file: ${configPath}`);
+  }
+  let raw = fs.readFileSync(configPath, 'utf-8');
+  // Strip a UTF-8 BOM. Windows Notepad and PowerShell's default Out-File both
+  // write one, and JSON.parse rejects it — so a perfectly valid config was
+  // unloadable with only "Invalid JSON" to go on.
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
   let config: CliConfig;
   try {
     config = JSON.parse(raw);
-  } catch {
-    throw new Error(`Invalid JSON in config file: ${configPath}`);
+  } catch (error) {
+    throw new Error(`Invalid JSON in config file ${configPath}: ${error instanceof Error ? error.message : error}`);
   }
   validateCliConfig(config);
   return config;
 }
 
 export function validateCliConfig(config: CliConfig): void {
+  // `null` parses fine as JSON and then crashed on the first property read
+  // ("Cannot read properties of null (reading 'initialPrompts')").
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error(`Config must be a JSON object (got ${config === null ? 'null' : Array.isArray(config) ? 'an array' : typeof config})`);
+  }
+
   const hasInitialPrompts = Array.isArray(config.initialPrompts);
 
   if (hasInitialPrompts) {
@@ -305,6 +319,12 @@ export function validateCliConfig(config: CliConfig): void {
   warnUnknown(config.costNorm, ['mode', 'maxUSDPerCall'], 'costNorm');
   warnUnknown(config.latencyNorm, ['mode', 'maxMs'], 'latencyNorm');
   warnUnknown(config.pairwise, ['enabled', 'contenders'], 'pairwise');
+  // `"pairwise": true` is the obvious shorthand and silently did nothing —
+  // the engine tests `config.pairwise?.enabled === true`, so the playoff never
+  // ran and no warning was printed.
+  if (config.pairwise !== undefined && (typeof config.pairwise !== 'object' || config.pairwise === null || Array.isArray(config.pairwise))) {
+    throw new Error(`"pairwise" must be an object like { "enabled": true, "contenders": 4 } (got ${JSON.stringify(config.pairwise)})`);
+  }
   const TEST_KEYS = [
     'id', 'name', 'prompt', 'expected', 'mode', 'holdout', 'schema', 'tools',
     'expectedTool', 'grading', 'image', 'weight',

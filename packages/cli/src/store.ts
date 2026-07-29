@@ -113,26 +113,28 @@ export function resolveApiKey(
   provider: Provider,
   cliConfigKeys?: Record<string, string>
 ): string | null {
+  // Trim every source. `$(cat key.txt)` carries a trailing newline and a
+  // whitespace-only value passed straight through as a "key", producing a
+  // confusing 401 instead of the clear "no API key found" the user needs.
+  const clean = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+  };
+
   // 1. Environment variable (plugin providers use <PROVIDER>_API_KEY)
   const envVar = ENV_VAR_MAP[provider] ?? `${String(provider).toUpperCase().replace(/-/g, '_')}_API_KEY`;
-  if (envVar && process.env[envVar]) {
-    return process.env[envVar]!;
-  }
+  const fromEnv = envVar ? clean(process.env[envVar]) : null;
+  if (fromEnv) return fromEnv;
 
   // 2. CLI config file key
   const configKey = CONFIG_KEY_MAP[provider];
-  if (cliConfigKeys && configKey && cliConfigKeys[configKey]) {
-    return cliConfigKeys[configKey];
-  }
+  const fromConfig = cliConfigKeys && configKey ? clean(cliConfigKeys[configKey]) : null;
+  if (fromConfig) return fromConfig;
 
   // 3. Electron-store saved key
   const storeData = readElectronStore();
-  const savedKey = storeData?.apiKey?.[provider];
-  if (savedKey && typeof savedKey === 'string') {
-    return savedKey;
-  }
-
-  return null;
+  return clean(storeData?.apiKey?.[provider]);
 }
 
 /**

@@ -277,16 +277,16 @@ async function handleSetKey(provider: Provider, key: string): Promise<void> {
   emit(`Saved ${provider} key (${masked})`);
 }
 
-async function handleSyncModels(dbPath?: string): Promise<void> {
+async function handleSyncModels(dbPath?: string, configKeys?: Record<string, string>): Promise<void> {
   // Initialize DB first
   lastResolvedDbPath = resolveDbPath(dbPath);
   await initCliDatabase(dbPath);
 
-  // Resolve OpenRouter key
-  const apiKey = resolveApiKey('openrouter');
+  // Resolve OpenRouter key with the documented precedence: env > config > store
+  const apiKey = resolveApiKey('openrouter', configKeys);
   if (!apiKey) {
     console.error('No OpenRouter API key found.');
-    console.error('Set via: --set-key openrouter <key>, or OPENROUTER_API_KEY env var');
+    console.error('Set via: --set-key openrouter <key>, OPENROUTER_API_KEY env var, or "openrouterKey" in a config passed with --config');
     process.exit(1);
   }
 
@@ -614,15 +614,34 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  // These three take precedence over --config/--resume. Saying so matters:
+  // combining them silently ran the utility and ignored the run entirely, which
+  // in a script reads as a run that produced no output.
+  const utilityCommand = args.setKey ? '--set-key' : args.syncModels ? '--sync-models' : args.listModels ? '--list-models' : null;
+  if (utilityCommand && (args.config || args.resume)) {
+    process.stderr.write(`note: ${utilityCommand} takes precedence — --config/--resume are ignored\n`);
+  }
+
   if (args.setKey) {
     await handleSetKey(args.setKey.provider, args.setKey.key);
     return;
   }
 
   if (args.syncModels) {
-    // Install store shim for OpenRouter key resolution
-    installStoreShim();
-    await handleSyncModels(args.db);
+    // Resolve the OpenRouter key the same way a run does: env > config > store.
+    // Skipping the config meant `"openrouterKey"` in the config file — the
+    // documented precedence — was ignored, and --sync-models failed with "no
+    // API key found" for a config that runs fine.
+    let syncKeys: Record<string, string> | undefined;
+    if (args.config) {
+      try {
+        syncKeys = extractConfigKeys(loadCliConfig(args.config));
+      } catch (error) {
+        process.stderr.write(`note: could not read keys from ${args.config}: ${error instanceof Error ? error.message : error}\n`);
+      }
+    }
+    installStoreShim(syncKeys);
+    await handleSyncModels(args.db, syncKeys);
     return;
   }
 
