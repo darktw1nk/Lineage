@@ -39,6 +39,23 @@ Plugins are authored in plain JavaScript (ESM). TypeScript authors precompile �
 }
 ```
 
+### The apply() contract
+
+**Inputs are snapshots — `parent`, `parentB` and `generation` are deep copies.** Mutating them changes nothing; the engine keeps the originals. (Before this was enforced, a plugin that appended to `parent.prompt` rewrote the already-scored parent node in place and every sibling saw the damage.)
+
+**The returned object is validated.** `prompt` must be a non-empty string. `changeLog` must be an array (non-object entries are dropped). `params` must be a plain object. `cost` fields must be finite numbers; anything else counts as 0. A result that fails validation is treated exactly like a thrown operator: the child carries the parent's prompt forward with an `ERROR` changelog entry, and the run continues.
+
+**`apply()` is bounded by `callTimeoutMs`** (default 120000, settable in config). An operator that never resolves is rejected into the same carry-forward path rather than hanging the run.
+
+**Report your real spend in `cost`.** It feeds run totals, the cost breakdown, and budget enforcement. If your operator throws *after* making paid calls, attach the spend to the error so it is still accounted:
+
+```js
+import { withPartialCost } from '@promptengine/core';
+try { /* ... */ } catch (err) { throw withPartialCost(err, spentSoFar); }
+```
+
+**Binary operators get two different parents** where the population allows it; with a single surviving performer `parentB` may equal `parent`.
+
 - Give users a share via `operators.custom` in the evaluation config: `{ "custom": { "section-shuffle": { "share": 0.3 } } }`. Shares are normalized together with the built-in operators. In the desktop app, plugin operators appear automatically in New Evaluation → Variations (Advanced mode).
 - Need an LLM inside your operator? `import { getProviderAdapter } from '@promptengine/core'` and call the service model from `config.serviceModel` — report the spend in `cost` so budget enforcement stays accurate.
 - Throwing from `apply()` is safe: the engine falls back to carrying the parent forward with an `ERROR` changelog entry.
@@ -67,8 +84,12 @@ Plugins are authored in plain JavaScript (ESM). TypeScript authors precompile �
 
 ## Failure behavior
 
-- A module that throws at import time, fails validation, or collides with an existing operator/provider name is reported (manifest `error` in Settings; stderr in the CLI) and contributes nothing — the host keeps running.
-- Duplicate names lose: the first registration wins, later ones error.
+- A module that throws at import time, **hangs at import for more than 10 seconds**, fails validation, or collides with an existing operator/provider name is reported (manifest `error` in Settings; stderr in the CLI) and contributes nothing — the host keeps running.
+- "Contributes nothing" is enforced by rollback: if a plugin's *second* operator fails to register, its first one is unregistered too. A plugin is all-or-nothing.
+- Duplicate names lose: the first registration wins, later ones error. Two plugin *files* declaring the same plugin `name` is also an error — the Settings enable/disable toggle is keyed by name, so duplicates would toggle together.
+- A misbehaving operator cannot take the run down: bad results, thrown errors and timeouts all degrade to carrying the parent prompt forward with an `ERROR` changelog entry.
+
+**Known limitation:** the `disabled` list is keyed by plugin name, but a plugin's name is only known after its module is imported — so a disabled plugin's top-level code still executes. Keep import-time side effects out of plugin modules.
 
 ## Trust model
 

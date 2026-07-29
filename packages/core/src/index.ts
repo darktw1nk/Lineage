@@ -38,6 +38,10 @@ export { mulberry32, rngFor } from './engine/rng.js';
 export { isEvaluationActive } from './engine/evaluator_v2.js';
 export { scoreJsonSchema, scoreToolCall } from './engine/structured.js';
 export { estimateRunCost, COST_LABELS } from './engine/estimate.js';
+// Plugin operators that make paid calls need this to report spend incurred
+// before a throw — see docs/plugins.md.
+export { withPartialCost, partialCostOf, ZERO_OPERATOR_COST } from './engine/operator-cost.js';
+export type { OperatorCost } from './engine/operator-cost.js';
 export type { CostEstimate } from './engine/estimate.js';
 export { selectChampion } from './engine/champion.js';
 export { runPairwisePlayoff } from './engine/pairwise.js';
