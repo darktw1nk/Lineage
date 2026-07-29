@@ -187,15 +187,28 @@ async function createEvaluation(config: EvaluationConfig): Promise<EvaluationRun
     INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version)
     VALUES (?, ?, ?, ?, ?)
   `);
-  
-  runInsert.run(
-    run.id,
-    run.configId,
-    run.startedAt,
-    JSON.stringify(run),
-    run.version
-  );
-  
+
+  try {
+    runInsert.run(
+      run.id,
+      run.configId,
+      run.startedAt,
+      JSON.stringify(run),
+      run.version
+    );
+  } catch (error) {
+    // Roll back the config row by hand. These two inserts are separated by an
+    // async estimate call so they cannot share a sql.js transaction, and
+    // without this a failed run insert left a config row that listEvaluations
+    // never returns and no handler can delete — one orphan per failed attempt.
+    try {
+      db.prepare('DELETE FROM evaluation_configs WHERE id = ?').run(config.id);
+    } catch (cleanupError) {
+      console.error('[CreateEval] Could not remove the orphaned config row:', cleanupError);
+    }
+    throw error;
+  }
+
   return run;
 }
 
@@ -555,6 +568,12 @@ async function setSettings(settings: AppSettings): Promise<void> {
 }
 
 async function saveApiKey(provider: string, key: string): Promise<void> {
+  // The store key is built by interpolation, so an arbitrary provider string
+  // wrote junk entries like `apiKey.../../etc` and `apiKey.__proto__` into the
+  // store the CLI also reads. Providers are a known, small set.
+  if (typeof provider !== 'string' || !/^[a-z0-9][a-z0-9_-]*$/i.test(provider)) {
+    throw new Error(`Invalid provider name: ${JSON.stringify(provider)}`);
+  }
   try {
     console.log(`[Handlers] Saving API key for ${provider} as: apiKey.${provider}, value: ${key ? '***' + key.slice(-4) : 'EMPTY'}`);
     if (key && key.trim()) {
@@ -655,6 +674,19 @@ async function getModelCost(modelRef: ModelRef): Promise<ModelCostEntry | null> 
 }
 
 async function setModelCost(entry: ModelCostEntry): Promise<void> {
+  // Validate before writing. The handler accepted anything: a string price was
+  // stored verbatim into a REAL NOT NULL column and read back as a string,
+  // Infinity round-tripped as null, and a NEGATIVE price inverts fitness and
+  // disarms the budget cap. The CLI and the estimator read this same table.
+  if (!entry || typeof entry.provider !== 'string' || !entry.provider || typeof entry.model !== 'string' || !entry.model) {
+    throw new Error('Model cost entry needs a non-empty provider and model');
+  }
+  for (const field of ['promptUSDper1k', 'completionUSDper1k'] as const) {
+    const value = entry[field];
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new Error(`Model cost "${field}" must be a finite number >= 0 (got ${JSON.stringify(value)})`);
+    }
+  }
   const db = getDatabase();
   db.prepare(`
     INSERT OR REPLACE INTO model_costs (provider, model, prompt_usd_per_1k, completion_usd_per_1k)

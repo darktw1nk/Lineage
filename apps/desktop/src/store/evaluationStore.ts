@@ -292,6 +292,19 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
           // Persisted on run_json; no live UI yet
           break;
           
+        // Emitted by the engine and previously logged as "unknown". Neither
+        // carries state the store needs — population_ready is a progress
+        // signal, and errors are surfaced as toasts in App.tsx — but treating
+        // real events as unknown buries an actual unknown in the noise.
+        case 'population_ready':
+          break;
+
+        case 'error':
+          // App.tsx only toasts errors for the SELECTED evaluation, so a
+          // failure on any other running run was invisible.
+          console.error(`[Store] Run ${evalId.slice(0, 8)} reported an error:`, data.message);
+          break;
+
         default:
           console.warn(`[Store] Unknown IPC event type: ${data.type}`);
       }
@@ -309,17 +322,22 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
   unsubscribe: (evalId) => {
     const state = get();
     const unsubscribe = state.subscriptions.get(evalId);
-    
     if (unsubscribe) {
       console.log(`[Store] Unsubscribing from ${evalId.slice(0, 8)}`);
       unsubscribe();
-      
-      set((state) => {
-        const newSubscriptions = new Map(state.subscriptions);
-        newSubscriptions.delete(evalId);
-        return { subscriptions: newSubscriptions };
-      });
     }
+    // Drop the cached graph too. Keeping it meant a deleted run's full node
+    // set stayed resident for the whole session, and a late event could still
+    // resurrect it in the UI.
+    set((state) => {
+      const newSubscriptions = new Map(state.subscriptions);
+      newSubscriptions.delete(evalId);
+      const newEvaluations = new Map(state.evaluations);
+      newEvaluations.delete(evalId);
+      const newLoading = new Set(state.loading);
+      newLoading.delete(evalId);
+      return { subscriptions: newSubscriptions, evaluations: newEvaluations, loading: newLoading };
+    });
   },
   
   cleanup: () => {

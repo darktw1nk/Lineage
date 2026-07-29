@@ -155,6 +155,11 @@ export function LeftSidebar({
       return await window.electronAPI.eval.delete(runId);
     },
     onSuccess: (_, deletedId) => {
+      // Tear down the store's IPC subscription and drop the cached graph.
+      // Nothing ever called unsubscribe, so a deleted run kept its per-run IPC
+      // channel open and its full node graph in memory for the rest of the
+      // session — and late events for it still mutated the store.
+      useEvaluationStore.getState().unsubscribe(deletedId);
       // Clear selection if deleted evaluation was selected
       if (selectedEvaluationId === deletedId) {
         onSelectEvaluation(null as any);
@@ -162,7 +167,9 @@ export function LeftSidebar({
       queryClient.invalidateQueries({ queryKey: ['evaluations'] });
     },
     onError: (error: any) => {
-      alert(`Delete failed: ${error.message}`);
+      // A non-Error rejection (several handlers reject with a raw sql.js
+      // string) made this read "Delete failed: undefined".
+      alert(`Delete failed: ${error?.message ?? String(error)}`);
     },
   });
 
@@ -207,16 +214,33 @@ export function LeftSidebar({
         if (!file) return;
 
         const text = await file.text();
-        const config = JSON.parse(text);
+        const parsed = JSON.parse(text);
+
+        // A full exported RUN ({ run, config, rawBlobs }) is what the "Export
+        // Results" button writes, and this importer only ever accepted a bare
+        // config — so an exported run could never be read back in. eval:import
+        // existed and was wired through preload, with no caller anywhere.
+        if (parsed?.run && parsed?.config) {
+          const filePath = (file as File & { path?: string }).path;
+          if (!filePath) {
+            toast.error('Could not read that file’s path — try File › Import again');
+            return;
+          }
+          const imported = await window.electronAPI.eval.import(filePath);
+          queryClient.invalidateQueries({ queryKey: ['evaluations'] });
+          onSelectEvaluation(imported.id as UUID);
+          toast.success('Run imported');
+          return;
+        }
 
         // Validate it's a config (basic check)
-        if (!config.selection || !config.operators || !config.population) {
-          toast.error('Invalid config file');
+        if (!parsed.selection || !parsed.operators || !parsed.population) {
+          toast.error('Not a PromptEngine config or exported run');
           return;
         }
 
         // Open modal with imported config
-        onImportConfig(config);
+        onImportConfig(parsed);
         toast.success('Config imported successfully');
       } catch (error) {
         toast.error('Failed to import config');

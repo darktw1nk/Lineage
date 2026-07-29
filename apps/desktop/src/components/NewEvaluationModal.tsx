@@ -680,16 +680,17 @@ function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
               label="Initial Population Size (Generation 0)"
               tooltip="Number of candidates in the first generation. Use a larger value for broader initial exploration or a smaller value for faster startup."
             />
+            {/* min matches validate(): a population of 1 cannot evolve */}
             <Input
               id="initialSize"
               type="number"
-              min="1"
+              min="2"
               value={config.population?.initialSize || 10}
               onChange={(e) => {
                 const value = e.target.value;
                 if (value === '') return;
                 const size = parseInt(value);
-                if (!isNaN(size) && size > 0) {
+                if (!isNaN(size) && size >= 2) {
                   setConfig({
                     ...config,
                     population: {
