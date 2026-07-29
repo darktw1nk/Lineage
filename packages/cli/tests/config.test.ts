@@ -51,6 +51,24 @@ describe('CLI Config - validateCliConfig', () => {
     expect(() => validateCliConfig({ seedPrompt: 'x', testSet: [] })).toThrow('testSet');
   });
 
+  it('rejects unknown test modes and missing per-mode fields', () => {
+    expect(() => validateCliConfig({ seedPrompt: 'x', testSet: [{ prompt: 'p', mode: 'json-schema' as any }] }))
+      .toThrow('unknown mode');
+    expect(() => validateCliConfig({ seedPrompt: 'x', testSet: [{ prompt: 'p', mode: 'json_schema' }] }))
+      .toThrow('no "schema"');
+    expect(() => validateCliConfig({ seedPrompt: 'x', testSet: [{ prompt: 'p', mode: 'tool_call', tools: [{ name: 'f' }] }] }))
+      .toThrow('expectedTool');
+    expect(() => validateCliConfig({ seedPrompt: 'x', testSet: [{ prompt: 'p', mode: 'tool_call', expectedTool: { name: 'f' } }] }))
+      .toThrow('"tools" array');
+  });
+
+  it('warns on unknown top-level keys (typo protection) without throwing', () => {
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(() => validateCliConfig({ seedPrompt: 'x', testSet: [{ prompt: 'p' }], callTimeoutMS: 5 } as any)).not.toThrow();
+    expect(spy.mock.calls.some(c => String(c[0]).includes('callTimeoutMS'))).toBe(true);
+    spy.mockRestore();
+  });
+
   it('rejects test without prompt', () => {
     expect(() => validateCliConfig({ seedPrompt: 'x', testSet: [{}] } as any)).toThrow('testSet[0]');
   });

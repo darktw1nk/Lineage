@@ -86,12 +86,12 @@ export class OpenAIAdapter extends BaseProviderAdapter {
         body.max_tokens = opts.maxTokens ?? 4096;
       }
       
-      console.log(`[OpenAI] REQUEST:`, JSON.stringify(body, null, 2));
-      
       if (opts.tools?.length) {
         body.tools = opts.tools.map(t => ({ type: 'function', function: t }));
         body.tool_choice = 'auto';
       }
+
+      console.log(`[OpenAI] REQUEST:`, JSON.stringify(body, null, 2));
 
       let response;
       try {

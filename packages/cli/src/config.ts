@@ -150,9 +150,24 @@ export function validateCliConfig(config: CliConfig): void {
   if (!Array.isArray(config.testSet) || config.testSet.length === 0) {
     throw new Error('Config must have a non-empty "testSet" array');
   }
+  const VALID_MODES = ['llm_grade', 'exact_match', 'json_schema', 'tool_call'];
   for (const [i, test] of config.testSet.entries()) {
     if (!test.prompt || typeof test.prompt !== 'string') {
       throw new Error(`testSet[${i}] must have a "prompt" string`);
+    }
+    if (test.mode !== undefined && !VALID_MODES.includes(test.mode)) {
+      throw new Error(`testSet[${i}] has unknown mode "${test.mode}" (valid: ${VALID_MODES.join(', ')})`);
+    }
+    if (test.mode === 'json_schema' && !test.schema) {
+      throw new Error(`testSet[${i}] uses mode "json_schema" but has no "schema"`);
+    }
+    if (test.mode === 'tool_call') {
+      if (!Array.isArray(test.tools) || test.tools.length === 0) {
+        throw new Error(`testSet[${i}] uses mode "tool_call" but has no "tools" array`);
+      }
+      if (!test.expectedTool?.name) {
+        throw new Error(`testSet[${i}] uses mode "tool_call" but "expectedTool.name" is missing`);
+      }
     }
   }
   if (config.models) {
@@ -162,6 +177,24 @@ export function validateCliConfig(config: CliConfig): void {
   }
   if (config.serviceModel) {
     parseModelRef(config.serviceModel);
+  }
+
+  // Typo protection: unknown top-level keys silently run with defaults on a
+  // tool that spends real money — warn loudly instead.
+  const KNOWN_KEYS = new Set([
+    'name', 'seedPrompt', 'initialPrompts', 'testSet', 'models', 'serviceModel',
+    'plugins', 'promptMode', 'samplesPerTest', 'holdoutShare', 'holdoutSeed',
+    'pairwise', 'seed', 'callTimeoutMs', 'populationSize', 'generationSize',
+    'maxGenerations', 'budget', 'targetFitness', 'timeLimitMs',
+    'parallelLimit', 'serviceModelMaxTokens', 'retries', 'fitnessWeights',
+    'operators', 'selection', 'systemPrompts', 'providerOptions',
+    'costNorm', 'latencyNorm', 'guardrails',
+    'openaiKey', 'anthropicKey', 'geminiKey', 'groqKey', 'openrouterKey',
+  ]);
+  for (const key of Object.keys(config)) {
+    if (!KNOWN_KEYS.has(key)) {
+      process.stderr.write(`warning: unknown config key "${key}" — ignored (typo?)\n`);
+    }
   }
 }
 

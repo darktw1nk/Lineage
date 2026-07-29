@@ -111,6 +111,8 @@ export async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // NOTE: a caller-supplied init.signal would be overridden here. No current
+    // caller passes one; if that changes, combine with AbortSignal.any().
     const res = await fetch(url, { ...init, signal: controller.signal });
     // Read the FULL body under the timer: a slow-drip body (bytes trickling in
     // below undici's idle threshold) would otherwise hang past the timeout.

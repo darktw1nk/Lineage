@@ -160,8 +160,11 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       const evaluation = state.evaluations.get(evalId);
       if (!evaluation) return state;
 
+      // Idempotent per generation: a resumed run can re-run a generation's
+      // playoff — replace that generation's entry instead of duplicating it
+      const playoffs = [...(evaluation.playoffs ?? []).filter(p => p.generation !== playoff.generation), playoff];
       const newEvaluations = new Map(state.evaluations);
-      newEvaluations.set(evalId, { ...evaluation, playoffs: [...(evaluation.playoffs ?? []), playoff] });
+      newEvaluations.set(evalId, { ...evaluation, playoffs });
 
       return { evaluations: newEvaluations };
     });

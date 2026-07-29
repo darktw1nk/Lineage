@@ -94,7 +94,7 @@ export function LeftSidebar({
   }, [isResizing, width]);
   
   // Get evaluations from database (for list of all evaluations)
-  const { data: dbEvaluations = [] } = useQuery<EvaluationRun[]>({
+  const { data: dbEvaluations = [] } = useQuery<Array<EvaluationRun & { configName?: string; interrupted?: boolean }>>({
     queryKey: ['evaluations'],
     queryFn: async () => {
       return await window.electronAPI.eval.list();
@@ -112,7 +112,7 @@ export function LeftSidebar({
   const evaluations = dbEvaluations.map(dbEval => {
     const liveEval = storeEvaluations.get(dbEval.id);
     return liveEval
-      ? ({ ...liveEval, interrupted: (dbEval as any).interrupted } as EvaluationRun)
+      ? { ...liveEval, interrupted: dbEval.interrupted }
       : dbEval;
   });
   
@@ -366,7 +366,7 @@ export function LeftSidebar({
                   >
                     <Trash2 className="h-3 w-3" />
                   </span>
-                  {(evaluation as any).interrupted ? (
+                  {evaluation.interrupted ? (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
                       interrupted
                     </span>
@@ -381,7 +381,7 @@ export function LeftSidebar({
                 {bestScore !== null && (
                   <span>Best: {bestScore.toFixed(2)}</span>
                 )}
-                {(evaluation as any).interrupted && !resumeMutation.isPending && (
+                {evaluation.interrupted && !resumeMutation.isPending && (
                   <span
                     className="inline-flex items-center gap-1 text-amber-600 hover:text-amber-500 cursor-pointer"
                     role="button"

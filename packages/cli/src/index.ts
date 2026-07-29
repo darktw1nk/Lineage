@@ -189,12 +189,13 @@ function parseArgs(argv: string[]): {
         result.estimate = true;
         break;
       case '--seed': {
-        const parsed = parseInt(args[++i], 10);
-        if (Number.isNaN(parsed)) {
+        const raw = args[++i];
+        // Full-string check: parseInt('12abc') === 12 would silently accept junk
+        if (!raw || !/^-?\d+$/.test(raw)) {
           console.error('--seed requires an integer');
           process.exit(1);
         }
-        result.seed = parsed;
+        result.seed = parseInt(raw, 10);
         break;
       }
       case '--sync-models':
@@ -401,7 +402,7 @@ async function emitOutputs(
     }
     try {
       fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-      fs.writeFileSync(reportPath, generateReport(result, evalConfig, cliConfig ?? ({} as CliConfig)));
+      fs.writeFileSync(reportPath, generateReport(result, evalConfig, cliConfig));
       process.stderr.write(`\nReport written to ${reportPath}\n`);
     } catch (error: any) {
       // The report is auxiliary — a failed write must not change the run's exit code
@@ -466,7 +467,13 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
     console.error(`Run not found: ${runId}`);
     process.exit(1);
   }
-  const run = JSON.parse(row.run_json);
+  let run: any;
+  try {
+    run = JSON.parse(row.run_json);
+  } catch {
+    console.error(`Run ${runId} checkpoint is corrupt (unparseable run_json) — it cannot be resumed.`);
+    process.exit(1);
+  }
   if (run.status === 'finished') {
     console.error(`Run ${runId} is already finished — nothing to resume. Reseed a new run from its best prompt instead.`);
     process.exit(1);
@@ -476,7 +483,13 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
     console.error(`Config not found for run: ${row.config_id}`);
     process.exit(1);
   }
-  const evalConfig: EvaluationConfig = JSON.parse(cfgRow.config_json);
+  let evalConfig: EvaluationConfig;
+  try {
+    evalConfig = JSON.parse(cfgRow.config_json);
+  } catch {
+    console.error(`Config for run ${runId} is corrupt (unparseable config_json).`);
+    process.exit(1);
+  }
 
   // Same key preflight as a fresh run
   const requiredProviders = new Set<Provider>();
@@ -536,6 +549,9 @@ async function main(): Promise<void> {
     if (!args.config) {
       console.error('--estimate requires --config');
       process.exit(1);
+    }
+    if (args.output || args.report || args.pluginDirs.length > 0) {
+      process.stderr.write('note: --estimate is a dry run — --output/--report/--plugins are ignored\n');
     }
     await handleEstimate(args.config, args.db, args.seed);
     return;

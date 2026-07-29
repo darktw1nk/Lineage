@@ -213,6 +213,12 @@ describe('evaluationStore subscriptions', () => {
       { generation: 0, ranking: ['n2', 'n1'] },
       { generation: 1, ranking: ['n1', 'n2'] },
     ]);
+    // Idempotent per generation: a re-run playoff replaces, never duplicates
+    capturedCallbacks.get('run-1')!({}, { type: 'playoff_result', generation: 1, ranking: ['n2', 'n1'], matches: 4 });
+    expect((store().evaluations.get('run-1') as any).playoffs).toEqual([
+      { generation: 0, ranking: ['n2', 'n1'] },
+      { generation: 1, ranking: ['n2', 'n1'] },
+    ]);
   });
 
   it('cleanup unsubscribes everything', () => {

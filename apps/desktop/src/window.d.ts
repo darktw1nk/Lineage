@@ -26,7 +26,7 @@ export interface ElectronAPI {
     pause: (runId: string) => Promise<void>;
     resume: (runId: string) => Promise<void>;
     stop: (runId: string) => Promise<void>;
-    list: () => Promise<EvaluationRun[]>;
+    list: () => Promise<Array<EvaluationRun & { configName?: string; interrupted?: boolean }>>;
     export: (runId: string) => Promise<string>;
     import: (filePath: string) => Promise<EvaluationRun>;
     delete: (runId: string) => Promise<void>;

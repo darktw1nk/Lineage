@@ -1,6 +1,22 @@
 import { BaseProviderAdapter } from './base.js';
 import type { Provider, ToolDef } from '../types.js';
 import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
+
+// Gemini's proto-backed functionDeclarations schema rejects some common JSON
+// Schema keywords ($schema, additionalProperties) with a hard 400. Strip them
+// recursively so OpenAI-style tool definitions work as-is.
+function stripUnsupportedSchemaKeys(schema: any): any {
+  if (Array.isArray(schema)) return schema.map(stripUnsupportedSchemaKeys);
+  if (schema && typeof schema === 'object') {
+    const out: any = {};
+    for (const [k, v] of Object.entries(schema)) {
+      if (k === '$schema' || k === 'additionalProperties') continue;
+      out[k] = stripUnsupportedSchemaKeys(v);
+    }
+    return out;
+  }
+  return schema;
+}
 import { store } from '../store.js';
 
 export class GeminiAdapter extends BaseProviderAdapter {
@@ -41,7 +57,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
           ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
         },
         ...(opts.tools?.length
-          ? { tools: [{ functionDeclarations: opts.tools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })) }] }
+          ? { tools: [{ functionDeclarations: opts.tools.map(t => ({ name: t.name, description: t.description, parameters: stripUnsupportedSchemaKeys(t.parameters) })) }] }
           : {}),
       };
       if (opts.system) {
@@ -86,7 +102,10 @@ export class GeminiAdapter extends BaseProviderAdapter {
         ? fnParts.map((p: any) => ({ name: p.functionCall.name, arguments: p.functionCall.args ?? {} }))
         : undefined;
       const promptTokens = this.estimateTokens(opts.prompt).prompt;
-      const completionTokens = this.estimateTokens(output).prompt;
+      // Function calls ARE completion output — a functionCall-only response
+      // would otherwise count ~0 completion tokens and undercount cost
+      const completionText = output + fnParts.map((p: any) => JSON.stringify(p.functionCall)).join('');
+      const completionTokens = this.estimateTokens(completionText).prompt;
 
       const result = {
         output,

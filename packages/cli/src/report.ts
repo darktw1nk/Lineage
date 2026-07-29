@@ -101,7 +101,9 @@ function formatDate(timestamp: number): string {
 export function generateReport(
   result: EvolutionResult,
   config: EvaluationConfig,
-  cliConfig: CliConfig,
+  // Optional: --resume without --config has no CLI config file. Only touch
+  // fields through optional chaining in here.
+  cliConfig?: Partial<CliConfig>,
 ): string {
   const lines: string[] = [];
 
@@ -135,7 +137,7 @@ export function generateReport(
     lines.push(`| Temperature range | ${tempConfig.min} – ${tempConfig.max} |`);
   }
 
-  lines.push(`| Custom grading prompt | ${cliConfig.systemPrompts?.llmGradingPrompt ? 'Yes' : 'No'} |`);
+  lines.push(`| Custom grading prompt | ${cliConfig?.systemPrompts?.llmGradingPrompt ? 'Yes' : 'No'} |`);
   lines.push(`| Duration | ${formatDuration(result.durationMs)} |`);
   lines.push(`| Cost | $${result.totals.usd.toFixed(4)} |`);
   lines.push(`| API calls | ${result.totals.calls} |`);
@@ -159,6 +161,12 @@ export function generateReport(
       const est = estByLabel.get(label);
       lines.push(`| ${label} | ${est ? est.calls : '—'} | ${act ? act.calls : '—'} | ${est ? `$${est.low.toFixed(4)}–$${est.high.toFixed(4)}` : '—'} | ${act ? `$${act.usd.toFixed(4)}` : '—'} |`);
     }
+    // Totals row: doubles as a visible sums-equal-totals check
+    const actCalls = purposes.reduce((a, k) => a + result.costBreakdown![k].calls, 0);
+    const actUsd = purposes.reduce((a, k) => a + result.costBreakdown![k].usd, 0);
+    const estCalls = result.estimate ? result.estimate.calls : undefined;
+    lines.push(`| **Total** | ${estCalls ?? '—'} | **${actCalls}** | ${result.estimate ? `$${result.estimate.low.toFixed(4)}–$${result.estimate.high.toFixed(4)}` : '—'} | **$${actUsd.toFixed(4)}** |`);
+
     const models = Object.keys(result.costBreakdown).filter(k => k.startsWith('model:'));
     if (models.length > 0) {
       lines.push('');

@@ -127,6 +127,8 @@ export async function estimateRunCost(
   if (totalShare > 0) {
     const children = N - E;
     for (const [name, share] of shares) {
+      // Math.round here vs the engine's largest-remainder distribution can
+      // drift ±1 child per operator per transition — fine for a band estimate.
       operatorCalls += Math.round((share / totalShare) * children) * (CALLS_PER_CHILD[name] ?? 0);
     }
     operatorCalls *= transitions;

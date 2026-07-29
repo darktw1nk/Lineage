@@ -1006,8 +1006,9 @@ function ModelsTab({ config, setConfig }: TabProps) {
 // Test Set Tab
 // Validated JSON editor: invalid text shows an error and never overwrites the
 // last valid value, so the config always stays well-formed.
-function JsonField({ label, value, onValid, placeholder }: {
+function JsonField({ label, value, onValid, placeholder, validate }: {
   label: string; value: unknown; onValid: (parsed: any) => void; placeholder: string;
+  validate?: (parsed: any) => string | null; // shape check beyond JSON syntax
 }) {
   const [text, setText] = useState(() => (value === undefined ? '' : JSON.stringify(value, null, 2)));
   const [error, setError] = useState<string | null>(null);
@@ -1021,25 +1022,37 @@ function JsonField({ label, value, onValid, placeholder }: {
         onChange={(e) => {
           setText(e.target.value);
           if (e.target.value.trim() === '') { setError(null); onValid(undefined); return; }
-          try { onValid(JSON.parse(e.target.value)); setError(null); }
-          catch (err: any) { setError(err.message); }
+          try {
+            const parsed = JSON.parse(e.target.value);
+            const shapeError = validate?.(parsed) ?? null;
+            if (shapeError) { setError(shapeError); return; }
+            onValid(parsed);
+            setError(null);
+          } catch (err: any) {
+            setError(`Invalid JSON: ${err.message}`);
+          }
         }}
       />
-      {error && <div className="text-xs text-red-500">Invalid JSON: {error}</div>}
+      {error && <div className="text-xs text-red-500">{error}</div>}
     </div>
   );
 }
 
 // Debounced live cost estimate for the modal footer
 function useCostEstimate(config: Partial<EvaluationConfig>) {
-  const [estimate, setEstimate] = useState<any>(null);
+  const [estimate, setEstimate] = useState<import('@promptengine/core').CostEstimate | null>(null);
   useEffect(() => {
     if (!config.enabledModels?.length || !config.testSet?.length) { setEstimate(null); return; }
+    let cancelled = false; // a slow older IPC response must not overwrite a newer one
     const t = setTimeout(async () => {
-      try { setEstimate(await window.electronAPI.eval.estimate(config as EvaluationConfig)); }
-      catch { setEstimate(null); }
+      try {
+        const est = await window.electronAPI.eval.estimate(config as EvaluationConfig);
+        if (!cancelled) setEstimate(est);
+      } catch {
+        if (!cancelled) setEstimate(null);
+      }
     }, 400);
-    return () => clearTimeout(t);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [config]);
   return estimate;
 }
@@ -1158,12 +1171,26 @@ function TestSetTab({ config, setConfig, isSimpleMode }: TabProps) {
                   value={test.tools}
                   onValid={(v) => updateTest(test.id, { tools: v })}
                   placeholder='[{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}]'
+                  validate={(v) => {
+                    if (!Array.isArray(v)) return 'Tools must be a JSON array';
+                    if (v.some((t: any) => !t?.name || typeof t.name !== 'string')) return 'Every tool needs a "name" string';
+                    return null;
+                  }}
                 />
                 <JsonField
                   label="Expected Tool (JSON)"
                   value={test.expectedTool}
                   onValid={(v) => updateTest(test.id, { expectedTool: v })}
                   placeholder='{"name":"get_weather","args":{"city":"Paris"},"argsMode":"subset"}'
+                  validate={(v) => {
+                    if (typeof v !== 'object' || Array.isArray(v) || !v?.name || typeof v.name !== 'string') {
+                      return 'Expected tool needs a "name" string';
+                    }
+                    if (v.argsMode !== undefined && v.argsMode !== 'subset' && v.argsMode !== 'exact') {
+                      return 'argsMode must be "subset" or "exact"';
+                    }
+                    return null;
+                  }}
                 />
               </>
             )}
@@ -2323,7 +2350,9 @@ function AdvancedTab({ config, setConfig }: TabProps) {
             value={(config.callTimeoutMs ?? 120000) / 1000}
             onChange={(e) => {
               const s = parseInt(e.target.value, 10);
-              setConfig({ ...config, callTimeoutMs: Number.isNaN(s) ? undefined : s * 1000 });
+              // Clamp to >=1s: core treats <=0 as "use default", which would
+              // silently diverge from what the input displays
+              setConfig({ ...config, callTimeoutMs: Number.isNaN(s) || s < 1 ? undefined : s * 1000 });
             }}
           />
         </div>
@@ -2354,7 +2383,12 @@ function AdvancedTab({ config, setConfig }: TabProps) {
               min="2"
               max="8"
               value={config.pairwise?.contenders ?? 4}
-              onChange={(e) => setConfig({ ...config, pairwise: { enabled: true, contenders: parseInt(e.target.value) || 4 } })}
+              onChange={(e) => {
+                // Clamp to the engine's 2..8 range so the input never shows a
+                // value the run would silently correct
+                const raw = parseInt(e.target.value, 10) || 4;
+                setConfig({ ...config, pairwise: { enabled: true, contenders: Math.min(8, Math.max(2, raw)) } });
+              }}
             />
           </div>
         )}

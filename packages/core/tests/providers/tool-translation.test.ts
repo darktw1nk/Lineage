@@ -98,6 +98,29 @@ describe('gemini', () => {
     expect(r.output).toBe('hello');
     expect(r.toolCalls).toBeUndefined();
   });
+
+  it('functionCall-only response (no text parts) yields empty output + toolCalls + nonzero completion tokens', async () => {
+    stub({ candidates: [{ content: { parts: [
+      { functionCall: { name: 'get_weather', args: { city: 'Paris' } } },
+    ] } }], usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 } });
+    const r = await new GeminiAdapter().call(CALL);
+    expect(r.output).toBe('');
+    expect(r.toolCalls).toEqual([{ name: 'get_weather', arguments: { city: 'Paris' } }]);
+    expect(r.completionTokens).toBeGreaterThan(0); // calls count as completion output
+  });
+
+  it('strips $schema and additionalProperties from tool parameters (Gemini rejects them)', async () => {
+    stub({ candidates: [{ content: { parts: [{ text: 'ok' }] } }], usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 } });
+    await new GeminiAdapter().call({ ...CALL, tools: [{
+      name: 'f',
+      parameters: { $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false,
+        properties: { a: { type: 'string' } } } as object,
+    }] });
+    const params = lastBody.tools[0].functionDeclarations[0].parameters;
+    expect(params.$schema).toBeUndefined();
+    expect(params.additionalProperties).toBeUndefined();
+    expect(params.properties.a).toEqual({ type: 'string' });
+  });
 });
 
 describe('anthropic', () => {
@@ -110,5 +133,18 @@ describe('anthropic', () => {
     expect(lastBody.tools).toEqual([{ name: 'get_weather', description: 'Weather lookup', input_schema: TOOLS[0].parameters }]);
     expect(r.toolCalls).toEqual([{ name: 'get_weather', arguments: { city: 'Paris' } }]);
     expect(r.output).toBe('On it.');
+  });
+
+  it('tools without parameters get the { type: "object" } input_schema fallback', async () => {
+    stub({ content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
+    await new AnthropicAdapter().call({ ...CALL, tools: [{ name: 'noop' }] });
+    expect(lastBody.tools).toEqual([{ name: 'noop', description: undefined, input_schema: { type: 'object' } }]);
+  });
+
+  it('type-less text blocks still contribute to output (legacy shape tolerance)', async () => {
+    stub({ content: [{ text: 'legacy block' }], usage: { input_tokens: 1, output_tokens: 1 } });
+    const r = await new AnthropicAdapter().call({ ...CALL, tools: undefined });
+    expect(r.output).toBe('legacy block');
+    expect(r.toolCalls).toBeUndefined();
   });
 });

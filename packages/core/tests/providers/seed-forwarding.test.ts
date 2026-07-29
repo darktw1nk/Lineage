@@ -15,6 +15,7 @@ vi.mock('../../src/providers/costs.js', () => ({
 
 import { GeminiAdapter } from '../../src/providers/gemini.js';
 import { OpenRouterAdapter } from '../../src/providers/openrouter.js';
+import { GroqAdapter } from '../../src/providers/groq.js';
 
 const RESPONSES: Record<string, any> = {
   openai: { choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
@@ -50,6 +51,12 @@ describe('provider seed forwarding', () => {
   it('openrouter: seed in body', async () => {
     stubFetch('openai');
     await new OpenRouterAdapter().call({ ...CALL, seed: 12345 });
+    expect(lastBody.seed).toBe(12345);
+  });
+
+  it('groq: seed in body', async () => {
+    stubFetch('openai');
+    await new GroqAdapter().call({ ...CALL, seed: 12345 });
     expect(lastBody.seed).toBe(12345);
   });
 });

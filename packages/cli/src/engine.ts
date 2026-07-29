@@ -385,8 +385,9 @@ export async function runEvolution(
     ).run(run.id, run.configId, run.startedAt, JSON.stringify(run), run.version);
   } else {
     const finishedCount = run.generations.flat().filter((n) => n.status === 'finished').length;
+    const from = run.generations.length > 0 ? `generation ${run.generations.length - 1}` : 'the start';
     process.stderr.write(
-      `Resuming run ${run.id.slice(0, 8)} from generation ${run.generations.length - 1} (${finishedCount} finished nodes, $${run.totals.usd.toFixed(4)} already spent)\n\n`,
+      `Resuming run ${run.id.slice(0, 8)} from ${from} (${finishedCount} finished nodes, $${run.totals.usd.toFixed(4)} already spent)\n\n`,
     );
     // Completed playoffs are checkpointed on the run and never re-judged
     // (dedupe guard) — seed the collector so results.json keeps them.
