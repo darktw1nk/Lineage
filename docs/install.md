@@ -56,12 +56,28 @@ Config file format: see [cli.md](cli.md) for the full field-by-field reference.
 npm run electron:dev     # dev mode: Vite HMR + Electron, port 5173
 ```
 
-Build installers (Windows: NSIS setup + portable exe, output in `apps/desktop/release/`):
+Build installers (output in `apps/desktop/release/`; electron-builder targets the OS you build on):
 
 ```bash
 npm run build            # vite build + electron-builder
 npm run build:strict     # type-check everything first, then build
 ```
+
+### macOS / Linux
+
+Everything above is cross-platform: the dependency tree is pure JavaScript (sql.js is WebAssembly — no native modules, no node-gyp), Electron's npm package downloads the right binaries for your OS, and the scripts avoid shell-specific syntax. On macOS or Linux the same three commands apply:
+
+```bash
+npm install              # pulls the macOS/Linux Electron binaries automatically
+npm run electron:dev     # run the UI from source
+npm run build            # build a local dmg/zip (macOS) or AppImage/deb (Linux)
+```
+
+Notes:
+
+- A **locally built** macOS app runs without Gatekeeper warnings (quarantine only applies to downloaded binaries). Distributing a dmg to others would need codesigning/notarization — irrelevant for build-it-yourself.
+- The app icon currently ships as `.ico` only; macOS/Linux builds fall back to the default Electron icon. Cosmetic.
+- The project is developed and CI-tested on Windows; macOS/Linux are expected-good but less traveled. If something breaks, please open an issue with the command output.
 
 ## Installable packages
 
