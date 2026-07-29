@@ -161,6 +161,21 @@ export function calculateFitness(
     effectiveWeights.stability = 0;
   }
 
+  // Every dimension the user weighted turned out to be unmeasurable, so
+  // normalizeWeights falls back to quality alone. Fitness has to be SOMETHING,
+  // so the fallback stands — but it must not be silent: with
+  // {quality: 0, safety: 1} and no guardrails, the report printed
+  // "quality=0, safety=1" directly above a score that was 100% quality.
+  const effectiveSum =
+    (effectiveWeights.quality ?? 0) + (effectiveWeights.safety ?? 0) + (effectiveWeights.cost ?? 0) +
+    (effectiveWeights.latency ?? 0) + (effectiveWeights.stability ?? 0);
+  if (effectiveSum === 0) {
+    warnOnce('all-disabled',
+      '[Fitness] Every weighted dimension is unmeasurable in this run, so fitness is scoring on QUALITY ALONE — ' +
+      `regardless of the weights you set (${JSON.stringify(weights)}). Fix the dimension you care about, or set a quality weight.`,
+    );
+  }
+
   // Normalize weights
   const normalizedWeights = normalizeWeights(effectiveWeights);
   
@@ -544,7 +559,16 @@ export async function evaluateTestResultLLM(
     
     // Parse JSON response
     const parsed = JSON.parse(jsonText);
-    const score = Math.max(0, Math.min(10, parsed.score || 0));
+    // A bare number is a valid JSON reply, and `parsed.score || 0` turned a
+    // judge answering `7` into a 0 — while a NON-JSON reply falls through to
+    // the 5.0 default below, so failing harder paid better. And a non-numeric
+    // score is the judge not answering, not the candidate scoring zero: fall
+    // through to the recovery path instead of asserting it was terrible.
+    const rawScore = typeof parsed === 'number' ? parsed : parsed?.score;
+    if (typeof rawScore !== 'number' || !Number.isFinite(rawScore)) {
+      throw new Error(`judge returned no numeric score (got ${JSON.stringify(parsed?.score ?? parsed)})`);
+    }
+    const score = Math.max(0, Math.min(10, rawScore));
 
     return {
       passed: score >= 7,

@@ -135,9 +135,25 @@ function satisfiedFraction(parsed: unknown, schema: any, errors: ReadonlyArray<a
     if (!faulty) ok++;
   }
 
+  // "Other" means errors NOT already reflected in `ok` above.
+  //
+  // A required key that is present but faulty is counted once by failing to
+  // increment `ok`. Counting its error here too penalised it a SECOND time, so
+  // omitting a required field beat attempting it with the wrong type: with
+  // required [name, age], `{"name":"Bob"}` scored 3 and
+  // `{"name":"Bob","age":"31"}` scored 2. That teaches a model to leave fields
+  // out, which is the opposite of what the schema is asking for.
   const explainedByMissingKey = (e: any) =>
     e.keyword === 'required' && required.includes(e.params?.missingProperty);
-  const otherErrors = errors.filter(e => !explainedByMissingKey(e)).length;
+  const explainedByFaultyRequiredKey = (e: any) =>
+    typeof e.instancePath === 'string' &&
+    required.some(key => {
+      const pointer = pointerFor(key);
+      return e.instancePath === pointer || e.instancePath.startsWith(`${pointer}/`);
+    });
+  const otherErrors = errors.filter(
+    e => !explainedByMissingKey(e) && !explainedByFaultyRequiredKey(e),
+  ).length;
 
   // A DIMINISHING penalty, never a saturating one.
   //

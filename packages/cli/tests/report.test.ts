@@ -149,3 +149,42 @@ describe('slugify', () => {
     expect(slugify('My Run')).toBe('my-run');
   });
 });
+
+describe('model-written text cannot inject markdown into the report', () => {
+  it('neutralises links and raw HTML in a candidate output', () => {
+    // escapeMarkdown escaped `|` and newlines but not `[` or `<`, unlike
+    // escapeMarkdownProse. Candidate output is rendered into `> Output:` lines,
+    // so a candidate could put a live external link and raw HTML into the
+    // artifact a human reads to decide whether the run worked.
+    const evil = 'PARIS [click here](http://evil.example) <img src=x onerror=alert(1)>';
+    const withEvil = makeResult({
+      generations: [{
+        generation: 0,
+        nodes: [node('seed', 'SEED PROMPT', [4, 4], 4), node('best', 'BEST PROMPT', [6, 6], 6)],
+      }],
+    } as any);
+    withEvil.generations[0].nodes[1].tests[0].outputText = evil;
+    const md = generateReport(withEvil, CONFIG);
+
+    // The bracket must be escaped, so the link syntax never forms.
+    expect(md).not.toContain('[click here](');
+    expect(md).toContain('\\[click here\\]');
+    expect(md).not.toContain('<img src=x');
+  });
+
+  it('escapes a changelog label, not just its text', () => {
+    // One of the two changelog render paths interpolated `change.label` raw.
+    const withLabel = makeResult();
+    withLabel.generations[0].nodes[1].changeLog = [
+      { label: 'X](http://evil.example) #Forged', text: 'ordinary text' } as any,
+    ];
+    const md = generateReport(withLabel, CONFIG);
+    // The changelog template wraps the label in `**[...]**`, so a label
+    // containing `]` closes the bracket the TEMPLATE opened and the `(url)`
+    // after it renders as a live link. The property is that no `](` in the
+    // document is unescaped — `\](` is inert, and asserting the raw substring
+    // is absent would be unsatisfiable because `\](` contains it.
+    expect(md).not.toMatch(/[^\\]\]\(/);
+    expect(md).toContain('X\\]');
+  });
+});

@@ -289,3 +289,34 @@ describe('scoreToolCall', () => {
     expect(r.detail).toMatch(/expectedTool/);
   });
 });
+
+describe('attempting a required field beats omitting it', () => {
+  const TYPED = {
+    type: 'object',
+    required: ['name', 'age'],
+    properties: { name: { type: 'string' }, age: { type: 'number' } },
+  };
+
+  it('a wrong-typed required field scores at least as well as a missing one', () => {
+    // The present-but-faulty key was penalised TWICE: once by not counting
+    // toward `ok`, and again through `otherErrors`. So omitting `age` scored 3
+    // while attempting it as "31" scored 2 — the model that tried was punished
+    // for trying, and evolution would learn to leave fields out.
+    const omitted = scoreJsonSchema('{"name":"Bob"}', TYPED);
+    const attempted = scoreJsonSchema('{"name":"Bob","age":"31"}', TYPED);
+    expect(attempted.score).toBeGreaterThanOrEqual(omitted.score);
+  });
+
+  it('still ranks a fully correct object above a partial one', () => {
+    const correct = scoreJsonSchema('{"name":"Bob","age":31}', TYPED);
+    const partial = scoreJsonSchema('{"name":"Bob"}', TYPED);
+    expect(correct.score).toBeGreaterThan(partial.score);
+  });
+
+  it('still penalises errors unrelated to the required keys', () => {
+    const strict = { ...TYPED, additionalProperties: false };
+    const clean = scoreJsonSchema('{"name":"Bob","age":31}', strict);
+    const noisy = scoreJsonSchema('{"name":"Bob","age":31,"junk":1,"junk2":2}', strict);
+    expect(noisy.score).toBeLessThan(clean.score);
+  });
+});

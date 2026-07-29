@@ -48,6 +48,23 @@ describe('a candidate cannot pick its own score', () => {
     expect(r.score).toBe(8);
   });
 
+  it('reads a judge that replies with a bare number', async () => {
+    // `parsed.score || 0` on a reply of `7` — valid JSON, but a number, not an
+    // object — made `parsed.score` undefined and scored the candidate 0.
+    // Failing harder paid better: a NON-JSON reply falls through to the 5.0
+    // default, so the judge answering "7" was worth less than answering "hi".
+    const r = await grade('7', 'PARIS');
+    expect(r.score).toBe(7);
+  });
+
+  it('does not silently score 0 when the score field is not a number', async () => {
+    // `{"score": "excellent"}` is parseable but has no usable score. Scoring 0
+    // asserts the candidate was terrible; it means the judge did not answer.
+    const r = await grade('{"score": "excellent", "justification": "great"}', 'PARIS');
+    expect(r.score).not.toBe(0);
+    expect((r as any)._parseError).toBe(true);
+  });
+
   it('still recovers a score from a truncated reply', async () => {
     // The fallback exists for this case and must keep working.
     const r = await grade('{"score": 7, "justification": "the answer wa', 'PARIS');

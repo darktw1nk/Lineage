@@ -117,7 +117,19 @@ function truncate(text: string | undefined, maxLen: number): string {
 function escapeMarkdown(text: string): string {
   // A newline inside a table cell ends the table: the row splits, and every
   // following row (including Average) renders as plain prose.
-  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  //
+  // `[` and `<` matter just as much and were missing. This escapes candidate
+  // OUTPUT into `> Output:` blockquotes, so without them a candidate could put
+  // a live external link and raw HTML into the artifact a human or an agent
+  // reads to decide whether the run worked.
+  // BOTH brackets: escaping only `[` leaves `\[click here](url)`, in which
+  // `[click here](` is still a contiguous substring and still renders as a link.
+  return text
+    .replace(/\|/g, '\\|')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/</g, '&lt;');
 }
 
 /**
@@ -135,7 +147,13 @@ function escapeMarkdownProse(text: string): string {
   return text
     .replace(/\r?\n/g, ' ')     // no new block-level constructs
     .replace(/^\s*#/, '\\#')    // no headings even after the newline strip
+    // BOTH brackets. The changelog template wraps the label in `**[...]**`, so
+    // a label containing `]` closes the bracket the template opened and
+    // `](http://…)` right after it renders as a live link — escaping only `[`
+    // never touched that.
     .replace(/\[/g, '\\[')      // no links
+    .replace(/\]/g, '\\]')
+    .replace(/</g, '&lt;')      // no raw HTML
     .replace(/\|/g, '\\|');     // no table rows
 }
 
@@ -579,7 +597,9 @@ export function generateReport(
       for (const step of lineage) {
         const genLabel = `Gen ${step.generation}`;
         for (const change of step.changeLog) {
-          lines.push(`- **[${change.label}]** (${genLabel}): ${escapeMarkdownProse(change.text)}`);
+          // The label is model- and plugin-authored too; the sibling path below
+          // escaped it and this one did not.
+          lines.push(`- **[${escapeMarkdownProse(change.label)}]** (${genLabel}): ${escapeMarkdownProse(change.text)}`);
         }
       }
     } else {

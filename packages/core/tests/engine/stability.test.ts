@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { calculateStabilityFromSamples, calculateFitness, resetFitnessWarnings } from '../../src/engine/fitness.js';
 import type { CandidateNode } from '../../src/types.js';
 
@@ -103,6 +103,24 @@ describe('an UNMEASURABLE stability weight does not inflate fitness', () => {
     const measured = { ...nodeWith([[1], [1]]), metrics: { quality: 1, fitness: 0, safety: 3, costUSD: 0, latencyMs: 1 } } as any;
     const { fitness } = calculateFitness(measured, configWith({ quality: 0.5, safety: 0.5 }));
     expect(fitness).toBeCloseTo(2, 5); // 0.5*1 + 0.5*3
+  });
+
+  it('does not silently promote a weight the user set to 0', () => {
+    // {quality: 0, safety: 1} with no guardrails disables safety, leaving all
+    // effective weights at 0 — and normalizeWeights' `if (sum === 0) return
+    // {quality: 1}` then made quality the SOLE objective. The report printed
+    // "quality=0, safety=1" directly above a 10.000 that was 100% quality.
+    // Scoring has to produce something, so the fallback stays; what must not
+    // happen is it happening quietly.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { fitness } = calculateFitness(badNode(), configWith({ quality: 0, safety: 1 }));
+      expect(fitness).toBe(1); // quality, because nothing else survived
+      const said = warn.mock.calls.flat().join(' ');
+      expect(said).toMatch(/every weighted dimension/i);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('still counts stability when it IS measured', () => {
