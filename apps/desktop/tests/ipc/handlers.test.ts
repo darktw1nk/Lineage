@@ -89,7 +89,9 @@ describe('handler registration', () => {
     for (const ch of [
       'eval:create', 'eval:start', 'eval:pause', 'eval:resume', 'eval:stop',
       'eval:list', 'eval:export', 'eval:import', 'eval:delete', 'eval:getConfig',
-      'settings:get', 'settings:set', 'keys:save', 'keys:get', 'keys:test', 'keys:debug',
+      // 'keys:debug' deliberately absent: it returned every decrypted secret to
+      // the renderer and had no caller.
+      'settings:get', 'settings:set', 'keys:save', 'keys:get', 'keys:test',
       'costs:get', 'costs:set', 'costs:getAll',
       'models:fetch-openrouter', 'models:sync-openrouter',
       'systemPrompts:get', 'systemPrompts:set', 'logs:getBuffer',

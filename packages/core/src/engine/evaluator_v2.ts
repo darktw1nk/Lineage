@@ -1424,6 +1424,15 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 
+  // Every terminal run must say WHY it ended. The loop can drain with no reason
+  // set (e.g. a generation that produced no queueable work), and results.json
+  // then simply had no stopReason at all — while docs/cli.md lists seven values
+  // and tells agents to branch on it.
+  if (!state.run.stopReason) {
+    console.warn('[Evaluator] Loop drained with no stop reason recorded — reporting "exhausted"');
+    state.run.stopReason = 'exhausted';
+  }
+
   // The final generation never reaches moveToNextGeneration — run its playoff here
   // so the champion (and the holdout below) reflect the last generation's ranking.
   // Both are billable: a user who pressed Stop wants spending to STOP, not to

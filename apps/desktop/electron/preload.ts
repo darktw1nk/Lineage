@@ -36,7 +36,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     save: (provider, key) => ipcRenderer.invoke('keys:save', provider, key),
     get: (provider) => ipcRenderer.invoke('keys:get', provider),
     test: (provider) => ipcRenderer.invoke('keys:test', provider),
-    debug: () => ipcRenderer.invoke('keys:debug'),
   },
   
   // Cost table methods

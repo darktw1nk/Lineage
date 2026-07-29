@@ -83,13 +83,11 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
     return testApiKey(provider);
   });
   
-  ipcMain.handle('keys:debug', async () => {
-    return {
-      allKeys: Object.keys(store.store),
-      allData: store.store,
-    };
-  });
-  
+  // 'keys:debug' removed: it returned every DECRYPTED secret in the store to
+  // the renderer, had no caller anywhere in the app, and DevTools opens
+  // automatically in dev. If you need to inspect keys while debugging, log them
+  // in the main process instead of exposing a channel that hands them out.
+
   // Cost table handlers
   ipcMain.handle('costs:get', async (_event, modelRef: ModelRef) => {
     return getModelCost(modelRef);
