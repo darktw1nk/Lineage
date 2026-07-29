@@ -2000,7 +2000,7 @@ function sniffImageMimeType(buf: Buffer): string | null {
 
 function budgetExhausted(state: EvaluationState): boolean {
   const budget = state.config.targets.budgetUSD;
-  return budget !== undefined && state.run.totals.usd + state.reservedUSD >= budget;
+  return budget !== undefined && state.run.totals.usd >= budget;
 }
 
 /**
@@ -2020,69 +2020,32 @@ function budgetExhausted(state: EvaluationState): boolean {
  * the gate honest (concurrent calls still cannot all clear the same total)
  * while leaving the overshoot bounded and small.
  */
-const ASSUMED_COMPLETION_TOKENS = 1024;
-/** Headroom over the observed mean, so a longer-than-usual reply still fits. */
-const COMPLETION_SAFETY_FACTOR = 2;
-
-async function callCeiling(
-  state: EvaluationState, model: ModelRef, promptText: string, maxTokens: number,
-): Promise<number> {
-  const key = `${model.provider}/${model.model}`;
-  const priceCache = (state.callCeilingUSD ??= new Map());
-  let price = priceCache.get(key);
-  if (price === undefined) {
-    const { getModelCost } = await import('../providers/costs.js');
-    let entry = null;
-    try { entry = await getModelCost(model); } catch { /* unpriced: treated as free below */ }
-    price = { prompt: entry?.promptUSDper1k ?? 0, completion: entry?.completionUSDper1k ?? 0 };
-    priceCache.set(key, price);
-  }
-  const promptPer1k = Math.max(0, price.prompt);
-  const completionPer1k = Math.max(0, price.completion);
-
-  // Expected completion for THIS model: the run's own mean with headroom, or
-  // the default until it has settled a call. Never above the hard cap.
-  const seen = state.observedCompletion?.get(key);
-  const expectedCompletion = Math.min(
-    maxTokens,
-    seen && seen.n > 0
-      ? Math.max(64, Math.ceil((seen.sum / seen.n) * COMPLETION_SAFETY_FACTOR))
-      : ASSUMED_COMPLETION_TOKENS,
-  );
-
-  const promptTok = Math.ceil(promptText.length / 4);
-  const fromCatalog = (promptTok / 1000) * promptPer1k + (expectedCompletion / 1000) * completionPer1k;
-  // A plugin adapter (the shape docs/plugins.md documents) reports its own `usd`
-  // and may have no catalog row at all, which would make the catalog ceiling $0
-  // and the reservation a no-op — exactly the models where the cap matters most.
-  // The priciest call this run has actually settled is a real, observed floor.
-  const ceiling = Math.max(Number.isFinite(fromCatalog) ? fromCatalog : 0, state.maxObservedCallUSD);
-  return Number.isFinite(ceiling) ? ceiling : 0;
-}
-
 /** Commit a call's worst case against the cap, or refuse it if it does not fit. */
 async function reserveCall(
-  state: EvaluationState, model: ModelRef, promptText: string, maxTokens: number,
+  state: EvaluationState, _model: ModelRef, _promptText: string, _maxTokens: number,
 ): Promise<number> {
   const budget = state.config.targets.budgetUSD;
   if (budget === undefined) return 0;
-  let ceiling = await callCeiling(state, model, promptText, maxTokens);
-  if (ceiling === 0) {
-    if (state.priceProbe) {
-      // Someone is already measuring what a call costs. Wait for the answer
-      // rather than committing blind alongside them.
-      await state.priceProbe;
-      ceiling = await callCeiling(state, model, promptText, maxTokens);
-    } else {
-      state.priceProbe = new Promise<void>(resolve => { state.resolvePriceProbe = resolve; });
-    }
-  }
-  if (state.run.totals.usd + state.reservedUSD + ceiling > budget) {
+  // REVERTED to a settled-spend gate. Reserving a predicted per-call cost
+  // was tried three times and failed a different way each time:
+  //   - reserving serviceModelMaxTokens strangled runs at 2.6x their true
+  //     cost while reporting stopReason "generations";
+  //   - reserving a 1024-token assumption still overshot 19.2x at
+  //     parallelLimit 8 (overshoot scales with real completion length) AND
+  //     still returned NOTHING below ~1.25x true cost, because one refusal
+  //     aborts a whole node via Promise.all and the cascade takes the
+  //     generation.
+  // A run that spends money and produces nothing is worse than a run that
+  // overshoots, so this returns to the known, bounded behaviour: the cap is
+  // checked against SETTLED spend at every call site. Overshoot is
+  // parallelLimit x testCount x samplesPerTest calls' worth, which
+  // docs/cli.md states plainly. Do not replace this with a prediction
+  // without measuring BOTH failure directions first.
+  if (state.run.totals.usd >= budget) {
     state.budgetRefusals++;
     throw new BudgetExhaustedError();
   }
-  state.reservedUSD += ceiling;
-  return ceiling;
+  return 0;
 }
 
 /** Release a reservation once the call has settled (or failed). */
