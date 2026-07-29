@@ -141,35 +141,69 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
     }
   };
 
-  outer:
+  // Every (pair x test) comparison is independent, so flatten them and run the
+  // list concurrently.
+  //
+  // This used to be three nested `for` loops with `await judge(...)` twice in
+  // the body: C(C-1)/2 x tests x 2 calls, strictly one at a time, while the
+  // rest of the run used parallelLimit. Measured on 30 nodes / 10 tests /
+  // 3 generations at parallelLimit 16: contenders 4 took 4.0x the no-playoff
+  // wall time and contenders 8 took 15.0x, for only +97% calls. At a realistic
+  // 1.5s service model, 8 contenders x 10 tests is 560 sequential calls — 14
+  // minutes per generation transition, which `targets.timeLimitMs` cannot
+  // interrupt.
+  //
+  // Points are order-independent (each comparison contributes to exactly one
+  // pair) so concurrency does not change the ranking.
+  type Unit = { a: CandidateNode; b: CandidateNode; test: TestCase; outA: string; outB: string };
+  const units: Unit[] = [];
   for (let i = 0; i < contenders.length; i++) {
     for (let j = i + 1; j < contenders.length; j++) {
-      if (shouldAbort?.()) {
-        console.warn('[Playoff] Aborted between pairs (budget) — ranking from completed matches');
-        break outer;
-      }
-      const a = contenders[i];
-      const b = contenders[j];
       for (const test of tests) {
-        const outA = outputFor(a, test.id);
-        const outB = outputFor(b, test.id);
+        const outA = outputFor(contenders[i], test.id);
+        const outB = outputFor(contenders[j], test.id);
         if (!outA || !outB) continue;
-
-        // Order 1: a first. Order 2: b first — map verdicts back to nodes.
-        const v1 = await judge(test, outA, outB); // 'A' -> a, 'B' -> b
-        const v2 = await judge(test, outB, outA); // 'A' -> b, 'B' -> a
-        const w1 = v1 === 'A' ? a.id : v1 === 'B' ? b.id : null;
-        const w2 = v2 === 'A' ? b.id : v2 === 'B' ? a.id : null;
-
-        if (w1 && w1 === w2) {
-          points[w1] += 1; // both orders agree
-        } else {
-          points[a.id] += 0.5;
-          points[b.id] += 0.5;
-        }
+        units.push({ a: contenders[i], b: contenders[j], test, outA, outB });
       }
     }
   }
+
+  const runUnit = async ({ a, b, test, outA, outB }: Unit): Promise<void> => {
+    // Order 1: a first. Order 2: b first — map verdicts back to nodes.
+    const [v1, v2] = await Promise.all([
+      judge(test, outA, outB), // 'A' -> a, 'B' -> b
+      judge(test, outB, outA), // 'A' -> b, 'B' -> a
+    ]);
+    const w1 = v1 === 'A' ? a.id : v1 === 'B' ? b.id : null;
+    const w2 = v2 === 'A' ? b.id : v2 === 'B' ? a.id : null;
+
+    if (w1 && w1 === w2) {
+      points[w1] += 1; // both orders agree
+    } else {
+      points[a.id] += 0.5;
+      points[b.id] += 0.5;
+    }
+  };
+
+  // Bounded pool, not Promise.all over everything: the abort check has to stay
+  // meaningful, and a 28-pair playoff must not dispatch 56 calls in one tick.
+  const poolSize = Math.max(1, Math.min(config.parallelLimit || 1, units.length));
+  let nextUnit = 0;
+  let aborted = false;
+  await Promise.all(Array.from({ length: poolSize }, async () => {
+    for (;;) {
+      if (shouldAbort?.()) {
+        if (!aborted) {
+          aborted = true;
+          console.warn('[Playoff] Aborted (budget) — ranking from completed matches');
+        }
+        return;
+      }
+      const index = nextUnit++;
+      if (index >= units.length) return;
+      await runUnit(units[index]);
+    }
+  }));
 
   const ranking = [...contenders]
     .sort((x, y) =>

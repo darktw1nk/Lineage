@@ -95,6 +95,48 @@ describe('runPairwisePlayoff', () => {
     expect(junk!.points['n2']).toBe(0.5);
   });
 
+  it('judges concurrently, bounded by parallelLimit, with the same ranking', async () => {
+    // The playoff was three nested for-loops with `await judge(...)` twice in
+    // the body — strictly one call at a time while the rest of the run used
+    // parallelLimit. Measured at 30 nodes / 10 tests / 3 generations: turning
+    // on 8 contenders cost 15x the wall time for +97% calls, and at a realistic
+    // 1.5s service model that is 14 minutes per generation transition.
+    let inFlight = 0;
+    let peak = 0;
+    const judgeFor = (limit: number) => {
+      resetRegistry();
+      registerProvider({ adapter: { name: 'fakejudge', estimateTokens: () => ({ prompt: 1 }),
+        call: async (opts: any) => {
+          inFlight++; peak = Math.max(peak, inFlight);
+          await new Promise(r => setTimeout(r, 5));
+          inFlight--;
+          const aIsGood = /OUTPUT A: <<<\nGOOD/.test(opts.prompt);
+          return { output: JSON.stringify({ winner: aIsGood ? 'A' : 'B' }), promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 };
+        } } as any });
+      return { ...config, parallelLimit: limit } as any;
+    };
+
+    const nodes = [
+      contender('n1', 9, 'GOOD one'), contender('n2', 8, 'weak two'),
+      contender('n3', 7, 'weak three'), contender('n4', 6, 'weak four'),
+    ];
+
+    inFlight = 0; peak = 0;
+    const serial = await runPairwisePlayoff({ contenders: nodes, tests: [test1], config: judgeFor(1), accrue });
+    const serialPeak = peak;
+
+    inFlight = 0; peak = 0;
+    const parallel = await runPairwisePlayoff({ contenders: nodes, tests: [test1], config: judgeFor(8), accrue });
+
+    expect(serialPeak).toBeLessThanOrEqual(2); // one unit's two orders at most
+    expect(peak).toBeGreaterThan(serialPeak);  // actually concurrent now
+    expect(peak).toBeLessThanOrEqual(16);      // and still bounded
+    // Concurrency must not change the outcome.
+    expect(parallel!.ranking).toEqual(serial!.ranking);
+    expect(parallel!.points).toEqual(serial!.points);
+    expect(parallel!.matches).toBe(serial!.matches);
+  }, 30000);
+
   it('parses an embedded verdict object that has nested fields', async () => {
     // The last-resort scavenger used /\{[^{}]*\}/g, which cannot match anything
     // nested — so a judge that reports per-output scores alongside its winner

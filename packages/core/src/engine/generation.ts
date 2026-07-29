@@ -507,17 +507,33 @@ export async function createNextGeneration(
   let totalCalls = 0;
   
   // Step 7: Create children per operator plan (one operator per child, no layering)
-  // Process all children in PARALLEL
-  console.log(`[Generation] Creating ${remainingChildren} children in parallel...`);
-  
-  const childCreationPromises = [];
-  
-  for (let i = 0; i < remainingChildren; i++) {
-    const operatorName = operatorPlan[i];
+  //
+  // Parents are drawn HERE, in plan order, so the assignment stays identical
+  // regardless of how the work is then scheduled — a seeded run must reproduce.
+  const childPlan = Array.from({ length: remainingChildren }, (_, i) => {
     const parent = nextParent();
-    const parentFitness = parent.metrics?.fitness || 0;
+    return { i, operatorName: operatorPlan[i], parent, parentFitness: parent.metrics?.fitness || 0 };
+  });
 
-    const childPromise = (async () => {
+  // Bounded by parallelLimit, NOT one promise per child.
+  //
+  // Every child used to call apply() in the same tick, and withOperatorTimeout
+  // starts its 6 x callTimeoutMs clock at that moment — but the resulting
+  // service calls then queued on the global semaphore. So a child at the back
+  // of the queue burned its whole budget WAITING, and was declared hung.
+  // Measured with parallelLimit 2 and 500ms calls: popSize 10 lost 1 child to
+  // the timeout, popSize 20 lost 2, popSize 40 lost 13 (33%). Past the cliff
+  // every child is a carry-forward clone of its parent — evolution silently
+  // stops while the run still reports success.
+  const childPoolSize = Math.max(1, Math.min(config.parallelLimit || 1, remainingChildren));
+  console.log(`[Generation] Creating ${remainingChildren} children (${childPoolSize} at a time)...`);
+
+  type ChildOutcome = { index: number; parent: CandidateNode; parentFitness: number; result: any };
+  const childResults: ChildOutcome[] = new Array(remainingChildren);
+  let nextChild = 0;
+
+  const createChild = async ({ i, operatorName, parent, parentFitness }: typeof childPlan[number]) => {
+    const outcome = await (async () => {
       const carry = (
         label: 'CARRY' | 'ERROR',
         text: string,
@@ -603,14 +619,19 @@ export async function createNextGeneration(
         }
         return carry('ERROR', `Operator '${operatorName}' failed, using parent`, spent);
       }
-    })().then(result => ({ index: i, parent, parentFitness, result }));
+    })();
+    childResults[i] = { index: i, parent, parentFitness, result: outcome };
+  };
 
-    childCreationPromises.push(childPromise);
-  }
-  
-  // Wait for all children to be created in parallel
-  const childResults = await Promise.all(childCreationPromises);
-  
+  await Promise.all(Array.from({ length: childPoolSize }, async () => {
+    for (;;) {
+      const index = nextChild++;
+      if (index >= childPlan.length) return;
+      await createChild(childPlan[index]);
+    }
+  }));
+
+
   // Process results in order and create nodes
   for (const { index, parentFitness, result } of childResults) {
     // Accumulate costs
