@@ -18,6 +18,8 @@ npm run cli -- --estimate --config <path>   # Print the cost estimate and exit (
 npm run cli -- --sync-models                # Sync models from OpenRouter
 npm run cli -- --list-models                # List all models with pricing
 npm run cli -- --set-key <provider> <key>   # Save API key (shared with desktop app)
+npm run cli -- --archive-runs <dir>         # Write every run to <dir>/<runId>.json
+npm run cli -- --prune-runs <keep>          # Delete all but the <keep> most recent runs
 npm run cli -- --help                       # Show help
 ```
 
@@ -28,6 +30,12 @@ npm run --silent cli -- --config c.json 2>/dev/null > results.json   # clean JSO
 ```
 
 `--output <path>` writes the file directly and sidesteps the issue entirely. A markdown run report lands in `testoutputs/` beside the output file by default — `--report <path>` puts it exactly where you want it, `--report none` skips it.
+
+**Managing history**: every database save rewrites the whole file, so the cost of saving grows with accumulated history rather than with the run you are doing — noticeable past ~10 MB. `--archive-runs <dir>` writes each run to `<dir>/<runId>.json` in the same shape the desktop's "Export Results" uses, so an archived run can be imported back. `--prune-runs <keep>` deletes all but the N most recent runs and VACUUMs, which is what actually shrinks the file. Combining them archives first:
+
+```bash
+npm run --silent cli -- --archive-runs ./run-archive --prune-runs 20 --db ./evolution.db
+```
 
 **Cost estimation**: every run prints `Estimated cost: $low – $high (~N calls)` at startup, and `--estimate --config cfg.json` prints the same estimate (JSON on stdout, per-phase breakdown on stderr) without running anything. The band brackets the one true unknown — completion lengths; treat `high` as the commit number. Warnings call out uncatalogued models and budgets below the low bound.
 

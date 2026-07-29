@@ -115,6 +115,8 @@ OPTIONS:
   --sync-models                Sync available models from OpenRouter
   --list-models                List all models in the database with pricing
   --set-key <provider> <key>   Save an API key (shared with desktop app)
+  --archive-runs <dir>         Write every run to <dir>/<runId>.json (re-importable)
+  --prune-runs <keep>          Delete all but the <keep> most recent runs, then VACUUM
   --help                       Show this help message
 
 PROVIDERS:
@@ -163,6 +165,8 @@ function parseArgs(argv: string[]): {
   resume?: string;
   report?: string;
   estimate: boolean;
+  archiveRuns?: string;
+  pruneRuns?: number;
 } {
   const args = argv.slice(2);
   const result = {
@@ -178,6 +182,8 @@ function parseArgs(argv: string[]): {
     resume: undefined as string | undefined,
     report: undefined as string | undefined,
     estimate: false,
+    archiveRuns: undefined as string | undefined,
+    pruneRuns: undefined as number | undefined,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -221,6 +227,19 @@ function parseArgs(argv: string[]): {
           process.exit(1);
         }
         break;
+      case '--archive-runs':
+        result.archiveRuns = requireValue('--archive-runs');
+        break;
+      case '--prune-runs': {
+        const raw = requireValue('--prune-runs');
+        const keep = Number(raw);
+        if (!Number.isInteger(keep) || keep < 0) {
+          console.error(`--prune-runs takes the number of recent runs to KEEP (got ${JSON.stringify(raw)})`);
+          process.exit(1);
+        }
+        result.pruneRuns = keep;
+        break;
+      }
       case '--estimate':
         result.estimate = true;
         break;
@@ -275,6 +294,37 @@ async function handleSetKey(provider: Provider, key: string): Promise<void> {
   saveApiKey(provider, key);
   const masked = key.length > 4 ? '***' + key.slice(-4) : '****';
   emit(`Saved ${provider} key (${masked})`);
+}
+
+async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath?: string): Promise<void> {
+  lastResolvedDbPath = resolveDbPath(dbPath);
+  await initCliDatabase(dbPath);
+  const { getDatabase, closeDatabase } = await import('@promptengine/core');
+  const db = getDatabase();
+  const { archiveRuns, pruneRuns } = await import('./maintenance.js');
+
+  // Archive BEFORE pruning, always — so `--archive-runs X --prune-runs 5` is a
+  // safe one-liner rather than an ordering trap.
+  if (archiveDir) {
+    const result = await archiveRuns(db, archiveDir);
+    emit(`Archived ${result.archived.length} run(s) to ${archiveDir}`);
+    for (const skipped of result.skipped) {
+      process.stderr.write(`  skipped ${skipped.runId.slice(0, 8)}: ${skipped.reason}\n`);
+    }
+  }
+
+  if (pruneKeep !== undefined) {
+    const result = await pruneRuns(db, pruneKeep, lastResolvedDbPath);
+    const mb = (n: number) => `${(n / 1e6).toFixed(1)} MB`;
+    if (result.deleted.length === 0) {
+      emit(`Nothing to prune — ${result.kept} run(s) on file, keeping ${pruneKeep}.`);
+    } else {
+      emit(`Pruned ${result.deleted.length} run(s), kept the ${result.kept} most recent.`);
+      emit(`Database ${mb(result.bytesBefore)} → ${mb(result.bytesAfter)}`);
+    }
+  }
+
+  closeDatabase();
 }
 
 async function handleSyncModels(dbPath?: string, configKeys?: Record<string, string>): Promise<void> {
@@ -620,6 +670,11 @@ async function main(): Promise<void> {
   const utilityCommand = args.setKey ? '--set-key' : args.syncModels ? '--sync-models' : args.listModels ? '--list-models' : null;
   if (utilityCommand && (args.config || args.resume)) {
     process.stderr.write(`note: ${utilityCommand} takes precedence — --config/--resume are ignored\n`);
+  }
+
+  if (args.archiveRuns || args.pruneRuns !== undefined) {
+    await handleMaintenance(args.archiveRuns, args.pruneRuns, args.db);
+    return;
   }
 
   if (args.setKey) {
