@@ -998,7 +998,7 @@ async function processNode(
     sendUpdate(runId, { type: 'node_updated', node });
   }
 
-  persistRun(state);
+  persistRun(state, false); // per-node: ride the adaptive debounce, not an fsync each time
 }
 
 /**
@@ -1724,7 +1724,19 @@ function resumeAdjustedPausedMs(run: EvaluationRun, isResume: boolean): number {
   return total;
 }
 
-function persistRun(state: EvaluationState): void {
+/**
+ * Checkpoint the run.
+ *
+ * `durable` forces the write to disk immediately. Use it where losing the
+ * checkpoint actually costs something — a generation boundary, a pause, the
+ * end of the run. The per-NODE checkpoint passes false and rides the wrapper's
+ * adaptive debounce instead: forcing an fsync there meant one whole-file export
+ * per node, and because that export scales with total database size, a 72-node
+ * run against a 25MB database spent ~3.1s blocked and wrote ~1.8GB. The
+ * in-memory row is updated either way, so a crash loses at most the debounce
+ * window rather than a whole generation.
+ */
+function persistRun(state: EvaluationState, durable = true): void {
   try {
     state.run.lastCheckpointAt = Date.now();
     const db = getDatabase();
@@ -1751,7 +1763,7 @@ function persistRun(state: EvaluationState): void {
     // dropped FINAL checkpoint makes a completed run reappear as interrupted,
     // so --resume pays for it a second time. A retry is already scheduled;
     // say so rather than reporting success.
-    if (!db.flush()) {
+    if (durable && !db.flush()) {
       console.warn(
         `[Evaluator] Checkpoint for ${state.run.id.slice(0, 8)} is not on disk yet — a retry is scheduled. ` +
         `If the process dies before it succeeds, this generation's progress will be replayed on resume.`,

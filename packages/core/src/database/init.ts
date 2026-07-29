@@ -121,6 +121,8 @@ export class SqlJsWrapper {
   private _saveTimer: ReturnType<typeof setTimeout> | null = null;
   private _readOnly: boolean;
   private _consecutiveSaveFailures = 0;
+  /** Duration of the last successful save, used to pace the next one. */
+  private _lastSaveDurationMs = 5;
 
   constructor(db: SqlJsDatabase, dbPath: string, readOnly = false) {
     this._db = db;
@@ -210,8 +212,26 @@ export class SqlJsWrapper {
     return wrapped;
   }
 
-  /** Schedule a debounced save (50ms), backing off while it keeps failing. */
-  _scheduleSave(delayMs = 50): void {
+  /**
+   * How long to wait before the next save, based on how expensive saving has
+   * become.
+   *
+   * Every save is a whole-file export, so its cost scales with the size of the
+   * DATABASE — i.e. with accumulated history, not with the current run.
+   * Measured: 13ms at 1.3MB, 43ms at 25MB, 80ms at 50MB. With a fixed 50ms
+   * debounce that meant a large database spent most of its time exporting
+   * itself, and a 72-node run wrote ~1.8GB.
+   *
+   * Scaling the gap to 10x the last save's duration caps the share of wall
+   * time spent saving at roughly 10%, whatever the file size. A small database
+   * keeps the original 50ms and behaves exactly as before.
+   */
+  private _adaptiveDelayMs(): number {
+    return Math.max(50, Math.min(5000, Math.round(this._lastSaveDurationMs * 10)));
+  }
+
+  /** Schedule a debounced save, backing off while it keeps failing. */
+  _scheduleSave(delayMs = this._adaptiveDelayMs()): void {
     if (this._saveTimer) return;
     this._saveTimer = setTimeout(() => {
       this._saveTimer = null;
@@ -260,6 +280,7 @@ export class SqlJsWrapper {
     // invocation, destroying concurrent work.
     if (this._readOnly) return;
 
+    const startedAt = Date.now();
     const data = Buffer.from(this._db.export());
     const tmpPath = `${this._dbPath}.tmp`;
     let fd: number | undefined;
@@ -270,6 +291,7 @@ export class SqlJsWrapper {
       fs.closeSync(fd);
       fd = undefined;
       renameWithRetry(tmpPath, this._dbPath); // atomic on both NTFS and POSIX
+      this._lastSaveDurationMs = Date.now() - startedAt;
     } catch (error) {
       if (fd !== undefined) {
         try { fs.closeSync(fd); } catch { /* already closing down */ }
