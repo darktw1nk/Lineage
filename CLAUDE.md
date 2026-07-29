@@ -26,7 +26,7 @@ apps/desktop      evolution2         — private Electron app (React renderer + 
 
 ```bash
 npm run electron:dev     # Full dev mode (Vite HMR + Electron, port 5173)
-npm run dev              # Vite dev server only (no Electron)
+npm run dev              # Vite dev server only (--mode renderer-only; no Electron)
 npm run cli -- --help    # CLI from source (tsx)
 npm run type-check       # tsc across all three workspaces
 npm run build:packages   # tsup builds of core + cli (dist/)

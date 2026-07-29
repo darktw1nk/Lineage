@@ -203,7 +203,11 @@ export function getDatabase(): SqlJsWrapper {
  * than an exotic one. A stale lock (previous crash) is reclaimed by checking
  * whether the recorded pid is still alive.
  */
-function acquireDbLock(dbPath: string): void {
+/** Total time we wait for a departing holder to release before giving up. */
+const LOCK_WAIT_MS = 3000;
+const LOCK_POLL_MS = 150;
+
+async function acquireDbLock(dbPath: string): Promise<void> {
   const lock = `${dbPath}.lock`;
   const readHolder = (): { pid: number; since: string } | null => {
     try {
@@ -213,50 +217,60 @@ function acquireDbLock(dbPath: string): void {
     }
   };
 
-  try {
-    // 'wx' fails if the file already exists — atomic create-or-fail
-    fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }), { flag: 'wx' });
-    lockPath = lock;
-    return;
-  } catch (error: any) {
-    if (error?.code !== 'EEXIST') throw error;
-  }
-
-  const holder = readHolder();
-  if (!holder) {
-    // Unreadable or 0 bytes. That is ALSO what a healthy lock looks like in the
-    // instant between another process's create and its write, so treat it as
-    // held rather than stealing it.
-    throw new Error(
-      `Database ${dbPath} appears to be in use: ${lock} exists but could not be read. ` +
-      `If no other PromptEngine process is running, delete ${lock} and retry.`
-    );
-  }
-
-  if (holder.pid !== process.pid) {
-    // Only ESRCH ("no such process") proves the holder is gone. EPERM means the
-    // process exists but belongs to another user or an elevated session —
-    // reading that as "dead" stole live locks in exactly the case the lock
-    // matters most.
-    let alive = true;
+  // Poll rather than fail on first contact. Handing the lock over is a normal,
+  // brief event — `npm run electron:dev` restarts the main process on every
+  // edit, and the replacement reliably starts before its predecessor has
+  // finished quitting. Failing instantly turned that into a hard startup crash.
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  let lastReason = '';
+  for (;;) {
     try {
-      process.kill(holder.pid, 0); // signal 0 only tests existence
+      // 'wx' fails if the file already exists — atomic create-or-fail
+      fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }), { flag: 'wx' });
+      lockPath = lock;
+      return;
     } catch (error: any) {
-      alive = error?.code !== 'ESRCH';
+      if (error?.code !== 'EEXIST') throw error;
     }
-    if (alive) {
-      throw new Error(
-        `Database ${dbPath} is in use by process ${holder.pid} (since ${holder.since}). ` +
+
+    const holder = readHolder();
+    if (!holder) {
+      // Unreadable or 0 bytes. That is ALSO what a healthy lock looks like in
+      // the instant between another process's create and its write, so treat it
+      // as held rather than stealing it.
+      lastReason = `${lock} exists but could not be read`;
+    } else if (holder.pid === process.pid) {
+      fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }));
+      lockPath = lock;
+      return;
+    } else {
+      // Only ESRCH ("no such process") proves the holder is gone. EPERM means
+      // the process exists but belongs to another user or an elevated session —
+      // reading that as "dead" stole live locks in exactly the case the lock
+      // matters most.
+      let alive = true;
+      try {
+        process.kill(holder.pid, 0); // signal 0 only tests existence
+      } catch (error: any) {
+        alive = error?.code !== 'ESRCH';
+      }
+      if (!alive) {
+        console.warn(`[Database] Reclaiming stale lock from dead process ${holder.pid}`);
+        fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }));
+        lockPath = lock;
+        return;
+      }
+      lastReason =
+        `it is in use by process ${holder.pid} (since ${holder.since}). ` +
         `Two processes writing this file would erase each other's runs. ` +
-        `Close the other instance, or pass a separate --db path. ` +
-        `If that process is gone, delete ${lock}.`
-      );
+        `Close the other instance, or pass a separate --db path`;
     }
-    console.warn(`[Database] Reclaiming stale lock from dead process ${holder.pid}`);
+
+    if (Date.now() >= deadline) break;
+    await new Promise(resolve => setTimeout(resolve, LOCK_POLL_MS));
   }
 
-  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }));
-  lockPath = lock;
+  throw new Error(`Cannot open ${dbPath}: ${lastReason}. If that process is gone, delete ${lock}.`);
 }
 
 function releaseDbLock(): void {
@@ -291,7 +305,7 @@ export async function initializeDatabase(dbPath: string, options: InitializeData
   if (!options.readOnly) {
     // A second init while one is already open would orphan the first lock file.
     releaseDbLock();
-    acquireDbLock(dbPath);
+    await acquireDbLock(dbPath);
   }
 
   try {
