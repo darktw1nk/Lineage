@@ -120,6 +120,25 @@ function escapeMarkdown(text: string): string {
   return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
+/**
+ * Neutralise model-written prose before it becomes report BODY text.
+ *
+ * Judge justifications and operator changelog entries are written by a model
+ * while it is looking at a candidate's output, and both were interpolated raw.
+ * That let generated text emit its own `## Improvement Summary` table and its
+ * own `## Outcome` line — a report claiming "target fitness reached" for a run
+ * that stopped on budget, with a forged +8.0 delta and an external link. The
+ * report is the artifact a human or an agent reads to decide whether the run
+ * worked, so nothing inside it may impersonate the report's own structure.
+ */
+function escapeMarkdownProse(text: string): string {
+  return text
+    .replace(/\r?\n/g, ' ')     // no new block-level constructs
+    .replace(/^\s*#/, '\\#')    // no headings even after the newline strip
+    .replace(/\[/g, '\\[')      // no links
+    .replace(/\|/g, '\\|');     // no table rows
+}
+
 function formatDuration(ms: number): string {
   const secs = Math.floor(ms / 1000);
   if (secs < 60) return `${secs}s`;
@@ -478,8 +497,9 @@ export function generateReport(
       const seedScore = seedTest.score ?? 0;
       const bestScore = bestTest.score ?? 0;
       const delta = bestScore - seedScore;
-      const seedReason = extractJustification(seedTest.llmGradeReasoning);
-      const bestReason = extractJustification(bestTest.llmGradeReasoning);
+      // Model-written prose: must not be able to forge report structure.
+      const seedReason = escapeMarkdownProse(extractJustification(seedTest.llmGradeReasoning));
+      const bestReason = escapeMarkdownProse(extractJustification(bestTest.llmGradeReasoning));
 
       if (delta > 0) {
         wins.push(`- **${testName}** (+${delta.toFixed(0)}): Seed scored ${seedScore}${seedReason ? ` — ${seedReason}` : ''}. Best scored ${bestScore}${bestReason ? ` — ${bestReason}` : ''}.`);
@@ -524,13 +544,13 @@ export function generateReport(
       for (const step of lineage) {
         const genLabel = `Gen ${step.generation}`;
         for (const change of step.changeLog) {
-          lines.push(`- **[${change.label}]** (${genLabel}): ${change.text}`);
+          lines.push(`- **[${change.label}]** (${genLabel}): ${escapeMarkdownProse(change.text)}`);
         }
       }
     } else {
       // Fallback: just show the best node's own changelog
       for (const change of bestNode.changeLog) {
-        lines.push(`- **[${change.label}]**: ${change.text}`);
+        lines.push(`- **[${escapeMarkdownProse(change.label)}]**: ${escapeMarkdownProse(change.text)}`);
       }
     }
     lines.push('');
