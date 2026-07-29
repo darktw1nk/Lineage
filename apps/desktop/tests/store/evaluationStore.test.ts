@@ -192,6 +192,18 @@ describe('evaluationStore subscriptions', () => {
     expect((store().evaluations.get('run-1') as any).holdout.champion.score).toBe(9);
   });
 
+  it('node_created is idempotent by node id (resume replay must not duplicate)', () => {
+    store().setEvaluation('run-1', makeRun('run-1'));
+    store().subscribe('run-1');
+    const cb = capturedCallbacks.get('run-1')!;
+    const node = (v: string) => ({ id: 'n1', generation: 0, status: 'finished', prompt: v, params: {}, changeLog: [] });
+    cb({}, { type: 'node_created', node: node('first') });
+    cb({}, { type: 'node_created', node: node('replayed') }); // resume replay of same node
+    const gen0 = (store().evaluations.get('run-1') as any).generations[0];
+    expect(gen0.filter((n: any) => n.id === 'n1')).toHaveLength(1);
+    expect(gen0.find((n: any) => n.id === 'n1').prompt).toBe('replayed'); // replaced, not ignored
+  });
+
   it('playoff_result appends to run.playoffs', () => {
     store().setEvaluation('run-1', makeRun('run-1'));
     store().subscribe('run-1');

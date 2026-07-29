@@ -90,14 +90,22 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       if (!evaluation) return state;
       
       const generations = [...evaluation.generations];
-      
+
       // Ensure generation exists
       while (generations.length <= node.generation) {
         generations.push([]);
       }
-      
-      // Add node
-      generations[node.generation] = [...generations[node.generation], node];
+
+      // Idempotent add: resume replays node_created for checkpointed nodes the
+      // store may already hold (from selecting the run) — replace, never duplicate
+      const existing = generations[node.generation].findIndex(n => n.id === node.id);
+      if (existing !== -1) {
+        const updated = [...generations[node.generation]];
+        updated[existing] = node;
+        generations[node.generation] = updated;
+      } else {
+        generations[node.generation] = [...generations[node.generation], node];
+      }
       
       const newEvaluations = new Map(state.evaluations);
       newEvaluations.set(evalId, { ...evaluation, generations });

@@ -105,11 +105,15 @@ export function LeftSidebar({
   // Get real-time data from Zustand store
   const storeEvaluations = useEvaluationStore((state) => state.evaluations);
   
-  // Merge: use store data for running evaluations, DB data for others
+  // Merge: use store data for running evaluations, DB data for others.
+  // `interrupted` must ALWAYS come from the fresh DB row: the store copy is a
+  // snapshot that can carry a stale flag (e.g. captured in the window between
+  // run creation and start) and would badge a live run as interrupted forever.
   const evaluations = dbEvaluations.map(dbEval => {
     const liveEval = storeEvaluations.get(dbEval.id);
-    // If evaluation is in store (active/subscribed), use live data
-    return liveEval || dbEval;
+    return liveEval
+      ? ({ ...liveEval, interrupted: (dbEval as any).interrupted } as EvaluationRun)
+      : dbEval;
   });
   
   const exportMutation = useMutation({
@@ -126,15 +130,23 @@ export function LeftSidebar({
   
   const resumeMutation = useMutation({
     mutationFn: async (runId: string) => {
-      await window.electronAPI.eval.start(runId);
-    },
-    onSuccess: (_, runId) => {
+      // Subscribe + select BEFORE starting (same "CRITICAL" ordering the create
+      // flow uses): the engine replays checkpointed state immediately on start,
+      // and an unsubscribed renderer would miss the replay.
       useEvaluationStore.getState().subscribe(runId as UUID);
       onSelectEvaluation(runId as UUID);
+      await window.electronAPI.eval.start(runId);
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['evaluations'] });
     },
     onError: (error: any) => {
-      alert(`Resume failed: ${error.message}`);
+      // A stale badge can race an already-live run — that's a no-op, not an error
+      if (String(error?.message ?? '').includes('already running')) {
+        queryClient.invalidateQueries({ queryKey: ['evaluations'] });
+        return;
+      }
+      toast.error(`Resume failed: ${error.message}`);
     },
   });
 
@@ -369,7 +381,7 @@ export function LeftSidebar({
                 {bestScore !== null && (
                   <span>Best: {bestScore.toFixed(2)}</span>
                 )}
-                {(evaluation as any).interrupted && (
+                {(evaluation as any).interrupted && !resumeMutation.isPending && (
                   <span
                     className="inline-flex items-center gap-1 text-amber-600 hover:text-amber-500 cursor-pointer"
                     role="button"
