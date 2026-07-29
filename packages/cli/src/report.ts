@@ -248,16 +248,37 @@ export function generateReport(
   // so a run truncated by the budget cap read exactly like one that finished.
   lines.push('## Outcome');
   lines.push('');
+  const totalFailed = result.generations.reduce((sum, g) => sum + g.nodes.filter(n => n.status === 'failed').length, 0);
+  const totalNodes = result.generations.reduce((sum, g) => sum + g.nodes.length, 0);
+  // A run where NOTHING worked is a failure, whatever the stop reason says.
+  // 'exhausted' was rendered with a ✅ and the cheerful "no candidates left to
+  // evaluate", so a run in which every single candidate died on a bad API key
+  // opened with a green checkmark.
+  const everythingFailed = totalNodes > 0 && totalFailed === totalNodes;
+
   if (result.error) {
     lines.push(`❌ **The run did not complete:** ${escapeMarkdown(result.error)}`);
+  } else if (everythingFailed) {
+    lines.push(`❌ **Every candidate failed** — this run produced nothing usable.`);
   } else if (result.stopReason) {
-    const cut = result.stopReason === 'budget' || result.stopReason === 'time' || result.stopReason === 'manual';
+    const cut = result.stopReason === 'budget' || result.stopReason === 'time' ||
+      result.stopReason === 'manual' || result.stopReason === 'exhausted' || result.stopReason === 'error';
     lines.push(`${cut ? '⚠️' : '✅'} **Stopped because:** ${STOP_REASON_TEXT[result.stopReason] ?? result.stopReason}`);
   } else {
     lines.push('**Stopped because:** (not recorded)');
   }
-  const totalFailed = result.generations.reduce((sum, g) => sum + g.nodes.filter(n => n.status === 'failed').length, 0);
-  const totalNodes = result.generations.reduce((sum, g) => sum + g.nodes.length, 0);
+
+  // Name the actual cause. The per-node `error` was in results.json and
+  // nowhere a human looks, so a report could say "no candidates left" without
+  // ever mentioning "Incorrect API key provided".
+  const firstError = result.generations
+    .flatMap(g => g.nodes)
+    .find(n => n.status === 'failed' && n.error)?.error;
+  if (firstError) {
+    lines.push('');
+    lines.push(`**First failure:** ${escapeMarkdownProse(firstError)}`);
+  }
+
   if (totalFailed > 0) {
     lines.push('');
     lines.push(`⚠️ **${totalFailed} of ${totalNodes} candidates failed** — the numbers below describe only the ones that completed.`);

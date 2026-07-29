@@ -200,6 +200,16 @@ export class SqlJsWrapper {
     }
   }
 
+  /**
+   * Pragmas that live on the CONNECTION and must survive every export/reopen
+   * cycle. Kept in one place so open and save cannot drift apart.
+   */
+  _applyConnectionPragmas(): void {
+    try {
+      this._db.exec('PRAGMA foreign_keys = ON');
+    } catch { /* a pragma failure must never take down a save */ }
+  }
+
   pragma(str: string): unknown {
     const results = this._db.exec(`PRAGMA ${str}`);
     if (results.length > 0 && results[0].values.length > 0) {
@@ -333,6 +343,11 @@ export class SqlJsWrapper {
 
     const startedAt = Date.now();
     const data = Buffer.from(this._db.export());
+    this._applyConnectionPragmas();
+    // sql.js's export() CLOSES and REOPENS the underlying connection, which
+    // resets every connection-scoped pragma. So `foreign_keys = ON`, set once at
+    // open, was off again before the first checkpoint even landed — the declared
+    // foreign keys were never actually enforced. Re-arm them on every export.
     const tmpPath = `${this._dbPath}.tmp`;
     let fd: number | undefined;
     try {
@@ -341,8 +356,15 @@ export class SqlJsWrapper {
       fs.fsyncSync(fd); // durable before the rename makes it visible
       fs.closeSync(fd);
       fd = undefined;
-      renameWithRetry(tmpPath, this._dbPath); // atomic on both NTFS and POSIX
+      // Measure BEFORE the rename. renameWithRetry sleeps through transient
+      // Windows EPERM/EBUSY (Defender, OneDrive), and folding those sleeps into
+      // "save cost" made one transient hit inflate the adaptive debounce ~7x
+      // (43ms -> 315ms, so 430ms -> 3150ms) for the rest of the session —
+      // widening exactly the window in which a crash loses checkpoints. The
+      // debounce is meant to track export cost, which scales with DB size; a
+      // rename is O(1) and its retry sleeps are noise.
       this._lastSaveDurationMs = Date.now() - startedAt;
+      renameWithRetry(tmpPath, this._dbPath); // atomic on both NTFS and POSIX
     } catch (error) {
       if (fd !== undefined) {
         try { fs.closeSync(fd); } catch { /* already closing down */ }

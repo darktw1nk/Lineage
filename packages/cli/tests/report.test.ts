@@ -103,6 +103,27 @@ describe('generateReport formatting hazards', () => {
     expect(md).not.toMatch(/\| 1 \| newline\n/);
   });
 
+  it('a run where everything failed is not a green checkmark', () => {
+    // stopReason 'exhausted' rendered as "✅ no candidates left to evaluate",
+    // so a run in which every candidate died on a bad API key opened with a
+    // green tick and never named the cause — which sat in results.json only.
+    const dead = (id: string) => ({
+      id, status: 'failed', prompt: 'p',
+      params: { model: { provider: 'openai', model: 'm' }, temperature: 0.7 },
+      changeLog: [], lineageParents: [], metrics: null, tests: null,
+      error: 'OpenAI API error: 401 - Incorrect API key provided: sk-fake-****ABCD',
+    } as any);
+    const md = generateReport(makeResult({
+      stopReason: 'exhausted',
+      generations: [{ generation: 0, nodes: [dead('a'), dead('b')] }],
+      best: null,
+    } as any), CONFIG);
+
+    expect(md).toContain('❌ **Every candidate failed**');
+    expect(md).not.toContain('✅');
+    expect(md).toContain('Incorrect API key provided');
+  });
+
   it('reports failed candidates instead of hiding them', () => {
     const result = makeResult({
       generations: [{

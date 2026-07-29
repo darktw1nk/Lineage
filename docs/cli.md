@@ -129,7 +129,7 @@ All evolution settings are specified in a single JSON file passed via `--config`
 {
   "name": "Math Tutor Evolution",
   "seedPrompt": "You are a helpful math tutor.",
-  "models": ["openai/gpt-4o", "anthropic/claude-sonnet-4-5-20250929"],
+  "models": ["openai/gpt-5-mini", "anthropic/claude-sonnet-5"],
   "serviceModel": "openai/gpt-4o-mini",
   "populationSize": 8,
   "generationSize": 8,

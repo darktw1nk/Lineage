@@ -674,10 +674,19 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // These three take precedence over --config/--resume. Saying so matters:
-  // combining them silently ran the utility and ignored the run entirely, which
-  // in a script reads as a run that produced no output.
-  const utilityCommand = args.setKey ? '--set-key' : args.syncModels ? '--sync-models' : args.listModels ? '--list-models' : null;
+  // These take precedence over --config/--resume. Saying so matters: combining
+  // them silently ran the utility and ignored the run entirely, which in a
+  // script reads as a run that produced no output. --archive-runs and
+  // --prune-runs belong here too — their branch runs BEFORE this check did any
+  // good, so `--config cfg.json --prune-runs 99` exited 0 having never
+  // evolved anything and never said why.
+  const utilityCommand =
+    args.setKey ? '--set-key'
+    : args.syncModels ? '--sync-models'
+    : args.listModels ? '--list-models'
+    : args.archiveRuns ? '--archive-runs'
+    : args.pruneRuns !== undefined ? '--prune-runs'
+    : null;
   if (utilityCommand && (args.config || args.resume)) {
     process.stderr.write(`note: ${utilityCommand} takes precedence — --config/--resume are ignored\n`);
   }

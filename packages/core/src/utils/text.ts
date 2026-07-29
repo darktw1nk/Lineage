@@ -20,7 +20,16 @@ export function sanitizeForJudge(text: string): string {
   const clipped = text.length > MAX_JUDGED_TEXT
     ? `${text.slice(0, MAX_JUDGED_TEXT)}\n…[truncated ${text.length - MAX_JUDGED_TEXT} characters]`
     : text;
-  return clipped.replace(/>>>/g, '>​>>'); // zero-width space breaks the delimiter, reads identically
+  // Break EVERY run of 3+ delimiter characters, in both directions.
+  //
+  // The previous `/>>>/g` matched non-overlapping triples and only broke the
+  // first character of each, so four `>` produced `>​>>>` — which still
+  // contains a literal `>>>`. Five and six likewise. Interleaving a zero-width
+  // space between every character of the run leaves no triple at any offset.
+  // `<<<` was not neutralised at all, so a candidate could open a forged block
+  // even when it could not close one.
+  const breakRun = (m: string) => m.split('').join('​');
+  return clipped.replace(/>{3,}/g, breakRun).replace(/<{3,}/g, breakRun);
 }
 
 /**
@@ -131,11 +140,19 @@ export function extractJsonArray(raw: string): any[] {
 }
 
 /** Balanced `[...]` spans, string-aware so a bracket inside a string is ignored. */
-function balancedArraySpans(text: string): string[] {
+/**
+ * Every balanced `open`…`close` span in `text`, in document order,
+ * string-literal aware so a brace inside a JSON string never counts.
+ *
+ * A flat `/\{[^{}]*\}/g` cannot match anything nested, which is why a judge
+ * verdict of `{"winner":"A","scores":{"a":9,"b":4}}` parsed as unreadable and
+ * was counted a tie.
+ */
+export function balancedSpans(text: string, open: '[' | '{', close: ']' | '}'): string[] {
   const spans: string[] = [];
   let cursor = 0;
   while (cursor < text.length) {
-    const start = text.indexOf('[', cursor);
+    const start = text.indexOf(open, cursor);
     if (start === -1) break;
     let depth = 0, inStr = false, esc = false, end = -1;
     for (let i = start; i < text.length; i++) {
@@ -147,13 +164,17 @@ function balancedArraySpans(text: string): string[] {
         continue;
       }
       if (ch === '"') inStr = true;
-      else if (ch === '[') depth++;
-      else if (ch === ']' && --depth === 0) { end = i; break; }
+      else if (ch === open) depth++;
+      else if (ch === close && --depth === 0) { end = i; break; }
     }
     if (end === -1) { cursor = start + 1; continue; }
     spans.push(text.slice(start, end + 1));
     cursor = end + 1;
   }
+  return spans;
+}
+
+function balancedArraySpans(text: string): string[] {
   // Longest first: the outer array is the answer, a nested one rarely is.
-  return spans.sort((a, b) => b.length - a.length);
+  return balancedSpans(text, '[', ']').sort((a, b) => b.length - a.length);
 }

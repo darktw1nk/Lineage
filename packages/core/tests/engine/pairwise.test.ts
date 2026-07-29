@@ -95,6 +95,29 @@ describe('runPairwisePlayoff', () => {
     expect(junk!.points['n2']).toBe(0.5);
   });
 
+  it('parses an embedded verdict object that has nested fields', async () => {
+    // The last-resort scavenger used /\{[^{}]*\}/g, which cannot match anything
+    // nested — so a judge that reports per-output scores alongside its winner
+    // was "unparseable" and counted as a tie. A tie also keeps the decisiveness
+    // margin from ever being met, so the playoff silently stops mattering.
+    let n = 0;
+    registerProvider({ adapter: { name: 'fakejudge', estimateTokens: () => ({ prompt: 1 }),
+      call: async (opts: any) => {
+        // Name the winner by CONTENT so both presentation orders agree.
+        const aIsGood = /OUTPUT A: <<<\nGOOD/.test(opts.prompt);
+        n++;
+        return {
+          output: `Verdict follows: {"winner":"${aIsGood ? 'A' : 'B'}","scores":{"a":9,"b":4}} end.`,
+          promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0,
+        };
+      } } as any });
+    const nodes = [contender('n1', 5, 'GOOD answer'), contender('n2', 5, 'weak answer')];
+    const result = await runPairwisePlayoff({ contenders: nodes, tests: [test1], config, accrue });
+    expect(n).toBe(2);
+    expect(result!.points['n1']).toBe(1); // decisive, not a 0.5/0.5 parse-failure tie
+    expect(result!.points['n2']).toBe(0);
+  });
+
   it('recovers verdicts from prose and embedded JSON (real flash-lite failure modes)', async () => {
     // Observed live: judges sometimes answer "OUTPUT A is better because..." despite
     // the JSON-only instruction, or wrap the JSON in prose. These must not become ties.

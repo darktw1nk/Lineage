@@ -19,7 +19,7 @@ Prefer `--output` over capturing stdout. If you do capture stdout, use `npm run 
 
 ## Before the first run
 
-1. **Pick catalogued models**: `npm run --silent cli -- --list-models --db ./throwaway.db` (the `--db` keeps even this read isolated from the shared desktop DB). Budget enforcement needs the model in the catalog; uncatalogued IDs get default pricing. Providers retire models — a 404 "model no longer available" means pick a newer one from the list.
+1. **Pick catalogued models**: `npm run --silent cli -- --list-models --db ./throwaway.db` (the `--db` keeps even this read isolated from the shared desktop DB). Budget enforcement needs the model in the catalog; an uncatalogued ID is priced at **$0**, so every call costs nothing on paper and `budget` can never trip. Providers retire models — a 404 "model no longer available" means pick a newer one from the list.
 2. **Keys**: env vars (`GEMINI_API_KEY`, `OPENAI_API_KEY`, …) win over stored keys. Cheap default when only Gemini is available: `gemini/gemini-2.5-flash-lite` for both `models` and `serviceModel`.
 3. **Isolate**: always pass `--db ./throwaway.db` — the default DB is shared with the desktop app.
 
@@ -53,7 +53,7 @@ Prefer `--output` over capturing stdout. If you do capture stdout, use `npm run 
 
 - **Meta-prompting is the only failure-aware operator** — it reads test failures. When iterating on quality, set `"operators": { "mutationShare": 0.4, "metaPrompting": { "enabled": true, "share": 0.6 } }`. Blind mutations often hurt.
 - **Iterate by reseeding**: take `best.prompt` from `results.json` as the next run's `seedPrompt`, optionally add `targetFitness` to stop early. Two small runs beat one big one.
-- **`targetFitness` ceiling**: fitness is quality diluted by the other weights — with weights `{quality: 1.0, cost: 0.1, latency: 0.1}` and no cost/latency norms configured, the maximum is 10 × 1.0/1.2 ≈ **8.33**, so `targetFitness: 9` would never trigger. Compute the ceiling as `10 × qualityWeight / sum(weights)` (or use quality-only weights when you want targetFitness on a 0–10 scale).
+- **`targetFitness` ceiling**: fitness is quality diluted by the other ENABLED weights. A weight whose normalization is missing (`cost` without `costNorm`, `latency` without `latencyNorm`) is disabled and dropped from the denominator, so `{quality: 1.0, cost: 0.1, latency: 0.1}` with no norms normalizes to 1.0 and the ceiling is a full 10 — the run logs a warning naming each disabled dimension. Compute the ceiling as `10 × qualityWeight / sum(ENABLED weights)`: with `costNorm` and `latencyNorm` actually configured, that same weight set caps at 10 × 1.0/1.2 ≈ 8.33 and `targetFitness: 9` would never trigger.
 - **Multiple `models` entries** let evolution discover that a different model beats prompt rewording.
 - **Trust the holdout number**: mark 1-2 tests `"holdout": true` (or set `holdoutShare`) and use `samplesPerTest: 2-3` with llm_grade when budget allows — the final `seed → champion` score on unseen tests (results `holdout` field) is the claim worth reporting, not the fitness on training tests.
 - Budget matters? `--estimate --config cfg.json` prints the cost band + call count WITHOUT running (JSON on stdout). Treat `high` as the commit number; the startup banner shows the same estimate on real runs.

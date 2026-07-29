@@ -98,6 +98,28 @@ describe('budget enforcement', () => {
     expect(final.totals.calls * USD_PER_CALL).toBeCloseTo(final.totals.usd, 10);
   }, 60000);
 
+  it('overshoot does not grow with parallelLimit', async () => {
+    // The real defect behind the loose bound above: a node fires every
+    // test x sample in ONE tick (Promise.all), and parallelLimit nodes do it at
+    // once, so they all read the same settled totals.usd and all pass the gate.
+    // The semaphore only delays them; nothing cancels a committed call.
+    // Measured with a $7 cap, 5 tests x 4 samples: $26 at parallelLimit 1 and
+    // $166 at parallelLimit 8 — the breach scaled with concurrency, which is
+    // what makes it unbounded rather than merely sloppy.
+    registerPricedAdapter();
+    const serial = await run(makeConfig({ parallelLimit: 1 }));
+    resetRegistry(); adapterCalls = 0; registerPricedAdapter();
+    const parallel = await run(makeConfig({ parallelLimit: 8 }));
+
+    expect(serial.stopReason).toBe('budget');
+    expect(parallel.stopReason).toBe('budget');
+    // Raising concurrency 8x must not raise spend. Allow one call of slack for
+    // the boundary itself; the point is that it is a CONSTANT, not a multiple.
+    expect(parallel.totals.usd).toBeLessThanOrEqual(serial.totals.usd + USD_PER_CALL);
+    // And neither may exceed the cap by more than a single in-flight call.
+    expect(parallel.totals.usd).toBeLessThanOrEqual(0.02 + USD_PER_CALL);
+  }, 120000);
+
   it('an already-exhausted budget stops the initial fill from spending', async () => {
     registerPricedAdapter();
     // Budget 0 means "spend nothing" — it must not be read as "no limit"

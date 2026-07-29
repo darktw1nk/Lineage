@@ -7,7 +7,7 @@
 import type { CandidateNode, TestCase, EvaluationConfig, UUID } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
-import { fillTemplate, sanitizeForJudge } from '../utils/text.js';
+import { fillTemplate, sanitizeForJudge, balancedSpans } from '../utils/text.js';
 
 export interface PlayoffOptions {
   contenders: CandidateNode[];
@@ -91,7 +91,11 @@ function parseVerdict(raw: string): 'A' | 'B' | 'tie' {
   // 3) Last resort: a JSON object embedded in prose ("Verdict follows: {...}").
   //    Take the LAST one — the judge writes its own conclusion after anything
   //    it quotes.
-  const embedded = [...text.matchAll(/\{[^{}]*\}/g)].map(m => m[0]).reverse();
+  //    Brace-balanced, because a flat /\{[^{}]*\}/ cannot match an object with
+  //    any nesting — `{"winner":"A","scores":{"a":9,"b":4}}` parsed as
+  //    unreadable and was scored a tie, which also keeps MIN_DECISIVE_MARGIN
+  //    from ever being met.
+  const embedded = balancedSpans(text, '{', '}').reverse();
   for (const candidate of embedded) {
     const verdict = asVerdict(candidate);
     if (verdict) return verdict;

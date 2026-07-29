@@ -173,6 +173,35 @@ describe('resume from checkpoint', () => {
     expect(decisionSignature(resumed)).toEqual(decisionSignature(full)); // seeded continuation matches
   }, 60000);
 
+  it('resumes a checkpoint whose last generation is EMPTY without truncating the run', async () => {
+    // moveToNextGeneration pushes an empty generation, then awaits
+    // createNextGeneration to fill it. Anything that throws in that window
+    // (a host sendUpdate raising "Object has been destroyed") checkpoints a
+    // resumable run whose last generation is []. An empty generation reads as
+    // "generation complete" everywhere downstream, so the resume selected from
+    // nothing, did NO work at all, and finished as `exhausted` with an empty
+    // array in results.json — while maxGenerations was nowhere near reached.
+    registerDet();
+    const full = await runToCompletion(freshRun());
+    expect(full.generations.length).toBe(3);
+
+    const stranded = JSON.parse(JSON.stringify(full));
+    stranded.id = 'rs-emptygen';
+    stranded.status = 'stopped';
+    stranded.stopReason = 'error';
+    delete stranded.finishedAt;
+    stranded.generations = stranded.generations.slice(0, 2);
+    stranded.generations.push([]); // the interrupted transition
+
+    resetRegistry(); registerDet();
+    const resumed = await runToCompletion(stranded);
+    expect(resumed.status).toBe('finished');
+    expect(resumed.stopReason).not.toBe('exhausted');
+    expect(resumed.generations.length).toBe(3);
+    expect(resumed.generations[2].length).toBeGreaterThan(0);
+    expect(decisionSignature(resumed)).toEqual(decisionSignature(full));
+  }, 60000);
+
   it('resumes an already-over-budget run to a clean finish instead of hanging', async () => {
     registerDet();
     const budgetConfig = { ...CONFIG, id: 'rs-budget-cfg', targets: { maxGenerations: 3, budgetUSD: 0.0005 } };

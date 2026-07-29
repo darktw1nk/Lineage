@@ -76,6 +76,22 @@ export interface FitnessResult {
   fitness: number;
 }
 
+/**
+ * Dimension-disabled warnings already fired. calculateFitness runs once per
+ * NODE, so an unguarded warn printed the same three-line advisory ten times for
+ * a ten-node generation and buried everything else in the log.
+ */
+const warnedDimensions = new Set<string>();
+/** Call at the start of a run so a second run in the same process still warns. */
+export function resetFitnessWarnings(): void {
+  warnedDimensions.clear();
+}
+function warnOnce(dimension: string, message: string): void {
+  if (warnedDimensions.has(dimension)) return;
+  warnedDimensions.add(dimension);
+  console.warn(message);
+}
+
 export function calculateFitness(
   node: CandidateNode,
   config: EvaluationConfig,
@@ -92,6 +108,13 @@ export function calculateFitness(
   const costUSD = node.metrics?.costUSD;
   const latencyMs = node.metrics?.latencyMs;
   const stability = weights.stability ? calculateStabilityScore(node) : undefined;
+  // Same rule as cost/latency: a dimension that CANNOT be measured is disabled,
+  // not awarded a free 10. `calculateStabilityFromSamples` returns undefined
+  // whenever samplesPerTest is 1 (the default), so a weighted stability handed
+  // every candidate 10/10 at full weight — a run where the judge scored every
+  // answer 1/10 reported fitness 8.2 and stopped with reason "target". Every
+  // targetFitness calibrated against a stability-weighted config was wrong.
+  const stabilityMeasured = node.metrics?.stability !== undefined;
   
   // A weighted dimension with NO normalization configured is disabled, and its
   // weight is dropped from the denominator so it cannot cap the score.
@@ -110,18 +133,25 @@ export function calculateFitness(
   // is what makes it not-silent.
   const effectiveWeights = { ...weights };
   if (effectiveWeights.cost && !config.fitness.costNorm) {
-    console.warn(
+    warnOnce('cost',
       '[Fitness] A "cost" weight is set but fitness.costNorm is missing — the cost dimension is DISABLED. ' +
       'Add fitness.costNorm ({ mode, maxUSDPerCall }) to enable it.',
     );
     effectiveWeights.cost = 0;
   }
   if (effectiveWeights.latency && !config.fitness.latencyNorm) {
-    console.warn(
+    warnOnce('latency',
       '[Fitness] A "latency" weight is set but fitness.latencyNorm is missing — the latency dimension is DISABLED. ' +
       'Add fitness.latencyNorm ({ mode, maxMs }) to enable it.',
     );
     effectiveWeights.latency = 0;
+  }
+  if (effectiveWeights.stability && !stabilityMeasured) {
+    warnOnce('stability',
+      '[Fitness] A "stability" weight is set but this candidate has no test with 2+ samples — the stability ' +
+      'dimension is DISABLED for it. Set samplesPerTest to 2 or more to enable it.',
+    );
+    effectiveWeights.stability = 0;
   }
 
   // Normalize weights
@@ -314,10 +344,11 @@ export async function evaluateSafetyGuardrails(
   return { score: avgScore, totalCost, totalPromptTokens, totalCompletionTokens, calls };
 }
 
-function calculateStabilityScore(node: CandidateNode): number {
-  // Stability requires multiple runs with different seeds.
-  // Only MISSING data is neutral-10: a measured 0 means maximally unstable.
-  return node.metrics?.stability ?? 10;
+function calculateStabilityScore(node: CandidateNode): number | undefined {
+  // Undefined means UNMEASURED (samplesPerTest < 2), which disables the
+  // dimension above. It used to fall back to 10, which is not neutral — it is
+  // the best possible score, handed out for free.
+  return node.metrics?.stability;
 }
 
 /**

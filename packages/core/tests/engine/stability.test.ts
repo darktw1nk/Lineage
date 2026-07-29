@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { calculateStabilityFromSamples } from '../../src/engine/fitness.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { calculateStabilityFromSamples, calculateFitness, resetFitnessWarnings } from '../../src/engine/fitness.js';
 import type { CandidateNode } from '../../src/types.js';
 
 function nodeWith(samplesPerTest: number[][]): CandidateNode {
@@ -53,5 +53,46 @@ describe('stability is measured from repeat SCORES, not reply length', () => {
     const mixed = calculateStabilityFromSamples(nodeWith([[8, 8, 8], [10, 0, 5]]))!;
     expect(mixed).toBeGreaterThan(0);
     expect(mixed).toBeLessThan(10);
+  });
+});
+
+describe('an UNMEASURABLE stability weight does not inflate fitness', () => {
+  beforeEach(() => resetFitnessWarnings());
+
+  const configWith = (weights: any) => ({
+    id: 'c', name: 'c',
+    fitness: { weights },
+    selection: {}, operators: {}, population: {}, targets: {},
+    enabledModels: [], serviceModel: { provider: 'x', model: 'y' },
+    testSet: [], parallelLimit: 1,
+  } as any);
+
+  // A node scored 1/10 on every test, with samplesPerTest 1 (THE DEFAULT), so
+  // metrics.stability is undefined.
+  const badNode = () => ({
+    ...nodeWith([[1], [1]]),
+    metrics: { quality: 1, fitness: 0, costUSD: 0, latencyMs: 1 },
+  } as any);
+
+  it('does not award a free 10 for a dimension that was never measured', () => {
+    // calculateStabilityScore used to `?? 10` — the BEST possible score, handed
+    // out for free. With {quality: 0.2, stability: 0.8} a run whose judge scored
+    // every answer 1/10 reported fitness 8.2 and stopped with reason "target".
+    const { fitness } = calculateFitness(badNode(), configWith({ quality: 0.2, stability: 0.8 }));
+    expect(fitness).toBeCloseTo(1, 5);
+  });
+
+  it('scores identically to the same config without the stability weight', () => {
+    // Disabling drops the weight from the denominator, so ranking is unchanged
+    // rather than capped.
+    const withStability = calculateFitness(badNode(), configWith({ quality: 0.5, stability: 0.5 })).fitness;
+    const withoutStability = calculateFitness(badNode(), configWith({ quality: 0.5 })).fitness;
+    expect(withStability).toBeCloseTo(withoutStability, 5);
+  });
+
+  it('still counts stability when it IS measured', () => {
+    const measured = { ...nodeWith([[1, 1], [1, 1]]), metrics: { quality: 1, fitness: 0, stability: 10, costUSD: 0, latencyMs: 1 } } as any;
+    const { fitness } = calculateFitness(measured, configWith({ quality: 0.5, stability: 0.5 }));
+    expect(fitness).toBeCloseTo(5.5, 5); // 0.5*1 + 0.5*10
   });
 });

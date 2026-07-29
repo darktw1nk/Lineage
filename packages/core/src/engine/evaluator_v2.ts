@@ -32,7 +32,8 @@ import { initGlobalSemaphore } from './semaphore.js';
 import { rngFor } from './rng.js';
 import { COST_LABELS } from './estimate.js';
 import { selectChampion } from './champion.js';
-import { calculateFitness } from './fitness.js';
+import { calculateFitness, resetFitnessWarnings } from './fitness.js';
+import { store } from '../store.js';
 import { getDatabase } from '../database/init.js';
 
 interface EvaluationState {
@@ -66,6 +67,34 @@ interface EvaluationState {
   totalPausedMs: number; // Total time spent paused
   gradingTotal: number; // Total grading calls completed
   gradingFailures: number; // Grading calls that failed to parse JSON
+  /**
+   * Worst-case dollars for calls that have been COMMITTED but have not settled.
+   *
+   * budgetUSD used to be checked against settled spend alone. Every test x
+   * sample of a node reaches the gate in the same tick (see the Promise.all in
+   * runNodeTests), and `parallelLimit` nodes do it at once, so they all read the
+   * same totals.usd and all pass. Measured on a 5-test x 4-sample config with a
+   * $7 cap: $26 at parallelLimit 1, $166 at parallelLimit 8 — a 23.7x breach.
+   * Counting in-flight commitments against the cap is what makes it a cap.
+   */
+  reservedUSD: number;
+  /** Per-call worst case, cached per model so the gate costs no lookups. */
+  callCeilingUSD: Map<string, number>;
+  /** Priciest single call settled so far — the reservation floor for adapter-priced models. */
+  maxObservedCallUSD: number;
+  /**
+   * Resolves when the first call of an UNPRICED model settles.
+   *
+   * With no catalog row and nothing billed yet there is no way to know what a
+   * call costs, so a reservation of $0 lets an unlimited number start at once —
+   * which is how the fill phase spent 3x a two-call budget. Exactly one call is
+   * allowed to run as the price probe; the rest wait for its answer, then
+   * reserve against real evidence.
+   */
+  priceProbe: Promise<void> | null;
+  resolvePriceProbe: (() => void) | null;
+  /** Calls that threw. Their provider-side spend, if any, is unknowable here. */
+  failedCalls: number;
 }
 
 // Active evaluations map
@@ -292,12 +321,26 @@ async function startEvaluationInner(
     console.warn(`[Playoff] contenders clamped from ${rawContenders} to ${pairwiseContenders}`);
   }
 
+  // Compute the downtime credit BEFORE the state literal. `run: { ...run }` is
+  // a shallow copy taken at literal-evaluation time, and object keys evaluate in
+  // order — so a later key that mutates `run` writes to an object `state.run` no
+  // longer shares, and persistRun (which serialises state.run) never saw it. The
+  // credit then vanished at the first checkpoint and the SECOND resume was
+  // killed on arrival by timeLimitMs. Assign it to BOTH explicitly.
+  const adjustedPausedMs = resumeAdjustedPausedMs(run, isResume);
+
+  // Warnings are once-per-run, not once-per-process: a second run in the same
+  // CLI/Electron process must still be told its cost dimension is disabled.
+  resetFitnessWarnings();
+
   // Initialize state
   const state: EvaluationState = {
     run: {
       ...run,
       generations: isResume ? run.generations : [[]],
       status: 'running',
+      totalPausedMs: adjustedPausedMs,
+      graderFingerprint: run.graderFingerprint ?? graderFingerprint(),
     },
     config,
     status: 'running',
@@ -318,6 +361,12 @@ async function startEvaluationInner(
     finishing: false,
     warnedStabilityNeedsSamples: false,
     warnedZeroCostModels: new Set(),
+    reservedUSD: 0,
+    callCeilingUSD: new Map(),
+    maxObservedCallUSD: 0,
+    priceProbe: null,
+    resolvePriceProbe: null,
+    failedCalls: 0,
     stopRequested: false,
     loopRunning: false,
     // Restore accumulated paused time: hard-zeroing it on resume charges every
@@ -329,7 +378,7 @@ async function startEvaluationInner(
     // instantly with stopReason 'time' having done zero work. Credit that gap
     // as paused time; `finishedAt ?? lastCheckpointAt` is the best evidence we
     // have of when the process actually stopped.
-    totalPausedMs: resumeAdjustedPausedMs(run, isResume),
+    totalPausedMs: adjustedPausedMs,
     gradingTotal: 0,
     gradingFailures: 0,
   };
@@ -341,6 +390,28 @@ async function startEvaluationInner(
   console.log(`[Evaluator] Status sent: running`);
 
   if (isResume) {
+    const nowFingerprint = graderFingerprint();
+    if (state.run.graderFingerprint && state.run.graderFingerprint !== nowFingerprint) {
+      activeEvaluations.delete(runId);
+      throw new Error(
+        'Cannot resume: the system prompts (grading rubric / mutation strategies) differ from the ones this run started with. ' +
+        'Scores from two rubrics are not comparable — selection and champion choice would silently mix them. ' +
+        'Re-run with the ORIGINAL config (CLI: --config <the config used to start the run>), or start a fresh run.',
+      );
+    }
+    state.run.graderFingerprint = nowFingerprint;
+
+    // moveToNextGeneration pushes an EMPTY generation, then awaits
+    // createNextGeneration to fill it. A crash in that window checkpoints a run
+    // whose last generation is `[]` — and an empty generation reads as
+    // "generation complete" everywhere downstream, so the resume selected from
+    // nothing, did no work at all, and finished as `exhausted` with an empty
+    // array in results.json while maxGenerations was nowhere near reached. The
+    // generation was never populated, so dropping it loses nothing.
+    while (state.run.generations.length > 1 && state.run.generations[state.run.generations.length - 1].length === 0) {
+      state.run.generations.pop();
+      console.warn('[Evaluator] Resume: dropped a trailing empty generation left by an interrupted transition');
+    }
     state.currentGeneration = state.run.generations.length - 1;
     state.run.stopReason = undefined;
     const TERMINAL = new Set(['finished', 'failed', 'skipped']);
@@ -494,8 +565,19 @@ async function mutatePopulationInBackground(
 
       // Stable label: the node's index in generation 0 — identical streams across resume
       const gen0Index = shellNodes.indexOf(node);
-      const result = await mutateNode(shellNodes[0].prompt, state.config, rngFor(state.config.seed, 'fill', gen0Index));
-      
+      // A mutation is 2+ service calls. Reserve them against the cap for the
+      // duration: the gate above only sees SETTLED spend, so `parallelLimit`
+      // workers starting at once all read the same total and all proceed.
+      const fillMaxTokens = (state.config as any).serviceModelMaxTokens || 20000;
+      const fillReserved = await reserveCall(
+        state, state.config.serviceModel, shellNodes[0].prompt, fillMaxTokens * 2);
+      let result;
+      try {
+        result = await mutateNode(shellNodes[0].prompt, state.config, rngFor(state.config.seed, 'fill', gen0Index));
+      } finally {
+        releaseCall(state, fillReserved);
+      }
+
       // Update node
       node.prompt = result.prompt;
       node.changeLog = result.changeLog;
@@ -1176,18 +1258,36 @@ async function runSingleSample(
       throw new BudgetExhaustedError();
     }
 
-    const result = await adapter.call({
-      model: params.model.model,
-      prompt: samplePrompt,
-      system,
-      temperature: params.temperature,
-      seed: sampleSeed,
-      maxTokens,
-      timeoutMs: state.config.callTimeoutMs,
-      ...(test.mode === 'tool_call' && test.tools?.length ? { tools: test.tools } : {}),
-      providerOptions: state.config.providerOptions,
-      images,
-    });
+    // Reserve BEFORE the await so concurrent samples cannot all clear the same
+    // gate; release in `finally` so a throw never strands the reservation.
+    const reserved = await reserveCall(state, params.model, `${system ?? ''}${samplePrompt}`, maxTokens);
+    let result;
+    try {
+      result = await adapter.call({
+        model: params.model.model,
+        prompt: samplePrompt,
+        system,
+        temperature: params.temperature,
+        seed: sampleSeed,
+        maxTokens,
+        timeoutMs: state.config.callTimeoutMs,
+        ...(test.mode === 'tool_call' && test.tools?.length ? { tools: test.tools } : {}),
+        providerOptions: state.config.providerOptions,
+        images,
+      });
+    } catch (callErr) {
+      // A throw used to skip accrueCost entirely, so a failing provider served
+      // calls that appeared nowhere in totals, the breakdown, the report or the
+      // budget check. Measured: 37 real calls reported as 32.
+      if (!(callErr instanceof BudgetExhaustedError)) {
+        state.failedCalls++;
+        accrueCost(state, state.costContext === 'holdout' ? COST_LABELS.holdout : COST_LABELS.candidates,
+          params.model, { usd: 0, promptTokens: 0, completionTokens: 0, calls: 1 });
+      }
+      throw callErr;
+    } finally {
+      releaseCall(state, reserved);
+    }
 
     // Tool responses serialize into the output channel so samples, cache,
     // playoff, reports, and the UI all compose without special cases.
@@ -1219,18 +1319,27 @@ async function runSingleSample(
       }
       const { evaluateTestResultLLM } = await import('./fitness.js');
       const serviceAdapter = getProviderAdapter(state.config.serviceModel.provider);
-      
-      const gradingResult = await evaluateTestResultLLM(
-        test,
-        candidatePrompt,
-        test.prompt,
-        result.output,
-        state.config.serviceModel,
-        serviceAdapter,
-        maxTokens,
-        state.config.callTimeoutMs
-      );
-      
+
+      // Reserved like the candidate call above. Grading fans out exactly as
+      // wide (one per llm_grade test per sample), so leaving it unreserved
+      // reopened the same "everyone reads the same settled total" hole.
+      const gradeReserved = await reserveCall(state, state.config.serviceModel, result.output, maxTokens);
+      let gradingResult;
+      try {
+        gradingResult = await evaluateTestResultLLM(
+          test,
+          candidatePrompt,
+          test.prompt,
+          result.output,
+          state.config.serviceModel,
+          serviceAdapter,
+          maxTokens,
+          state.config.callTimeoutMs
+        );
+      } finally {
+        releaseCall(state, gradeReserved);
+      }
+
       score = gradingResult.score;
       passed = gradingResult.passed;
       llmGradeReasoning = gradingResult.reasoning;
@@ -1534,6 +1643,16 @@ async function moveToNextGeneration(
 async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promise<void> {
   if (state.holdoutTests.length === 0) return;
 
+  // Resume dedupe, matching maybeRunPlayoff. A checkpoint taken between this
+  // function's own persistRun and finishEvaluation's already contains a
+  // COMPLETE holdout — resuming from it re-ran and re-billed the whole thing.
+  const prior = state.run.holdout;
+  if (prior && !prior.skipped && prior.champion && prior.seed) {
+    console.log('[Evaluator] Holdout already evaluated in an earlier attempt — keeping it');
+    sendUpdate(runId, { type: 'holdout_result', holdout: prior });
+    return;
+  }
+
   const holdout: NonNullable<EvaluationRun['holdout']> = {
     testIds: state.holdoutTests.map(t => t.id),
     samplesPerTest: state.samplesPerTest,
@@ -1693,7 +1812,79 @@ function sniffImageMimeType(buf: Buffer): string | null {
 
 function budgetExhausted(state: EvaluationState): boolean {
   const budget = state.config.targets.budgetUSD;
-  return budget !== undefined && state.run.totals.usd >= budget;
+  return budget !== undefined && state.run.totals.usd + state.reservedUSD >= budget;
+}
+
+/**
+ * Worst-case dollars for one call: the whole prompt, plus a completion that
+ * runs all the way to the token cap. A true upper bound is the only reservation
+ * that turns budgetUSD into a bound rather than a suggestion — an average-case
+ * reservation still lets a burst of concurrent calls overshoot.
+ */
+async function callCeiling(
+  state: EvaluationState, model: ModelRef, promptText: string, maxTokens: number,
+): Promise<number> {
+  const key = `${model.provider}/${model.model}`;
+  let perTokenPair = state.callCeilingUSD.get(key);
+  if (perTokenPair === undefined) {
+    const { getModelCost } = await import('../providers/costs.js');
+    let entry = null;
+    try { entry = await getModelCost(model); } catch { /* unpriced: treated as free below */ }
+    // Pack both prices into the cache as a pair scaled per 1k.
+    state.callCeilingUSD.set(key, entry ? entry.promptUSDper1k : 0);
+    state.callCeilingUSD.set(`${key}#c`, entry ? entry.completionUSDper1k : 0);
+    perTokenPair = state.callCeilingUSD.get(key)!;
+  }
+  const promptPer1k = Math.max(0, perTokenPair);
+  const completionPer1k = Math.max(0, state.callCeilingUSD.get(`${key}#c`) ?? 0);
+  const promptTok = Math.ceil(promptText.length / 4);
+  const fromCatalog = (promptTok / 1000) * promptPer1k + (maxTokens / 1000) * completionPer1k;
+  // A plugin adapter (the shape docs/plugins.md documents) reports its own `usd`
+  // and may have no catalog row at all, which would make the catalog ceiling $0
+  // and the reservation a no-op — exactly the models where the cap matters most.
+  // The priciest call this run has actually settled is a real, observed floor
+  // for what the next one can cost.
+  const ceiling = Math.max(Number.isFinite(fromCatalog) ? fromCatalog : 0, state.maxObservedCallUSD);
+  return Number.isFinite(ceiling) ? ceiling : 0;
+}
+
+/** Commit a call's worst case against the cap, or refuse it if it does not fit. */
+async function reserveCall(
+  state: EvaluationState, model: ModelRef, promptText: string, maxTokens: number,
+): Promise<number> {
+  const budget = state.config.targets.budgetUSD;
+  if (budget === undefined) return 0;
+  let ceiling = await callCeiling(state, model, promptText, maxTokens);
+  if (ceiling === 0) {
+    if (state.priceProbe) {
+      // Someone is already measuring what a call costs. Wait for the answer
+      // rather than committing blind alongside them.
+      await state.priceProbe;
+      ceiling = await callCeiling(state, model, promptText, maxTokens);
+    } else {
+      state.priceProbe = new Promise<void>(resolve => { state.resolvePriceProbe = resolve; });
+    }
+  }
+  if (state.run.totals.usd + state.reservedUSD + ceiling > budget) {
+    throw new BudgetExhaustedError();
+  }
+  state.reservedUSD += ceiling;
+  return ceiling;
+}
+
+/** Release a reservation once the call has settled (or failed). */
+function releaseCall(state: EvaluationState, reserved: number): void {
+  if (reserved > 0) {
+    state.reservedUSD = Math.max(0, state.reservedUSD - reserved);
+  }
+  // Always run: the probe itself reserves nothing, and a probe that never
+  // resolves (because its call threw) would strand every waiter.
+  if (state.resolvePriceProbe) {
+    const resolve = state.resolvePriceProbe;
+    state.resolvePriceProbe = null;
+    state.priceProbe = null;
+    resolve();
+  }
 }
 
 /** Thrown to abandon in-flight work the moment the budget is gone. */
@@ -1728,6 +1919,11 @@ function accrueCost(
     );
   }
 
+  // Per-call, not per-batch: a multi-call accrual (safety guardrails, an
+  // operator) would otherwise overstate what one call can cost.
+  if (c.calls > 0) {
+    state.maxObservedCallUSD = Math.max(state.maxObservedCallUSD, c.usd / c.calls);
+  }
   state.run.totals.usd += c.usd;
   state.run.totals.tokensPrompt += c.promptTokens;
   state.run.totals.tokensCompletion += c.completionTokens;
@@ -1759,19 +1955,47 @@ function downtimeSinceCheckpoint(run: EvaluationRun): number {
 }
 
 /**
- * Paused-time total for a starting run, crediting process downtime on resume —
- * and WRITING IT BACK TO THE RUN.
+ * Stable fingerprint of the system prompts in force right now.
  *
- * Crediting it only into the in-memory state was not enough: persistRun
- * serialises `run`, whose totalPausedMs was only ever touched by the live pause
- * path. So the credit vanished at the first checkpoint and the SECOND resume
- * was killed on arrival by timeLimitMs — the exact failure this was written to
- * prevent, one resume later.
+ * `systemPrompts` are HOST-injected, not part of the stored config — the CLI
+ * takes them from the `--config` file. `--config` is optional on resume, so
+ * resuming without it silently swapped the grading rubric back to the built-in
+ * default mid-run: one results.json whose early nodes were scored 10/10 by the
+ * custom rubric and whose later nodes were scored 1/10 by another, with
+ * selection comparing the two as if they meant the same thing.
+ */
+function graderFingerprint(): string {
+  const stable = (v: unknown): string => {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+    if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
+    const keys = Object.keys(v as Record<string, unknown>).sort();
+    return `{${keys.map(k => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`;
+  };
+  let serialized: string;
+  try {
+    serialized = stable(store.get('systemPrompts', null));
+  } catch {
+    return 'unavailable';
+  }
+  // FNV-1a. Not security — this only has to notice that the rubric changed.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < serialized.length; i++) {
+    hash ^= serialized.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Paused-time total for a starting run, crediting process downtime on resume.
+ *
+ * Pure: the caller assigns the result to BOTH state.totalPausedMs and
+ * state.run.totalPausedMs. Mutating `run` from in here looked equivalent but was
+ * not — state.run is a shallow copy made before this ran, and persistRun
+ * serialises that copy, so the credit never reached disk.
  */
 function resumeAdjustedPausedMs(run: EvaluationRun, isResume: boolean): number {
-  const total = (run.totalPausedMs ?? 0) + (isResume ? downtimeSinceCheckpoint(run) : 0);
-  run.totalPausedMs = total;
-  return total;
+  return (run.totalPausedMs ?? 0) + (isResume ? downtimeSinceCheckpoint(run) : 0);
 }
 
 /**

@@ -65,13 +65,23 @@ describe('estimateRunCost call model', () => {
     expect(e.breakdown.map(b => b.label)).toContain('Holdout evaluation');
   });
 
-  it('safety and stability add per-node calls when weighted', async () => {
+  it('safety adds per-node calls when weighted', async () => {
     const e = await estimateRunCost(base({
-      fitness: { weights: { quality: 1, safety: 0.2, stability: 0.1 }, guardrails: ['no pii', 'no slang'] },
+      fitness: { weights: { quality: 1, safety: 0.2 }, guardrails: ['no pii', 'no slang'] },
     }), flatCost);
     const plain = await estimateRunCost(base(), flatCost);
-    // nodes=5: safety 5*2=10, stability 5*3=15
-    expect(e.calls).toBe(plain.calls + 25);
+    expect(e.calls).toBe(plain.calls + 10); // nodes=5 x 2 guardrails
+  });
+
+  it('stability adds NO calls — it is read from samples already taken', async () => {
+    // It used to add nodes*3 phantom calls, from when stability made its own
+    // provider calls to measure reply-length variance. That was 108 of 338
+    // calls in the docs' own example — a 32% over-count.
+    const e = await estimateRunCost(base({
+      fitness: { weights: { quality: 1, stability: 0.5 } },
+    }), flatCost);
+    const plain = await estimateRunCost(base(), flatCost);
+    expect(e.calls).toBe(plain.calls);
   });
 
   it('unset maxGenerations => perGeneration estimate (one gen-0 pass + one transition)', async () => {
@@ -83,7 +93,18 @@ describe('estimateRunCost call model', () => {
   it('uncatalogued model warns and prices at zero', async () => {
     const e = await estimateRunCost(base(), noCost);
     expect(e.low).toBe(0);
-    expect(e.warnings.some(w => w.includes('not in catalog'))).toBe(true);
+    expect(e.warnings.some(w => w.includes('NOT PRICED'))).toBe(true);
+    // One note per model, not one per price lookup.
+    expect(e.warnings.filter(w => w.includes('NOT PRICED')).length).toBe(1);
+  });
+
+  it('says explicitly that an unpriced model makes budgetUSD unenforceable', async () => {
+    // This is the single most consequential thing the preflight can say — the
+    // calls are priced at $0, so the cap can never trip — and it used to be
+    // one lowercase `note:` among five.
+    const e = await estimateRunCost(base({ targets: { maxGenerations: 2, budgetUSD: 2 } }), noCost);
+    const notice = e.warnings.find(w => w.includes('NOT PRICED'));
+    expect(notice).toMatch(/CANNOT be enforced/);
   });
 
   it('budget below the low estimate warns', async () => {
@@ -94,5 +115,73 @@ describe('estimateRunCost call model', () => {
   it('plugin operator shares count 0 calls but warn', async () => {
     const e = await estimateRunCost(base({ operators: { mutationShare: 0.5, crossoverShare: 0, custom: { myop: { share: 0.5 } } } }), flatCost);
     expect(e.warnings.some(w => w.includes('plugin'))).toBe(true);
+  });
+});
+
+describe('estimateRunCost matches what the engine will actually do', () => {
+  it('partitions the holdout with the SAME seed the engine uses', async () => {
+    // The engine uses `config.holdoutSeed ?? 42`, deliberately NOT coupled to
+    // config.seed. Falling through config.seed here made the preview hold out
+    // the exact complement of the run's real holdout: a config with `seed` set
+    // previewed llm_grade fitness tests for a run whose fitness set had none.
+    const withoutSeed = await estimateRunCost(base({ holdoutShare: 0.5, targets: { maxGenerations: 1 } }), flatCost);
+    const withSeed = await estimateRunCost(base({ holdoutShare: 0.5, seed: 12345, targets: { maxGenerations: 1 } }), flatCost);
+    expect(withSeed.calls).toBe(withoutSeed.calls);
+    expect(withSeed.breakdown).toEqual(withoutSeed.breakdown);
+  });
+
+  it('keeps the operator line when eliteShare is near 1', async () => {
+    // generation.ts clamps numElite to targetPopSize - 1. Without the same
+    // clamp here, E === N made children === 0, so the whole operator line
+    // vanished from the estimate while the engine still ran and billed it.
+    const e = await estimateRunCost(base({ selection: { policy: 'topk', topK: 2, eliteShare: 1.0 } }), flatCost);
+    const ops = e.breakdown.find(b => b.label === 'Genetic operators');
+    expect(ops).toBeDefined();
+    expect(ops!.calls).toBeGreaterThan(0);
+  });
+
+  it('sizes generation 0s playoff with initialSize, not generationSize', async () => {
+    // "Explore wide, then narrow" (populationSize 8 > generationSize 4) is a
+    // documented shape. Sizing every generation with N under-quoted the
+    // playoff line by 183%.
+    const e = await estimateRunCost(base({
+      population: { initialSize: 8, generationSize: 4, seedPrompt: 'S', fill: 'auto' },
+      pairwise: { enabled: true, contenders: 8 },
+      targets: { maxGenerations: 2 },
+    }), flatCost);
+    const playoff = e.breakdown.find(b => b.label === 'Pairwise playoffs')!;
+    // gen0: min(8,8)=8 contenders -> 28 pairs; gen1: min(8,4)=4 -> 6 pairs.
+    // L=1 llm_grade test, both orders => (28 + 6) * 1 * 2
+    expect(playoff.calls).toBe((28 + 6) * 1 * 2);
+  });
+});
+
+describe('estimateRunCost dollar band', () => {
+  it('does not cap the high side at a token count the config never chose', async () => {
+    // The high side was Math.min(serviceModelMaxTokens, 1024) — an assumption
+    // that no reply exceeds 1024 tokens even when the config authorises 20000.
+    // An ordinary 3000-token-output run then spent 2.2x the quoted "high".
+    const small = await estimateRunCost(base({ serviceModelMaxTokens: 256 }), flatCost);
+    const large = await estimateRunCost(base({ serviceModelMaxTokens: 20000 }), flatCost);
+    expect(large.high).toBeGreaterThan(small.high);
+    expect(large.calls).toBe(small.calls); // token cap changes money, not calls
+  });
+
+  it('states the worst case when every reply could run to the token cap', async () => {
+    const e = await estimateRunCost(base({ serviceModelMaxTokens: 20000 }), flatCost);
+    const worst = e.warnings.find(w => w.startsWith('worst case $'));
+    expect(worst).toBeDefined();
+    expect(worst).toContain('20000');
+    // It must exceed the quoted band — otherwise it is not a ceiling.
+    const quoted = Number(worst!.match(/worst case \$([\d.]+)/)![1]);
+    expect(quoted).toBeGreaterThan(e.high);
+  });
+
+  it('discloses that mutation call counts are nominal, not a ceiling', async () => {
+    // mutations.ts re-proposes up to `retries` times when the service model
+    // returns something unusable, so fill/operator calls can run higher than
+    // the flat 2-per-child the estimate quotes.
+    const e = await estimateRunCost(base({ retries: 3 }), flatCost);
+    expect(e.warnings.some(w => w.includes('nominal') && w.includes('re-proposes'))).toBe(true);
   });
 });

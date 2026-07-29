@@ -41,9 +41,11 @@ export function useEvaluation(evaluationId: UUID | null): {
         setLoading(evaluationId, true);
         
         try {
-          const evals = await window.electronAPI.eval.list();
-          const eval_ = evals.find(e => e.id === evaluationId);
-          
+          // eval:get, not eval:list — list returns summaries with no
+          // generations now, and fetching every run to find one was the
+          // reason the sidebar poll grew to seconds.
+          const eval_ = await window.electronAPI.eval.get(evaluationId);
+
           if (eval_) {
             console.log(`[useEvaluation] Loaded eval ${evaluationId.slice(0, 8)} from DB, ${eval_.generations.length} generations`);
             setEvaluation(evaluationId, eval_);

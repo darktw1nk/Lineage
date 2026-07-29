@@ -150,6 +150,16 @@ export function RightPanel({ evaluationId, nodeId, onClose }: RightPanelProps) {
           )}
         </div>
 
+        {/* Why this candidate failed. `node.error` was stored and never shown
+            anywhere in the UI, so a red node — the thing a user clicks FIRST
+            when something goes wrong — explained nothing. */}
+        {node.error && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
+            <div className="text-xs font-medium text-destructive">Why this candidate failed</div>
+            <div className="mt-1 text-xs break-words">{node.error}</div>
+          </div>
+        )}
+
         {/* Prompt & Params */}
         <Section title="Prompt & Parameters">
           <div className="space-y-3">

@@ -150,6 +150,13 @@ export interface EvaluationRun {
   costBreakdown?: Record<string, { calls: number; promptTokens: number; completionTokens: number; usd: number }>; // COST_LABELS keys + model:<provider>/<model> keys
   pricingUnknown?: string[]; // models with no catalogued price: their calls count as $0, so spend is a lower bound
   estimate?: { calls: number; low: number; high: number; breakdown: Array<{ label: string; calls: number; low: number; high: number }> }; // preflight snapshot
+  /**
+   * Fingerprint of the system prompts (grading rubric, mutation strategies,
+   * judge instructions) in force when the run started. A resume that resolves
+   * DIFFERENT prompts is refused: scores from two rubrics are not comparable,
+   * and selection/elitism/champion choice would silently mix them.
+   */
+  graderFingerprint?: string;
   version: string; // schema version
   totalPausedMs?: number; // Total time spent paused (for accurate elapsed time display)
   pausedAt?: number; // Timestamp when currently paused (if status is 'paused')

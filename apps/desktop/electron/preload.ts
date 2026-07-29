@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     resume: (runId) => ipcRenderer.invoke('eval:resume', runId),
     stop: (runId) => ipcRenderer.invoke('eval:stop', runId),
     list: () => ipcRenderer.invoke('eval:list'),
+    get: (runId) => ipcRenderer.invoke('eval:get', runId),
     export: (runId) => ipcRenderer.invoke('eval:export', runId),
     import: (filePath) => ipcRenderer.invoke('eval:import', filePath),
     delete: (runId) => ipcRenderer.invoke('eval:delete', runId),

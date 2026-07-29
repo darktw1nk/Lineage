@@ -461,9 +461,12 @@ function getEvaluationName(evaluation: EvaluationRun): string {
   return `Eval ${evaluation.id.slice(0, 8)}`;
 }
 
-function getBestScore(evaluation: EvaluationRun): number | null {
+function getBestScore(evaluation: EvaluationRun & { bestScore?: number | null }): number | null {
+  // eval:list precomputes this in the main process and ships no generations,
+  // so the sidebar no longer receives (or scans) every node of every run.
+  if (evaluation.bestScore !== undefined) return evaluation.bestScore;
   let best = -Infinity;
-  for (const generation of evaluation.generations) {
+  for (const generation of evaluation.generations ?? []) {
     for (const node of generation) {
       if (node.metrics?.fitness !== undefined && node.metrics.fitness > best) {
         best = node.metrics.fitness;

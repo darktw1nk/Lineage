@@ -539,7 +539,14 @@ export async function createNextGeneration(
             parent: snapshot(parent),
             parentB: parentB && snapshot(parentB),
             config,
-            generation: currentGeneration.map(snapshot),
+            // Cloned ON ACCESS, not eagerly. `currentGeneration.map(snapshot)`
+            // per child is O(popSize^2) structuredClone calls per generation —
+            // measured 97-98% of createNextGeneration's wall time, and 584 MB
+            // of garbage per transition at popSize 50 with large outputs — for
+            // a field NO built-in operator reads (metaPromptNode takes it as
+            // `_generation`). A plugin that does read it still gets its own
+            // isolated copy; everyone else pays nothing.
+            get generation() { return currentGeneration.map(snapshot); },
             rng: childRng,
           }),
           config.callTimeoutMs ?? 120_000,

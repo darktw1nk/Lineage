@@ -26,7 +26,16 @@ export interface ElectronAPI {
     pause: (runId: string) => Promise<void>;
     resume: (runId: string) => Promise<void>;
     stop: (runId: string) => Promise<void>;
-    list: () => Promise<Array<EvaluationRun & { configName?: string; interrupted?: boolean }>>;
+    /**
+     * SUMMARIES for the sidebar: scalars + `bestScore`. `generations` is always
+     * empty — polling the full runs every 2s cost more than the poll interval
+     * once a couple of large runs existed. Use `get` for a whole run.
+     */
+    list: () => Promise<Array<EvaluationRun & {
+      configName?: string; interrupted?: boolean;
+      bestScore?: number | null; generationCount?: number; nodeCount?: number;
+    }>>;
+    get: (runId: string) => Promise<(EvaluationRun & { configName?: string; interrupted?: boolean }) | null>;
     export: (runId: string) => Promise<string>;
     import: (filePath: string) => Promise<EvaluationRun>;
     delete: (runId: string) => Promise<void>;

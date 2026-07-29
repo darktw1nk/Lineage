@@ -34,6 +34,10 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('eval:list', async () => {
     return listEvaluations();
   });
+
+  ipcMain.handle('eval:get', async (_event, runId: string) => {
+    return getEvaluation(runId);
+  });
   
   ipcMain.handle('eval:export', async (_event, runId: string) => {
     return exportEvaluation(runId);
@@ -243,7 +247,38 @@ async function startEvaluation(runId: string): Promise<void> {
     
     console.log('[IPC] Found config, importing evaluator_v2...');
     const config: EvaluationConfig = JSON.parse(configRow.config_json);
-    
+
+    // Same key preflight the CLI has had all along. Without it, a new user who
+    // pressed Start before setting a key watched every node turn red, the
+    // footer read "Stopped: no candidates left", the cost read $0.00, and the
+    // words "API key" appeared NOWHERE on screen — the real reason reached
+    // only a console.error in the Logs panel, which is closed by default.
+    const requiredProviders = new Set<string>(config.enabledModels.map(m => m.provider));
+    requiredProviders.add(config.serviceModel.provider);
+    const missingKeys = [...requiredProviders].filter(p => !getApiKeySync(p));
+    if (missingKeys.length > 0) {
+      throw new Error(
+        `No API key for ${missingKeys.join(', ')}. Open Settings → API Keys and add ${missingKeys.length > 1 ? 'them' : 'it'}, then start the run again.`,
+      );
+    }
+
+    // The CLI's other resume guard, which this path was missing. A checkpoint
+    // can reference a provider a PLUGIN registered; if that plugin is now
+    // disabled or removed, the run does not fail — it grinds through every
+    // remaining node with "Unknown provider", degenerates into cache-hit copies
+    // of whichever node still had results, marks itself `finished`, and can
+    // then never be resumed again. One click permanently burns the run.
+    const { listProviders } = await import('@promptengine/core');
+    const available = new Set(listProviders());
+    const missingProviders = [...requiredProviders].filter(p => !available.has(p as any));
+    if (missingProviders.length > 0) {
+      throw new Error(
+        `Provider not available: ${missingProviders.join(', ')}. ` +
+        'It comes from a plugin that is not loaded — re-enable it in Settings → Plugins, then start the run again. ' +
+        'The run is untouched and can still be resumed once the provider is back.',
+      );
+    }
+
     const { startEvaluation: startEval } = await import('@promptengine/core');
     console.log('[IPC] Calling engine startEvaluation (V2)...');
     await startEval(runId, config, run);
@@ -269,23 +304,101 @@ async function stopEvaluation(runId: string): Promise<void> {
   stopEval(runId);
 }
 
+/**
+ * Cached list summaries, keyed by run id. `len` is LENGTH(run_json) at the time
+ * the summary was built: a finished run's blob never changes again, so after the
+ * first poll it is never re-read or re-parsed.
+ */
+const summaryCache = new Map<string, { len: number; summary: EvaluationRun }>();
+
+/**
+ * Sidebar list rows: scalars plus a precomputed best score. NOT the full runs.
+ *
+ * This is polled every 2 seconds, forever, whether or not an evaluation is
+ * running. Selecting and JSON.parsing every run_json made that poll cost
+ * 1,442 ms with one large run on file and 2,335 ms across thirteen — longer
+ * than its own interval, so the main process never idled — and shipped 312 MB
+ * to the renderer on every tick, which React Query then cached. Reading lengths
+ * instead of blobs means a poll re-parses only the run that actually changed.
+ *
+ * `generations` is deliberately EMPTY here. Use eval:get for the full run.
+ */
 async function listEvaluations(): Promise<EvaluationRun[]> {
   const db = getDatabase();
   const rows = db.prepare(`
-    SELECT r.run_json, c.name as config_name 
+    SELECT r.id, LENGTH(r.run_json) as len, c.name as config_name
     FROM evaluation_runs r
     LEFT JOIN evaluation_configs c ON r.config_id = c.id
     ORDER BY r.started_at DESC
-  `).all() as { run_json: string; config_name: string }[];
-  
-  return rows.map(row => {
-    const run = JSON.parse(row.run_json);
-    // Add the config name to the run object for display
+  `).all() as { id: string; len: number; config_name: string }[];
+
+  const live = new Set(rows.map(r => r.id));
+  for (const id of summaryCache.keys()) {
+    if (!live.has(id)) summaryCache.delete(id); // deleted runs must not pin memory
+  }
+
+  const out: EvaluationRun[] = [];
+  for (const row of rows) {
+    const cached = summaryCache.get(row.id);
+    let summary: EvaluationRun;
+    if (cached && cached.len === row.len) {
+      summary = cached.summary;
+    } else {
+      const blob = db.prepare('SELECT run_json FROM evaluation_runs WHERE id = ?')
+        .get(row.id) as { run_json: string } | undefined;
+      if (!blob) continue;
+      let run: EvaluationRun;
+      try {
+        run = JSON.parse(blob.run_json);
+      } catch {
+        console.error(`[IPC] Skipping run ${row.id.slice(0, 8)} in list: unparseable run_json`);
+        continue;
+      }
+      let best = -Infinity;
+      let nodeCount = 0;
+      for (const generation of run.generations ?? []) {
+        for (const node of generation) {
+          nodeCount++;
+          const f = node.metrics?.fitness;
+          if (f !== undefined && f > best) best = f;
+        }
+      }
+      const { generations: _drop, ...scalars } = run;
+      summary = {
+        ...scalars,
+        generations: [],
+        ...( { bestScore: Number.isFinite(best) ? best : null, generationCount: (run.generations ?? []).length, nodeCount } as any ),
+      } as EvaluationRun;
+      summaryCache.set(row.id, { len: row.len, summary });
+    }
+    // Recomputed every poll: liveness is process state, not row state.
+    out.push({
+      ...summary,
+      ...( { configName: row.config_name, interrupted: summary.status !== 'finished' && !isEvaluationActive(row.id) } as any ),
+    } as EvaluationRun);
+  }
+  return out;
+}
+
+/** The FULL run, for the one evaluation the user actually opened. */
+async function getEvaluation(runId: string): Promise<EvaluationRun | null> {
+  const db = getDatabase();
+  const row = db.prepare(`
+    SELECT r.run_json, c.name as config_name
+    FROM evaluation_runs r
+    LEFT JOIN evaluation_configs c ON r.config_id = c.id
+    WHERE r.id = ?
+  `).get(runId) as { run_json: string; config_name: string } | undefined;
+  if (!row) return null;
+  try {
+    const run = JSON.parse(row.run_json) as EvaluationRun;
     (run as any).configName = row.config_name;
-    // Checkpointed but not finished and not live in this process => resumable
-    (run as any).interrupted = run.status !== 'finished' && !isEvaluationActive(run.id);
+    (run as any).interrupted = run.status !== 'finished' && !isEvaluationActive(runId);
     return run;
-  });
+  } catch {
+    console.error(`[IPC] eval:get ${runId.slice(0, 8)}: unparseable run_json`);
+    return null;
+  }
 }
 
 async function deleteEvaluation(runId: string): Promise<void> {
@@ -591,6 +704,16 @@ async function saveApiKey(provider: string, key: string): Promise<void> {
   } catch (error) {
     console.error(`Error saving API key for ${provider}:`, error);
     throw error;
+  }
+}
+
+/** Synchronous key read, for the preflight in startEvaluation. */
+function getApiKeySync(provider: string): string | null {
+  try {
+    const key = store.get(`apiKey.${provider}`, null) as string | null;
+    return key && key.trim() ? key : null;
+  } catch {
+    return null;
   }
 }
 

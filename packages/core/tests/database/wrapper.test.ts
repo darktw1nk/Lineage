@@ -288,4 +288,28 @@ describe('better-sqlite3 parity (bug-hunt regression)', () => {
     wrapper.prepare('INSERT INTO bigint_test (v) VALUES (?)').run(42n as any);
     expect((wrapper.prepare('SELECT v FROM bigint_test').get() as any).v).toBe(42);
   });
+
+  describe('connection pragmas survive a save', () => {
+    // sql.js's export() CLOSES and REOPENS the connection, resetting every
+    // connection-scoped pragma. `foreign_keys = ON`, set once at open, was off
+    // again before the first checkpoint landed — so the schema's declared
+    // foreign keys were never actually enforced. Nothing changed except the
+    // appearance of enforcement.
+    it('keeps foreign_keys ON after flush()', () => {
+      wrapper._applyConnectionPragmas();
+      expect(wrapper.pragma('foreign_keys')).toBe(1);
+      wrapper.flush();
+      expect(wrapper.pragma('foreign_keys')).toBe(1);
+    });
+
+    it('actually rejects an orphan row after a flush', () => {
+      wrapper._applyConnectionPragmas();
+      wrapper.exec('CREATE TABLE parent (id TEXT PRIMARY KEY)');
+      wrapper.exec('CREATE TABLE child (id TEXT PRIMARY KEY, parent_id TEXT REFERENCES parent(id))');
+      wrapper.flush();
+      expect(() =>
+        wrapper.prepare('INSERT INTO child (id, parent_id) VALUES (?, ?)').run('c1', 'no-such-parent'),
+      ).toThrow();
+    });
+  });
 });

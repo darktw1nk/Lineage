@@ -109,5 +109,5 @@ Run a single test file: `npx vitest run packages/core/tests/engine/fitness.test.
 
 - **404 "model is no longer available"** — providers retire models; pick a current one from `--list-models` or re-sync via OpenRouter.
 - **"No API key found for provider"** — the run needs a key for every provider referenced by `models` *and* `serviceModel`; see the key resolution order above.
-- **Budget seems ignored** — cost accounting uses the model catalog; uncatalogued model IDs fall back to default pricing. Check `--list-models`.
+- **Budget seems ignored** — cost accounting uses the model catalog, and an uncatalogued model ID is priced at **$0**, not at some default. Every call then costs nothing on paper, so `budget` can never trip. Check `--list-models`, and `--sync-models` to pull the OpenRouter catalog. The run warns about this at startup and `--estimate` flags it too.
 - **Where is my data?** — the desktop app's database and stored keys live in the OS user-data dir (`%APPDATA%/evolution2/` on Windows in dev mode).
