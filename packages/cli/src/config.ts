@@ -294,7 +294,10 @@ export function validateCliConfig(config: CliConfig): void {
     'openaiKey', 'anthropicKey', 'geminiKey', 'groqKey', 'openrouterKey',
   ]);
   for (const key of Object.keys(config)) {
-    if (!KNOWN_KEYS.has(key)) {
+    // `<provider>Key` is the documented way to supply a key for ANY provider,
+    // including one a plugin registers — the CLI's own error message even tells
+    // you to add "fakepKey". Warning that it is unknown contradicted that.
+    if (!KNOWN_KEYS.has(key) && !/^[a-z][a-z0-9]*Key$/i.test(key)) {
       process.stderr.write(`warning: unknown config key "${key}" — ignored (typo?)\n`);
     }
   }

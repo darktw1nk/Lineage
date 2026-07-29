@@ -34,11 +34,19 @@ export class OpenAIAdapter extends BaseProviderAdapter {
     return withRetry(async () => {
       const startTime = Date.now();
       
-      // Reasoning models (o-series and gpt-5) require max_completion_tokens and
-      // reject any temperature but 1. Matching only the literal 'o1' missed
+      // Reasoning models (o-series, codex, gpt-5) require max_completion_tokens
+      // and reject any temperature but 1. Matching only the literal 'o1' missed
       // o3/o3-mini/o4-mini entirely, so every o3/o4 call was sent max_tokens
       // with a real temperature and got an immediate, non-retryable 400.
-      const isReasoningModel = /(^|[^a-z])o[1-9](-|$|[0-9])/.test(opts.model) || opts.model.includes('gpt-5');
+      //
+      // Matched against the BASE model name: a fine-tune is named
+      // `ft:gpt-4o-…:my-o1-experiment:…`, and matching the whole string made
+      // that a false positive. Case-insensitive for Azure-style ids.
+      const baseModel = opts.model.split(':')[0].split('/').pop() ?? opts.model;
+      const isReasoningModel =
+        /(^|[^a-z])o[1-9](-|$|[0-9])/i.test(baseModel) ||
+        /(^|[^a-z])codex(-|$)/i.test(baseModel) ||
+        /gpt-5/i.test(baseModel);
       const useCompletionTokens = isReasoningModel || opts.model.includes('gpt-4');
       const hasTemperatureRestrictions = isReasoningModel;
       

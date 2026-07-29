@@ -51,8 +51,11 @@ export function isRetryableError(error: any): boolean {
   ];
   
   const statusCode = error.status ?? error.statusCode;
-  if (statusCode && retryableStatusCodes.includes(statusCode)) {
-    return true;
+  if (statusCode) {
+    // An explicit HTTP status is authoritative in BOTH directions. Falling
+    // through to the network-code walk let a hard 400 whose cause happened to
+    // carry ECONNRESET burn four attempts on a request that can never succeed.
+    return retryableStatusCodes.includes(statusCode);
   }
 
   // Network errors. (see withCause below)

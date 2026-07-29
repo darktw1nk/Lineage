@@ -136,8 +136,16 @@ export function normalizeContent(content: unknown): string {
   if (typeof content === 'string') return content;
   if (content == null) return '';
   if (Array.isArray(content)) {
+    // Skip reasoning/thinking parts. Concatenating everything with a `text`
+    // field glued a model's chain-of-thought onto its answer, which is then
+    // graded, diffed against `expected`, and shown as the candidate's output.
+    const ANSWER_PARTS = new Set(['text', 'output_text', undefined]);
     return content
-      .map(part => (typeof part === 'string' ? part : typeof part?.text === 'string' ? part.text : ''))
+      .map(part => {
+        if (typeof part === 'string') return part;
+        if (!part || typeof part.text !== 'string') return '';
+        return ANSWER_PARTS.has(part.type) ? part.text : '';
+      })
       .join('');
   }
   return typeof (content as any).text === 'string' ? (content as any).text : '';

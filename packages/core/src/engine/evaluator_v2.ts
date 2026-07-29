@@ -1730,9 +1730,18 @@ function persistRun(state: EvaluationState): void {
     const db = getDatabase();
     db.prepare(`
       UPDATE evaluation_runs
-      SET run_json = ?
+      SET run_json = ?, finished_at = ?, stop_reason = ?
       WHERE id = ?
-    `).run(JSON.stringify(state.run), state.run.id);
+    `).run(
+      JSON.stringify(state.run),
+      // These columns exist in the schema and were written only by import and
+      // the dev seeder — real runs left them NULL forever while the same facts
+      // sat inside run_json. Any future SQL consumer would have read that as
+      // "no run ever finished".
+      state.run.finishedAt ?? null,
+      state.run.stopReason ?? null,
+      state.run.id,
+    );
     // Flush now instead of 50ms from now. docs/cli.md promises "if the process
     // dies, nothing is lost" — with only the debounced save, a hard crash
     // inside that window lost the checkpoint the resume path depends on.
