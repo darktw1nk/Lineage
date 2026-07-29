@@ -101,24 +101,22 @@ export async function withGlobalSemaphore<T>(
   label?: string
 ): Promise<T> {
   if (label) {
-    console.log(`[Semaphore] Acquiring permit for: ${label} (available: ${globalSemaphore.getAvailable()}, queued: ${globalSemaphore.getQueueLength()})`);
+    // Three lines PER CALL. At ~39,000 calls that is 117,000 log lines, and in
+    // the desktop every one is a separate IPC message to the renderer (see
+    // electron/logger.ts). Only report when a call actually has to wait, which
+    // is the only case the log was useful for.
+    if (globalSemaphore.getAvailable() === 0) {
+      console.log(`[Semaphore] ${label} waiting (queued: ${globalSemaphore.getQueueLength()})`);
+    }
   }
   
   await globalSemaphore.acquire();
-  
-  if (label) {
-    console.log(`[Semaphore] Permit acquired for: ${label}`);
-  }
-  
+
   try {
     const result = await fn();
     return result;
   } finally {
     globalSemaphore.release();
-    
-    if (label) {
-      console.log(`[Semaphore] Permit released for: ${label} (available: ${globalSemaphore.getAvailable()}, queued: ${globalSemaphore.getQueueLength()})`);
-    }
   }
 }
 

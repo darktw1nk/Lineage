@@ -246,7 +246,13 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
     const handleUpdate = (_event: any, data: any) => {
       if (!data || !data.type) return;
       
-      console.log(`[Store] IPC update for ${evalId.slice(0, 8)}:`, data.type, data);
+      // Type only, and nothing at all for the per-CALL events. Logging the full
+      // payload here printed a whole node (250 KB with large outputs) for every
+      // node_updated and a totals object for every API call — ~30,000 lines and
+      // hundreds of MB of console traffic in a single 20-generation run.
+      if (data.type !== 'totals' && data.type !== 'node_updated') {
+        console.log(`[Store] IPC update for ${evalId.slice(0, 8)}: ${data.type}`);
+      }
       
       const store = get();
       

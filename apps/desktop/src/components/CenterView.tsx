@@ -218,7 +218,16 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
 
     setNodes(flowNodes);
     setEdges(flowEdges);
-  }, [evaluation, selectedNodeId, setNodes, setEdges]);
+    // Depend on `generations`, NOT the whole `evaluation`.
+    //
+    // accrueCost emits a `totals` event per API CALL, and updateTotals returns
+    // a new evaluation object (spreading the same generations array), so
+    // depending on `evaluation` rebuilt the entire graph on every call —
+    // measured 30,406 rebuilds in one 20-generation run, ~4.1ms each at 600
+    // nodes, so ~125 seconds of pure renderer JS before React reconciliation
+    // and React Flow's DOM work. Spend changes do not change the graph.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evaluation?.generations, selectedNodeId, setNodes, setEdges]);
 
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {

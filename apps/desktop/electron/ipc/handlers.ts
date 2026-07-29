@@ -443,8 +443,28 @@ async function deleteEvaluation(runId: string): Promise<void> {
       }
     }
   });
-  
+
   transaction();
+
+  // Reclaim the space. sql.js leaves freed pages in the file, so deleting rows
+  // alone does not shrink it — a 313 MB database stayed 313 MB after deleting
+  // every run, and sql.js then loads and re-exports all of it on every save
+  // (390 ms per whole-file write at that size). VACUUM cannot run inside a
+  // transaction, hence out here. `--prune-runs` already does this.
+  try {
+    db.exec('VACUUM');
+    db.flush();
+  } catch (error) {
+    console.warn('[IPC] VACUUM after delete failed (the row is still gone):', error);
+  }
+
+  // The deleted run's spend sidecar has nothing left to describe.
+  try {
+    const { clearSpend } = await import('@promptengine/core');
+    clearSpend(db.dbPath, runId);
+  } catch { /* best effort */ }
+
+  summaryCache.delete(runId);
 }
 
 async function getEvaluationConfig(runId: string): Promise<EvaluationConfig | null> {

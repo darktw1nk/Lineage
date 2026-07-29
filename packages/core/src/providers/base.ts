@@ -86,8 +86,6 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
           );
         }
 
-        console.log(`[BaseAdapter] Cost entry for ${this.name}/${opts.model}:`, cost);
-        
         // Last line of defence on price data: a negative or non-finite entry
         // (an OpenRouter "-1" sentinel, a hand-typed price in Settings, a
         // plugin's catalog) must never produce negative or NaN spend. Negative
@@ -106,8 +104,12 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
           );
         }
         
-        console.log(`[BaseAdapter] Calculated USD: ${usd} (prompt: ${result.promptTokens}, completion: ${result.completionTokens})`);
-        
+        // Two per-CALL log lines used to live here (this one plus a full dump
+        // of the cost entry object). At ~39,000 calls that is 78,000 lines, and
+        // in the desktop each becomes its own IPC message to the renderer. The
+        // same figures reach the user through the cost breakdown and the
+        // report, which is where they belong.
+
         return {
           ...result,
           latencyMs,
