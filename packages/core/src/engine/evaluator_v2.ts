@@ -1248,8 +1248,12 @@ async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<voi
   const contenders = finished.slice(0, state.pairwiseContenders);
   if (contenders.length < 2) return;
 
+  // !== undefined, not truthiness: budgetUSD 0 means "spend nothing", and
+  // truthiness read it as "no limit" — so a 0-budget resume could still fund a
+  // full round of judge calls.
   const budget = state.config.targets.budgetUSD;
-  if (budget && state.run.totals.usd >= budget) {
+  const budgetCapped = budget !== undefined;
+  if (budgetCapped && state.run.totals.usd >= budget!) {
     console.warn('[Playoff] Budget exhausted — skipping playoff');
     return;
   }
@@ -1263,7 +1267,7 @@ async function maybeRunPlayoff(runId: UUID, state: EvaluationState): Promise<voi
       accrueCost(state, COST_LABELS.playoff, state.config.serviceModel, { usd, promptTokens, completionTokens, calls: 1 });
       sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
     },
-    shouldAbort: () => !!(budget && state.run.totals.usd >= budget),
+    shouldAbort: () => budgetCapped && state.run.totals.usd >= budget!,
   });
   if (!result) return;
 
@@ -1367,7 +1371,8 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
     sendUpdate(runId, { type: 'holdout_result', holdout });
     return;
   }
-  if (state.config.targets.budgetUSD && state.run.totals.usd >= state.config.targets.budgetUSD) {
+  // Same 0-means-zero rule as the playoff gate above.
+  if (state.config.targets.budgetUSD !== undefined && state.run.totals.usd >= state.config.targets.budgetUSD) {
     holdout.skipped = 'budget';
     console.warn('[Evaluator] Budget exhausted — skipping holdout evaluation');
     sendUpdate(runId, { type: 'holdout_result', holdout });

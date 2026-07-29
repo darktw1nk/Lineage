@@ -49,9 +49,14 @@ export interface EvolutionResult {
   configName: string;
   startedAt: number;
   finishedAt: number;
+  /** Wall-clock from startedAt. On a resumed run this includes the downtime. */
   durationMs: number;
+  /** Time this process actually spent working — the number to quote on a resume. */
+  activeDurationMs: number;
   stopReason?: string;
   error?: string;
+  /** id → name/mode for every configured test, so tests[].testId resolves from the output alone. */
+  testSet: Array<{ id: UUID; name: string; mode: string; holdout: boolean }>;
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
   cacheHits: number;
   best: {
@@ -129,6 +134,10 @@ function buildResult(
   run: EvaluationRun,
   collector: RunCollector,
   finishedAt: number,
+  // When this process started work. Differs from run.startedAt on a resume,
+  // where the wall-clock span would otherwise report an overnight gap as
+  // "Duration: 8h 40m" for ten minutes of actual work.
+  processStartedAt: number,
 ): EvolutionResult {
   // Sort generations by number
   const sortedGens = [...collector.generations.entries()].sort((a, b) => a[0] - b[0]);
@@ -172,8 +181,15 @@ function buildResult(
     startedAt: run.startedAt,
     finishedAt,
     durationMs: finishedAt - run.startedAt,
+    activeDurationMs: finishedAt - processStartedAt,
     stopReason: collector.stopReason ?? undefined,
     error: collector.error ?? undefined,
+    testSet: config.testSet.map(t => ({
+      id: t.id,
+      name: t.name ?? '',
+      mode: t.mode ?? 'llm_grade',
+      holdout: t.holdout === true,
+    })),
     totals: { ...collector.totals },
     cacheHits: collector.cacheHits,
     holdout: collector.holdout ?? undefined,
@@ -215,6 +231,7 @@ export async function runEvolution(
   // Reset display state from any previous run
   display.resetState();
 
+  const processStartedAt = Date.now();
   const collector = createCollector();
 
   // Set up the sendUpdate hook before importing the evaluator
@@ -414,14 +431,14 @@ export async function runEvolution(
     const finishedAt = Date.now();
     collector.error = err.message ?? String(err);
     display.onError(collector.error!);
-    return buildResult(config, run, collector, finishedAt);
+    return buildResult(config, run, collector, finishedAt, processStartedAt);
   }
 
   // Wait for completion (resolves on 'finished' status)
   await finishedPromise;
 
   const finishedAt = Date.now();
-  const result = buildResult(config, run, collector, finishedAt);
+  const result = buildResult(config, run, collector, finishedAt, processStartedAt);
 
   if (result.holdout?.seed && result.holdout?.champion) {
     process.stderr.write(`Generalization (unseen tests): seed ${result.holdout.seed.score.toFixed(2)} → champion ${result.holdout.champion.score.toFixed(2)}\n`);

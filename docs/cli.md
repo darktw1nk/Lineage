@@ -400,7 +400,11 @@ The CLI writes a full JSON result to stdout on completion. Structure:
   "startedAt": 1234567890,
   "finishedAt": 1234567899,
   "durationMs": 9000,
+  "activeDurationMs": 9000,
   "stopReason": "generations",
+  "testSet": [
+    { "id": "t1", "name": "Extraction", "mode": "llm_grade", "holdout": false }
+  ],
   "totals": { "tokensPrompt": 0, "tokensCompletion": 0, "usd": 0.0, "calls": 0 },
   "cacheHits": 0,
   "best": {
@@ -432,3 +436,19 @@ The CLI writes a full JSON result to stdout on completion. Structure:
 ```
 
 Use `--output results.json` to write to file, or pipe: `npm run --silent cli -- --config c.json 2>/dev/null > results.json` (the `--silent` keeps npm's banner off stdout).
+
+**`stopReason`** is one of:
+
+| Value | Meaning |
+|---|---|
+| `target` | `targetFitness` was reached — the quality bar was actually hit |
+| `generations` | `maxGenerations` was reached; the ordinary end of a run |
+| `budget` | `budgetUSD` was reached — the run was **cut short** |
+| `time` | `timeLimitMs` was reached — the run was **cut short** |
+| `manual` | Stopped by the user |
+| `exhausted` | No candidates left to evaluate |
+| `error` | Stopped by an unrecoverable error |
+
+Branch on `target` only when you mean "hit the quality bar"; an ordinary successful run reports `generations`.
+
+**`testSet`** maps each test `id` to its name, mode and holdout flag, so `tests[].testId` inside `generations` resolves without re-reading the config. **`activeDurationMs`** is the time this process spent working — on a `--resume` it excludes the downtime that `durationMs` includes.

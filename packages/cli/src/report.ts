@@ -180,7 +180,14 @@ export function generateReport(
   }
 
   lines.push(`| Custom grading prompt | ${cliConfig?.systemPrompts?.llmGradingPrompt ? 'Yes' : 'No'} |`);
-  lines.push(`| Duration | ${formatDuration(result.durationMs)} |`);
+  // On a resumed run the wall-clock span from the ORIGINAL start includes the
+  // downtime, so an overnight gap read as "8h 40m" for ten minutes of work.
+  const resumed = result.activeDurationMs !== undefined && result.durationMs - result.activeDurationMs > 60_000;
+  lines.push(
+    resumed
+      ? `| Duration | ${formatDuration(result.activeDurationMs)} working (${formatDuration(result.durationMs)} wall clock, resumed) |`
+      : `| Duration | ${formatDuration(result.durationMs)} |`,
+  );
   lines.push(`| Cost | $${result.totals.usd.toFixed(4)} |`);
   lines.push(`| API calls | ${result.totals.calls} |`);
   lines.push('');
