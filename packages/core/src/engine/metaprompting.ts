@@ -8,7 +8,7 @@
 import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
-import { stripPromptDelimiters, extractJsonArray } from '../utils/text.js';
+import { stripPromptDelimiters, extractJsonArray, fillTemplate } from '../utils/text.js';
 
 const DEFAULT_METAPROMPT_WITH_FAILURES = `SYSTEM: You are a prompt surgeon. You analyze concrete test failures to suggest targeted fixes. You can ADD, REMOVE, or REWRITE any part of the prompt — including removing instructions that conflict with what the tests require.
 USER: Parent Prompt: <<<
@@ -169,16 +169,10 @@ export async function metaPromptNode(
   const templates = getMetapromptTemplates();
   
   // Step 1: Propose surgical edits - either based on failures or general improvements
-  let metaPrompt: string;
-  if (hasFailures) {
-    metaPrompt = templates.withFailures
-      .replace(/\$\{parentPrompt\}/g, parent.prompt)
-      .replace(/\$\{failureSummary\}/g, failureDetails);
-  } else {
-    metaPrompt = templates.withoutFailures
-      .replace(/\$\{parentPrompt\}/g, parent.prompt)
-      .replace(/\$\{failureSummary\}/g, failureDetails);
-  }
+  const metaPrompt = fillTemplate(
+    hasFailures ? templates.withFailures : templates.withoutFailures,
+    { parentPrompt: parent.prompt, failureSummary: failureDetails },
+  );
   
   const proposalResult = await serviceAdapter.call({
     model: config.serviceModel.model,
@@ -210,9 +204,10 @@ export async function metaPromptNode(
   }
   
   // Step 2: Apply edits
-  const applyPrompt = templates.apply
-    .replace(/\$\{parentPrompt\}/g, parent.prompt)
-    .replace(/\$\{edits\}/g, JSON.stringify(edits));
+  const applyPrompt = fillTemplate(templates.apply, {
+    parentPrompt: parent.prompt,
+    edits: JSON.stringify(edits),
+  });
   
   const applyResult = await serviceAdapter.call({
     model: config.serviceModel.model,

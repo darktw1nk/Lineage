@@ -7,6 +7,7 @@
 import type { CandidateNode, TestCase, EvaluationConfig, UUID } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
+import { fillTemplate } from '../utils/text.js';
 
 export interface PlayoffOptions {
   contenders: CandidateNode[];
@@ -107,11 +108,12 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
 
   const judge = async (test: TestCase, first: string, second: string): Promise<'A' | 'B' | 'tie'> => {
     const expectedBlock = test.expected ? `EXPECTED (reference): <<<\n${test.expected}\n>>>\n` : '';
-    const prompt = template
-      .replace(/\$\{testPrompt\}/g, test.prompt)
-      .replace(/\$\{expectedBlock\}/g, expectedBlock)
-      .replace(/\$\{outputA\}/g, first)
-      .replace(/\$\{outputB\}/g, second);
+    const prompt = fillTemplate(template, {
+      testPrompt: test.prompt,
+      expectedBlock,
+      outputA: first,
+      outputB: second,
+    });
     try {
       const result = await adapter.call({ model: config.serviceModel.model, prompt, temperature: 0.3, maxTokens, timeoutMs: config.callTimeoutMs });
       matches++;

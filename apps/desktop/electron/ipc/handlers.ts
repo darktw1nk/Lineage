@@ -275,7 +275,20 @@ async function listEvaluations(): Promise<EvaluationRun[]> {
 
 async function deleteEvaluation(runId: string): Promise<void> {
   const db = getDatabase();
-  
+
+  // Stop the engine FIRST. Deleting a live run used to leave it running with no
+  // UI to stop it: it kept making paid LLM calls, wrote checkpoints to a row
+  // that no longer existed, and still ran the playoff and holdout passes.
+  if (isEvaluationActive(runId)) {
+    console.log(`[IPC] Stopping active evaluation ${runId.slice(0, 8)} before deleting it`);
+    const { stopEvaluation } = await import('@promptengine/core');
+    stopEvaluation(runId);
+    // Give the engine a moment to unwind in-flight work before the rows vanish
+    for (let i = 0; i < 50 && isEvaluationActive(runId); i++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
   // Delete from all related tables in correct order (children first, then parents)
   const transaction = db.transaction(() => {
     // Get config_id before deleting the run

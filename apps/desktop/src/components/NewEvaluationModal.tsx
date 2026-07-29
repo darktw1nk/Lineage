@@ -381,7 +381,12 @@ Here is the bug report:
               ≈ ${estimate.low.toFixed(4)} – ${estimate.high.toFixed(4)} · ~{estimate.calls} calls{estimate.perGeneration ? ' /gen' : ''}
             </span>
           )}
-          <Button onClick={handleStart}>Start Evaluation</Button>
+          {/* Disabled while pending: eval:create awaits a DB insert AND a full
+              cost estimate before the modal closes — a second click in that
+              window minted a second run and started two evolutions in parallel. */}
+          <Button onClick={handleStart} disabled={createEvaluation.isPending}>
+            {createEvaluation.isPending ? 'Starting…' : 'Start Evaluation'}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

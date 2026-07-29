@@ -19,7 +19,7 @@ import type {
 
 type HoldoutResult = NonNullable<EvaluationRun['holdout']>;
 import { createCliStore } from './store.js';
-import { setStore } from '@promptengine/core';
+import { setStore, selectChampion } from '@promptengine/core';
 import * as display from './display.js';
 
 // ---------------------------------------------------------------------------
@@ -148,14 +148,21 @@ function buildResult(
     })),
   }));
 
-  // Champion: latest playoff winner when playoffs ran, else best-by-fitness
-  let best = collector.bestNode;
-  const lastPlayoff = collector.playoffs[collector.playoffs.length - 1];
-  if (lastPlayoff) {
-    for (const nodesMap of collector.generations.values()) {
-      const winner = nodesMap.get(lastPlayoff.ranking[0]);
-      if (winner) { best = winner; break; }
-    }
+  // Champion: same rule the engine's holdout pass uses — a playoff winner only
+  // counts when its playoff covers the newest evaluated generation.
+  const finishedNodes = sortedGens.flatMap(([gen, nodesMap]) =>
+    [...nodesMap.values()]
+      .filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
+      .map(n => ({ node: n, generation: gen })),
+  );
+  const choice = selectChampion(
+    finishedNodes.map(f => ({ id: f.node.id, generation: f.generation, metrics: f.node.metrics, node: f.node })),
+    collector.playoffs,
+    entry => entry.generation,
+  );
+  const best = choice.champion?.node ?? collector.bestNode;
+  if (choice.staleplayoffIgnored) {
+    console.warn('[CLI] The last pairwise playoff predates the newest evaluated generation — ranking by fitness instead');
   }
 
   return {

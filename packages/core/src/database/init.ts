@@ -223,18 +223,33 @@ function acquireDbLock(dbPath: string): void {
   }
 
   const holder = readHolder();
-  if (holder && holder.pid !== process.pid) {
+  if (!holder) {
+    // Unreadable or 0 bytes. That is ALSO what a healthy lock looks like in the
+    // instant between another process's create and its write, so treat it as
+    // held rather than stealing it.
+    throw new Error(
+      `Database ${dbPath} appears to be in use: ${lock} exists but could not be read. ` +
+      `If no other PromptEngine process is running, delete ${lock} and retry.`
+    );
+  }
+
+  if (holder.pid !== process.pid) {
+    // Only ESRCH ("no such process") proves the holder is gone. EPERM means the
+    // process exists but belongs to another user or an elevated session —
+    // reading that as "dead" stole live locks in exactly the case the lock
+    // matters most.
     let alive = true;
     try {
       process.kill(holder.pid, 0); // signal 0 only tests existence
-    } catch {
-      alive = false;
+    } catch (error: any) {
+      alive = error?.code !== 'ESRCH';
     }
     if (alive) {
       throw new Error(
         `Database ${dbPath} is in use by process ${holder.pid} (since ${holder.since}). ` +
         `Two processes writing this file would erase each other's runs. ` +
-        `Close the other instance, or pass a separate --db path.`
+        `Close the other instance, or pass a separate --db path. ` +
+        `If that process is gone, delete ${lock}.`
       );
     }
     console.warn(`[Database] Reclaiming stale lock from dead process ${holder.pid}`);
@@ -255,7 +270,16 @@ function releaseDbLock(): void {
   lockPath = null;
 }
 
-export async function initializeDatabase(dbPath: string): Promise<void> {
+export interface InitializeDatabaseOptions {
+  /**
+   * Open without taking the exclusive lock. For commands that only READ —
+   * `--list-models`, `--estimate` — where locking out a user who happens to
+   * have the desktop app open is pure obstruction: they never write.
+   */
+  readOnly?: boolean;
+}
+
+export async function initializeDatabase(dbPath: string, options: InitializeDatabaseOptions = {}): Promise<void> {
   if (!dbPath) {
     throw new Error('initializeDatabase requires a database file path');
   }
@@ -264,8 +288,23 @@ export async function initializeDatabase(dbPath: string): Promise<void> {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   // Exclusive access: whole-file saves make concurrent writers destructive
-  acquireDbLock(dbPath);
+  if (!options.readOnly) {
+    // A second init while one is already open would orphan the first lock file.
+    releaseDbLock();
+    acquireDbLock(dbPath);
+  }
 
+  try {
+    await openDatabase(dbPath);
+  } catch (error) {
+    // Anything after acquireDbLock that throws used to leave the lock behind,
+    // permanently locking the user out of their own database.
+    releaseDbLock();
+    throw error;
+  }
+}
+
+async function openDatabase(dbPath: string): Promise<void> {
   // Initialize sql.js WASM engine
   const SQL = await initSqlJs();
 

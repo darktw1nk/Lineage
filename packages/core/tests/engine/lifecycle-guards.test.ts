@@ -91,8 +91,10 @@ describe('lifecycle guards', () => {
       15000,
     );
     expect(finished).toBe(true);
-    expect(final.generations.length).toBe(3);  // reached maxGenerations
-    expect(final.stopReason).toBe('target');   // and said why it stopped
+    expect(final.generations.length).toBe(3);       // reached maxGenerations
+    // 'generations', not 'target': running out of generations is not the same
+    // claim as reaching the quality bar, and this config sets no targetFitness.
+    expect(final.stopReason).toBe('generations');
     // The final generation contains at least one genuinely new (non-elite) child
     const lastGen = final.generations[final.generations.length - 1];
     expect(lastGen.some((n: any) => n.changeLog?.[0]?.label !== 'ELITE')).toBe(true);

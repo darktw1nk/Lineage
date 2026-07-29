@@ -84,6 +84,14 @@ export function registerOperator(op: OperatorPlugin): void {
   operators.set(op.name, op);
 }
 
+/**
+ * Remove an operator. Used by the plugin loader to roll back a plugin whose
+ * later entries failed to register, so a rejected plugin leaves nothing behind.
+ */
+export function unregisterOperator(name: string): void {
+  operators.delete(name);
+}
+
 export function getOperator(name: string): OperatorPlugin | undefined {
   return operators.get(name);
 }
@@ -120,6 +128,11 @@ export function registerProvider(plugin: ProviderPlugin): void {
     pendingModels.push(...plugin.models);
     tryFlushModels();
   }
+}
+
+/** Counterpart to unregisterOperator — see that comment. */
+export function unregisterProvider(id: string): void {
+  providers.delete(id);
 }
 
 export function getRegisteredProviderAdapter(id: string): ProviderAdapter | undefined {

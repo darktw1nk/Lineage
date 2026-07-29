@@ -130,7 +130,7 @@ export interface EvaluationRun {
   configId: UUID;
   startedAt: number;
   finishedAt?: number;
-  stopReason?: 'time' | 'budget' | 'target' | 'manual' | 'exhausted' | 'error';
+  stopReason?: 'time' | 'budget' | 'target' | 'generations' | 'manual' | 'exhausted' | 'error';
   status?: 'running' | 'paused' | 'stopped' | 'pausing' | 'finished';
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
   generations: CandidateNode[][]; // 2D grid
@@ -257,7 +257,7 @@ export interface TotalsUpdateEvent {
 
 export interface StopEvent {
   runId: UUID;
-  reason: 'time' | 'budget' | 'target' | 'manual' | 'exhausted' | 'error';
+  reason: 'time' | 'budget' | 'target' | 'generations' | 'manual' | 'exhausted' | 'error';
   error?: string;
 }
 

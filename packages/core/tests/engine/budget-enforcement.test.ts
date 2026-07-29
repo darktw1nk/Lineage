@@ -107,6 +107,22 @@ describe('budget enforcement', () => {
     expect(final.stopReason).toBe('budget');
   }, 60000);
 
+  it('the fill-phase gate bounds spend under a large initial population', async () => {
+    // The gate existed but did nothing: nodesToMutate.map(async ...) drove every
+    // body to its first await in one tick, so all 19 budget checks read $0.
+    // Only an already-exhausted budget could trip it — which is exactly what the
+    // sibling test above covers, so the bug hid behind a passing test.
+    registerPricedAdapter();
+    const final = await run(makeConfig({
+      population: { initialSize: 20, generationSize: 20, seedPrompt: 'SEED', fill: 'auto' },
+      targets: { maxGenerations: 1, budgetUSD: 0.02 }, // 2 calls' worth
+      parallelLimit: 4,
+    }));
+
+    expect(final.stopReason).toBe('budget');
+    expect(final.totals.usd / 0.02).toBeLessThan(5);
+  }, 60000);
+
   it('a manual stop does not fund a playoff or holdout afterwards', async () => {
     registerPricedAdapter();
     const config = makeConfig({

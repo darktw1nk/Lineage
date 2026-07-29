@@ -8,7 +8,7 @@
 import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
-import { stripPromptDelimiters } from '../utils/text.js';
+import { stripPromptDelimiters, fillTemplate } from '../utils/text.js';
 
 const DEFAULT_CROSSOVER_PROMPT = `SYSTEM: Merge best parts of A and B into a coherent prompt without redundancy.
 USER: A: <<<
@@ -51,9 +51,10 @@ export async function crossoverNodes(
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
   
   const crossoverPromptTemplate = getCrossoverPromptTemplate();
-  const crossoverPrompt = crossoverPromptTemplate
-    .replace(/\$\{parentA\}/g, parentA.prompt)
-    .replace(/\$\{parentB\}/g, parentB.prompt);
+  const crossoverPrompt = fillTemplate(crossoverPromptTemplate, {
+    parentA: parentA.prompt,
+    parentB: parentB.prompt,
+  });
   
   const result = await serviceAdapter.call({
     model: config.serviceModel.model,

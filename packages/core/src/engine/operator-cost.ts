@@ -20,10 +20,21 @@ export const ZERO_OPERATOR_COST: OperatorCost = { promptTokens: 0, completionTok
 
 const COST_KEY = '__partialCost';
 
-/** Attach already-incurred cost to an error before rethrowing it. */
+/**
+ * Attach already-incurred cost to an error before rethrowing it.
+ *
+ * Never let the bookkeeping destroy the error: a frozen or sealed error (ESM
+ * strict mode makes the assignment throw, not fail silently) would otherwise
+ * replace a useful provider message with "object is not extensible".
+ */
 export function withPartialCost(error: unknown, cost: OperatorCost): unknown {
   if (error && typeof error === 'object') {
-    (error as Record<string, unknown>)[COST_KEY] = cost;
+    try {
+      Object.defineProperty(error, COST_KEY, { value: cost, enumerable: false, configurable: true, writable: true });
+    } catch {
+      // Frozen/sealed error: the spend goes unreported, but the original error survives.
+      console.warn('[Operators] Could not attach partial cost to a frozen error — that spend will not be accounted');
+    }
   }
   return error;
 }

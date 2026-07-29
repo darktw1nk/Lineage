@@ -64,9 +64,63 @@ describe('scoreJsonSchema', () => {
     expect(fourOfFive).toBeLessThanOrEqual(5);
   });
 
-  it('extracts JSON embedded in prose instead of scoring it 0', () => {
+  it('extracts JSON embedded in prose, but scores it below a clean emit', () => {
+    // Prose-wrapped JSON is recoverable, so it beats a 0 — but it is a format
+    // failure (JSON.parse on the raw response throws), so it must not pass and
+    // must never tie a clean emit.
     const r = scoreJsonSchema('Sure! Here you go: {"name":"Bob","email":"b@x.co"} — hope that helps.', SCHEMA);
-    expect(r.score).toBe(10);
+    expect(r.score).toBe(5);
+    expect(r.passed).toBe(false);
+    expect(r.score).toBeLessThan(scoreJsonSchema('{"name":"Bob","email":"b@x.co"}', SCHEMA).score);
+  });
+
+  it('a schema template echoed in prose cannot outscore a real answer (bug-hunt regression)', () => {
+    // The extractor made this a 0 -> 10 jump: a model that REFUSED the task but
+    // quoted the format validated and scored a perfect 10, handing evolution a
+    // gradient that rewards echoing the template.
+    const echo = scoreJsonSchema(
+      'Sure! I\'ll answer using the format {"answer": "<your answer here>"}.\n\nHmm, actually I\'m not able to determine the answer.',
+      { type: 'object', required: ['answer'], properties: { answer: { type: 'string' } } } as object,
+    );
+    const real = scoreJsonSchema('{"answer":"42"}', { type: 'object', required: ['answer'], properties: { answer: { type: 'string' } } } as object);
+    expect(echo.passed).toBe(false);
+    expect(echo.score).toBeLessThan(real.score);
+  });
+
+  it('scores the last JSON span, not a leading placeholder example', () => {
+    const schema = { type: 'object', required: ['answer'], properties: { answer: { type: 'string', pattern: '^[0-9]+$' } } } as object;
+    const r = scoreJsonSchema('Example: {"answer":"PLACEHOLDER"}\nReal answer: {"answer":"42"}', schema);
+    // The real answer satisfies the pattern; the placeholder does not.
+    expect(r.detail).not.toMatch(/pattern/);
+  });
+
+  it('present-but-invalid required keys earn no credit even behind a $ref', () => {
+    // Compiling each property sub-schema standalone threw on an unresolvable
+    // $ref, and the catch awarded full credit — so wrong values scored the
+    // partial-credit ceiling.
+    const schema = {
+      type: 'object',
+      required: ['a', 'b'],
+      definitions: { Str: { type: 'string' } },
+      properties: { a: { $ref: '#/definitions/Str' }, b: { $ref: '#/definitions/Str' } },
+    } as object;
+    const bothWrong = scoreJsonSchema('{"a":1,"b":2}', schema);
+    const bothRight = scoreJsonSchema('{"a":"x","b":"y"}', schema);
+    expect(bothRight.score).toBe(10);
+    expect(bothWrong.score).toBeLessThanOrEqual(2);
+  });
+
+  it('extra violations outrank nothing: more broken never scores higher (bug-hunt regression)', () => {
+    // satisfiedFraction measured only required-key presence, so an object with
+    // every key present plus four additionalProperties violations hit the 5
+    // ceiling while a strictly closer object missing one key scored 3.
+    const schema = {
+      type: 'object', additionalProperties: false, required: ['a', 'b'],
+      properties: { a: { type: 'string' }, b: { type: 'string' } },
+    } as object;
+    const missingOne = scoreJsonSchema('{"a":"x"}', schema);
+    const allPresentButFourExtras = scoreJsonSchema('{"a":"x","b":"y","z1":1,"z2":2,"z3":3,"z4":4}', schema);
+    expect(missingOne.score).toBeGreaterThan(allPresentButFourExtras.score);
   });
 
   it('invalid schema scores 0 without throwing', () => {
