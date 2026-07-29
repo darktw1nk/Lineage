@@ -1598,12 +1598,19 @@ async function moveToNextGeneration(
   state.currentGeneration++;
   state.run.generations.push([]);
   
+  const opMaxTokens = (state.config as any).serviceModelMaxTokens || 20000;
   const result = await createNextGeneration(
     topPerformers,
     currentGen,
     state.currentGeneration,
     state.config,
-    state.run.generations // Pass all generations for elitism
+    state.run.generations, // Pass all generations for elitism
+    {
+      // An operator child is 2+ service calls; reserve for both.
+      reserve: (promptText: string) => reserveCall(state, state.config.serviceModel, promptText, opMaxTokens * 2),
+      release: (reserved: number) => releaseCall(state, reserved),
+      exhausted: () => budgetExhausted(state),
+    },
   );
   
   const newGenNodes = result.newNodes;

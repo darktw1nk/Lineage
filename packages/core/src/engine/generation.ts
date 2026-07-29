@@ -323,7 +323,22 @@ export async function createNextGeneration(
   currentGeneration: CandidateNode[],
   nextGenerationNumber: number,
   config: EvaluationConfig,
-  allGenerations: CandidateNode[][] // All previous generations for elitism
+  allGenerations: CandidateNode[][], // All previous generations for elitism
+  /**
+   * Budget gate for the operator calls this transition is about to make.
+   *
+   * There was none. `shouldStop` let the transition BEGIN with one cent left,
+   * and then the entire generation's operator spend executed in a single
+   * unbounded Promise.all — measured at $32 against a $9 cap (356%), of which
+   * 24 calls were ungated operator work fired after the cap was already
+   * reached. `reserve` throws when the call does not fit; the per-child catch
+   * below turns that into a CARRY, so the parent advances unchanged and unpaid.
+   */
+  budget?: {
+    reserve: (promptText: string) => Promise<number>;
+    release: (reserved: number) => void;
+    exhausted: () => boolean;
+  },
 ): Promise<GenerationResult> {
   const newGenNodes: CandidateNode[] = [];
   
@@ -526,6 +541,9 @@ export async function createNextGeneration(
       if (!op) {
         return carry('CARRY', `Operator '${operatorName}' not registered`);
       }
+      if (budget?.exhausted()) {
+        return carry('CARRY', 'Budget exhausted before this operator ran');
+      }
 
       try {
         const parentB = op.parents === 2 ? pickSecondParent(parent) : undefined;
@@ -534,6 +552,11 @@ export async function createNextGeneration(
         // plugin that mutated the live parent rewrote the already-scored
         // parent node in place and every sibling saw the damage, because the
         // same object was handed to all of them.
+        // Reserve for the duration of this child's calls. The per-child check
+        // above only sees SETTLED spend, and every child reaches it in the same
+        // tick, so without a reservation they all pass together.
+        const reserved = await budget?.reserve(parent.prompt) ?? 0;
+        try {
         const result = await withOperatorTimeout(
           op.apply({
             parent: snapshot(parent),
@@ -565,7 +588,14 @@ export async function createNextGeneration(
           operatorType: operatorName as string | null,
           cost: validated.cost,
         };
+        } finally {
+          budget?.release(reserved);
+        }
       } catch (error) {
+        // A refused reservation is not a failure — it is the cap working.
+        if ((error as any)?.name === 'BudgetExhaustedError') {
+          return carry('CARRY', 'Budget exhausted before this operator ran');
+        }
         console.error(`[Generation] Operator '${operatorName}' failed for child ${i}:`, error);
         const spent = partialCostOf(error);
         if (spent.calls > 0) {

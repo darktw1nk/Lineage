@@ -120,6 +120,31 @@ describe('budget enforcement', () => {
     expect(parallel.totals.usd).toBeLessThanOrEqual(0.02 + USD_PER_CALL);
   }, 120000);
 
+  it('a generation transition cannot spend a whole generation of operator calls past the cap', async () => {
+    // createNextGeneration had NO budget check anywhere: once shouldStop let
+    // the transition begin — i.e. with one cent left — it built a child promise
+    // per child and Promise.all'd them, unbounded by parallelLimit. Measured
+    // $32 against a $9 cap (356%): 4 candidate + 4 grading calls inside the cap,
+    // then 24 ungated operator calls in one batch.
+    registerPricedAdapter();
+    const final = await run(makeConfig({
+      // Cheap evaluation so the budget survives into the transition, then a
+      // wide generation whose operator batch is where the money would go.
+      testSet: [{ id: 't1', name: 'a', mode: 'exact_match', prompt: 'A', expected: 'A' }],
+      population: { initialSize: 2, generationSize: 12, seedPrompt: 'SEED', fill: 'auto' },
+      samplesPerTest: 1,
+      targets: { maxGenerations: 3, budgetUSD: 0.05 },
+      parallelLimit: 8,
+    }));
+
+    // 12 children x 2 calls = 24 operator calls per transition = $0.24 alone.
+    expect(final.totals.usd).toBeLessThanOrEqual(0.05 + USD_PER_CALL);
+    // Children the cap refused are carried forward, not silently dropped.
+    const carried = final.generations.flat().filter((n: any) =>
+      n.changeLog?.some((c: any) => /Budget exhausted before this operator/.test(c.text)));
+    expect(carried.length).toBeGreaterThan(0);
+  }, 120000);
+
   it('an already-exhausted budget stops the initial fill from spending', async () => {
     registerPricedAdapter();
     // Budget 0 means "spend nothing" — it must not be read as "no limit"
