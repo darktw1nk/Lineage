@@ -591,7 +591,23 @@ async function openDatabase(dbPath: string, readOnly: boolean): Promise<void> {
         `which would discard existing history. Restore it from backup, or delete the file to start clean.${hint}`
       );
     }
-    sqlDb = new SQL.Database(fileBuffer);
+    try {
+      sqlDb = new SQL.Database(fileBuffer);
+      // sql.js does not validate the header at construction — it defers until
+      // the first statement — so this probe is what turns a non-database file
+      // into an error we can attach the PATH to.
+      sqlDb.exec('PRAGMA schema_version');
+    } catch (error) {
+      // sql.js says only "file is not a database" or "database disk image is
+      // malformed" — no path, no advice. A user who mistyped `--db notes.txt`
+      // could not tell which file was meant. The zero-byte branch above
+      // already sets the standard for this message.
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `${dbPath} is not a readable database (${detail}). ` +
+        `Check the --db path, restore the file from backup, or delete it to start clean.`,
+      );
+    }
   } else {
     sqlDb = new SQL.Database();
   }

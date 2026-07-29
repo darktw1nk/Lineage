@@ -256,6 +256,33 @@ export function validateCliConfig(config: CliConfig): void {
   positiveInt(config.callTimeoutMs, 'callTimeoutMs');
   positiveInt(config.timeLimitMs, 'timeLimitMs');
 
+  // Numeric fields that reach the ENGINE unchecked. These were accepted and
+  // then silently changed the run: `mutationShare: "half"` rewrote the operator
+  // plan (22 calls -> 14), `eliteShare: 1.5` carried nearly a whole generation
+  // forward as elites, and `fitnessWeights.cost: -2` inverts the dimension it
+  // weights. All exited 0 with no warning.
+  const fraction = (value: unknown, field: string) => {
+    if (value === undefined) return;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+      throw new Error(`"${field}" must be a number between 0 and 1 (got ${JSON.stringify(value)})`);
+    }
+  };
+  for (const [name, value] of Object.entries(config.operators ?? {})) {
+    if (name.endsWith('Share')) fraction(value, `operators.${name}`);
+    // Nested operator objects (metaPrompting, paramVariation, ...) carry their own share.
+    else if (value && typeof value === 'object' && 'share' in (value as any)) {
+      fraction((value as any).share, `operators.${name}.share`);
+    }
+  }
+  fraction(config.selection?.eliteShare, 'selection.eliteShare');
+  fraction(config.selection?.topP, 'selection.topP');
+  positiveInt(config.selection?.topK, 'selection.topK');
+  for (const [dim, w] of Object.entries(config.fitnessWeights ?? {})) {
+    nonNegativeNumber(w, `fitnessWeights.${dim}`);
+  }
+  nonNegativeNumber(config.costNorm?.maxUSDPerCall, 'costNorm.maxUSDPerCall');
+  nonNegativeNumber(config.latencyNorm?.maxMs, 'latencyNorm.maxMs');
+
   // `guardrails` is the one array field a user naturally writes as prose, and
   // a bare string is iterable: fitness.ts does `for (const g of guardrails)`,
   // so a 32-character rule became 32 safety judge calls, each grading a single

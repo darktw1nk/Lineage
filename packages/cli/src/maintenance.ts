@@ -111,6 +111,13 @@ export async function pruneRuns(db: any, keep: number, dbPath: string): Promise<
 
     db.exec('VACUUM');
     db.flush();
+
+    // Drop each pruned run's spend sidecar. clearSpend is otherwise only
+    // called on a clean finish and on desktop delete, so a run that crashed
+    // and was never resumed left `.spend-<uuid>.json` next to the database
+    // forever — and pruning its row did not take the file with it.
+    const { clearSpend } = await import('@promptengine/core');
+    for (const id of deleted) clearSpend(dbPath, id);
   }
 
   const bytesAfter = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
