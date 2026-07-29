@@ -1022,10 +1022,23 @@ async function runSingleSample(
     if (test.image) {
       try {
         const fs = await import('fs');
-        const path = await import('path');
         const imgBuf = fs.readFileSync(test.image);
-        const ext = path.extname(test.image).toLowerCase();
-        const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
+        // The file must actually BE an image. A config file names this path and
+        // the bytes are uploaded to a third-party API, so an unchecked read
+        // turned any config into an exfiltration primitive: `"image":
+        // "../../.ssh/id_rsa"` was base64'd, labelled image/png and sent. The
+        // MIME type now comes from the content rather than the extension.
+        const mimeType = sniffImageMimeType(imgBuf);
+        if (!mimeType) {
+          throw new Error(
+            `"${test.image}" is not a PNG, JPEG, GIF or WebP image. ` +
+            `Test images are uploaded to the model provider, so only real image files are read.`,
+          );
+        }
+        const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+        if (imgBuf.length > MAX_IMAGE_BYTES) {
+          throw new Error(`"${test.image}" is ${(imgBuf.length / 1e6).toFixed(1)} MB — test images are capped at 20 MB.`);
+        }
         images = [{ base64: imgBuf.toString('base64'), mimeType }];
       } catch (imgErr) {
         console.error(`[Evaluator] Failed to load image for test "${test.name}":`, imgErr);
@@ -1485,6 +1498,25 @@ function computeCacheKey(node: CandidateNode, state: EvaluationState): string {
  * boundaries, so a node with N tests × M samples could fire N×M×2 more calls
  * (times parallelLimit) after the cap was already reached.
  */
+/**
+ * Identify an image by its magic bytes, or return null.
+ *
+ * Trusting the file extension meant a config could name ANY file — a key
+ * store, an SSH key — and the engine would base64 it, label it image/png and
+ * upload it to the model provider.
+ */
+function sniffImageMimeType(buf: Buffer): string | null {
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'image/png';
+  }
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length >= 6 && buf.subarray(0, 6).toString('latin1').match(/^GIF8[79]a$/)) return 'image/gif';
+  if (buf.length >= 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') {
+    return 'image/webp';
+  }
+  return null;
+}
+
 function budgetExhausted(state: EvaluationState): boolean {
   const budget = state.config.targets.budgetUSD;
   return budget !== undefined && state.run.totals.usd >= budget;
@@ -1547,8 +1579,18 @@ function persistRun(state: EvaluationState): void {
     // Flush now instead of 50ms from now. docs/cli.md promises "if the process
     // dies, nothing is lost" — with only the debounced save, a hard crash
     // inside that window lost the checkpoint the resume path depends on.
-    // Checkpoints happen once per generation, so the extra fsync is cheap.
-    db.flush();
+    //
+    // flush() reports whether the data actually reached disk: on Windows the
+    // rename loses to any process holding the file open, and a silently
+    // dropped FINAL checkpoint makes a completed run reappear as interrupted,
+    // so --resume pays for it a second time. A retry is already scheduled;
+    // say so rather than reporting success.
+    if (!db.flush()) {
+      console.warn(
+        `[Evaluator] Checkpoint for ${state.run.id.slice(0, 8)} is not on disk yet — a retry is scheduled. ` +
+        `If the process dies before it succeeds, this generation's progress will be replayed on resume.`,
+      );
+    }
   } catch (error) {
     console.error('[Evaluator] Checkpoint persist failed:', error);
   }

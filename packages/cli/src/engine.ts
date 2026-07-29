@@ -410,7 +410,11 @@ export async function runEvolution(
     // Durable before the first paid call: a crash inside the debounce window
     // left no run row at all, so `--resume <runId>` answered "Run not found"
     // for a run that had already spent money.
-    db.flush();
+    if (!db.flush()) {
+      process.stderr.write(
+        'Warning: the run row is not on disk yet (a retry is scheduled). If this process dies now, --resume will not find it.\n',
+      );
+    }
   } else {
     const finishedCount = run.generations.flat().filter((n) => n.status === 'finished').length;
     const from = run.generations.length > 0 ? `generation ${run.generations.length - 1}` : 'the start';

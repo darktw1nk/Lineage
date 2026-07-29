@@ -55,6 +55,10 @@ async function runToCompletion(run: any, config: any = CONFIG): Promise<any> {
   const db = getDatabase();
   db.prepare('INSERT INTO evaluation_configs (id, name, config_json, created_at) VALUES (?, ?, ?, ?)')
     .run(config.id, config.name, JSON.stringify(config), Date.now());
+  // A run points at ITS config — foreign keys are enforced now, and the
+  // fixture used to insert a run whose config_id belonged to a different
+  // config, which is exactly the orphan shape enforcement exists to stop.
+  run.configId = config.id;
   db.prepare('INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version) VALUES (?, ?, ?, ?, ?)')
     .run(run.id, run.configId, run.startedAt, JSON.stringify(run), run.version);
   const done = new Promise<void>(res => setSendUpdate((_id, d) => {

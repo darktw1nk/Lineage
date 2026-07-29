@@ -64,19 +64,55 @@ class WrappedStatement {
 /** Flatten the variadic args callers pass, e.g. `.run(a, b, c)` → `[a, b, c]` */
 function flattenParams(params: unknown[]): (string | number | Uint8Array | null)[] {
   if (params.length === 0) return [];
-  // If first arg is already an array, use it directly
-  if (Array.isArray(params[0])) return params[0];
+  // An array FIRST arg is the array form, `.run([a, b, c])`. It used to be
+  // taken as the whole parameter list even when more args followed, so
+  // `.run([a,b,c], d, e)` silently dropped d and e — no error, wrong row.
+  if (Array.isArray(params[0])) {
+    if (params.length > 1) {
+      throw new Error(
+        'Mixed parameter forms: pass either .run(a, b, c) or .run([a, b, c]), not an array followed by more arguments',
+      );
+    }
+    return params[0];
+  }
   return params as (string | number | Uint8Array | null)[];
 }
 
 /** Convert sql.js errors to better-sqlite3–compatible error objects */
 function throwCompatError(err: unknown): never {
-  if (err instanceof Error) {
-    if (err.message.includes('UNIQUE constraint')) {
-      (err as Error & { code: string }).code = 'SQLITE_CONSTRAINT';
+  // sql.js throws BARE STRINGS for bind failures ("Wrong API use : tried to
+  // bind a value of an unknown type"). Every `instanceof Error` guard in the
+  // codebase skipped those, and `.message` came back undefined — so the desktop
+  // showed "Delete failed: undefined". Normalise to a real Error first.
+  const error = err instanceof Error ? err : new Error(typeof err === 'string' ? err : String(err));
+  if (error.message.includes('UNIQUE constraint')) {
+    (error as Error & { code: string }).code = 'SQLITE_CONSTRAINT';
+  }
+  throw error;
+}
+
+/**
+ * Rename, tolerating the transient sharing violations Windows produces.
+ *
+ * On Windows `rename` fails with EPERM/EBUSY/EACCES whenever ANY other process
+ * holds the destination open, even for reading — Defender's real-time scan,
+ * Search Indexer, OneDrive, a backup agent, or this project's own lock-free
+ * `--list-models`. These windows are milliseconds, but a single failed attempt
+ * was enough to silently drop a checkpoint. Spin briefly with Atomics.wait,
+ * which is the only synchronous sleep available and this is a sync code path.
+ */
+function renameWithRetry(from: string, to: string, attempts = 10): void {
+  const TRANSIENT = new Set(['EPERM', 'EBUSY', 'EACCES']);
+  const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error: any) {
+      if (attempt >= attempts || !TRANSIENT.has(error?.code)) throw error;
+      Atomics.wait(sleepBuffer, 0, 0, Math.min(100, 5 * attempt)); // 5,10,15… ms
     }
   }
-  throw err;
 }
 
 export class SqlJsWrapper {
@@ -84,6 +120,7 @@ export class SqlJsWrapper {
   private _dbPath: string;
   private _saveTimer: ReturnType<typeof setTimeout> | null = null;
   private _readOnly: boolean;
+  private _consecutiveSaveFailures = 0;
 
   constructor(db: SqlJsDatabase, dbPath: string, readOnly = false) {
     this._db = db;
@@ -102,12 +139,23 @@ export class SqlJsWrapper {
    * Call this after a write whose durability is the point — a run checkpoint
    * that --resume depends on. Ordinary writes should stay debounced; a save is
    * a whole-file write.
+   *
+   * RETURNS whether the data actually reached disk. It used to swallow the
+   * error and return void, so persistRun reported success for checkpoints that
+   * never landed: on Windows the atomic rename fails with EPERM whenever any
+   * other process momentarily holds the file open (Defender, Search Indexer,
+   * OneDrive, or this project's own lock-free `--list-models`), and a measured
+   * 72% of checkpoints were lost that way. Losing the FINAL one makes a
+   * completed run reappear as interrupted, so `--resume` pays for it twice.
    */
-  flush(): void {
+  flush(): boolean {
     try {
       this._flushSave();
+      return true;
     } catch (error) {
-      console.error('[Database] Flush failed (data stays in memory, will retry on next write):', error);
+      console.error('[Database] Flush failed — data is still in memory and a retry is scheduled:', error);
+      this._scheduleSave(); // re-arm: a swallowed failure used to leave NOTHING pending
+      return false;
     }
   }
 
@@ -126,22 +174,44 @@ export class SqlJsWrapper {
   transaction<T extends (...args: any[]) => any>(fn: T): T {
     const wrapper = this;
     const wrapped = ((...args: unknown[]) => {
+      let result: unknown;
       wrapper._db.run('BEGIN');
       try {
-        const result = fn(...args);
+        result = fn(...args);
+        // An async callback would COMMIT the instant its promise was created,
+        // before any of its work ran — a later throw then "rolled back" nothing
+        // and every write persisted. better-sqlite3 refuses these outright;
+        // so do we, rather than pretending to be transactional.
+        if (result && typeof (result as any).then === 'function') {
+          wrapper._db.run('ROLLBACK');
+          throw new Error(
+            'transaction() callbacks must be synchronous — a promise-returning callback commits before its work runs. ' +
+            'Do the async work first, then call transaction() with the synchronous writes.',
+          );
+        }
         wrapper._db.run('COMMIT');
-        wrapper._flushSave();
-        return result;
       } catch (err) {
-        wrapper._db.run('ROLLBACK');
+        try {
+          wrapper._db.run('ROLLBACK');
+        } catch {
+          // Already rolled back, or never began — keep the ORIGINAL error.
+        }
         throw err;
       }
+      // Durability flush lives OUTSIDE the try: it runs after COMMIT, so a disk
+      // error here used to land in the catch and issue a ROLLBACK against a
+      // transaction that no longer existed — reporting "cannot rollback - no
+      // transaction is active" and destroying the real ENOSPC/EPERM cause,
+      // while the change stayed committed in memory with nothing scheduled to
+      // save it. flush() re-arms the retry and reports rather than throwing.
+      wrapper.flush();
+      return result;
     }) as unknown as T;
     return wrapped;
   }
 
-  /** Schedule a debounced save (50ms) */
-  _scheduleSave(): void {
+  /** Schedule a debounced save (50ms), backing off while it keeps failing. */
+  _scheduleSave(delayMs = 50): void {
     if (this._saveTimer) return;
     this._saveTimer = setTimeout(() => {
       this._saveTimer = null;
@@ -150,10 +220,20 @@ export class SqlJsWrapper {
       // Electron main process or a paid CLI run mid-flight.
       try {
         this._saveToDisk();
+        this._consecutiveSaveFailures = 0;
       } catch (error) {
-        console.error('[Database] Scheduled save failed (will retry on next write):', error);
+        // Re-arm with backoff. Clearing the timer and NOT rescheduling meant a
+        // transient failure was simply dropped, and if no further write ever
+        // came the data was gone.
+        this._consecutiveSaveFailures++;
+        const backoff = Math.min(2000, 50 * 2 ** Math.min(this._consecutiveSaveFailures, 5));
+        console.error(
+          `[Database] Scheduled save failed (attempt ${this._consecutiveSaveFailures}, retrying in ${backoff}ms):`,
+          error,
+        );
+        this._scheduleSave(backoff);
       }
-    }, 50);
+    }, delayMs);
   }
 
   /** Flush any pending save immediately */
@@ -189,7 +269,7 @@ export class SqlJsWrapper {
       fs.fsyncSync(fd); // durable before the rename makes it visible
       fs.closeSync(fd);
       fd = undefined;
-      fs.renameSync(tmpPath, this._dbPath); // atomic on both NTFS and POSIX
+      renameWithRetry(tmpPath, this._dbPath); // atomic on both NTFS and POSIX
     } catch (error) {
       if (fd !== undefined) {
         try { fs.closeSync(fd); } catch { /* already closing down */ }
@@ -200,7 +280,18 @@ export class SqlJsWrapper {
   }
 
   close(): void {
-    this._flushSave();
+    // The final save must not prevent the handle from being released. An
+    // unguarded _flushSave() here threw on quit (a locked file, a full disk),
+    // escaped into Electron's before-quit sequence, and left the sql.js handle
+    // and the lock file behind.
+    if (!this.flush()) {
+      console.error('[Database] Final save did not reach disk — the last changes are lost. Closing anyway.');
+    }
+    // Cancel the retry flush() just scheduled: nothing can service it now.
+    if (this._saveTimer) {
+      clearTimeout(this._saveTimer);
+      this._saveTimer = null;
+    }
     this._db.close();
   }
 }
@@ -335,10 +426,14 @@ export async function initializeDatabase(dbPath: string, options: InitializeData
   // Ensure directory exists
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
+  // Close any handle already open. Releasing only the LOCK left the previous
+  // SqlJsWrapper alive with the same path and a live debounce timer, so its
+  // stale whole-file snapshot later landed on top of the new handle's work —
+  // a ghost write that reverted committed data wholesale.
+  closeDatabase();
+
   // Exclusive access: whole-file saves make concurrent writers destructive
   if (!options.readOnly) {
-    // A second init while one is already open would orphan the first lock file.
-    releaseDbLock();
     await acquireDbLock(dbPath);
   }
 
@@ -346,7 +441,11 @@ export async function initializeDatabase(dbPath: string, options: InitializeData
     await openDatabase(dbPath, options.readOnly === true);
   } catch (error) {
     // Anything after acquireDbLock that throws used to leave the lock behind,
-    // permanently locking the user out of their own database.
+    // permanently locking the user out of their own database. The singleton
+    // must go too: openDatabase assigns it before validating, so a failure left
+    // getDatabase() handing out a live, WRITABLE handle onto a bad file — and
+    // its next save would export that over the user's database.
+    db = null;
     releaseDbLock();
     throw error;
   }
@@ -380,6 +479,10 @@ async function openDatabase(dbPath: string, readOnly: boolean): Promise<void> {
 
   db = new SqlJsWrapper(sqlDb, dbPath, readOnly);
   db.pragma('journal_mode = WAL');
+  // The schema DECLARES foreign keys but SQLite ignores them unless this is on,
+  // so a run could point at a deleted config and orphaned rows accumulated
+  // invisibly.
+  db.pragma('foreign_keys = ON');
 
   // Create tables
   createTables(db);
@@ -395,9 +498,18 @@ async function openDatabase(dbPath: string, readOnly: boolean): Promise<void> {
 }
 
 export function closeDatabase(): void {
-  if (db) {
-    db.close();
-    db = null;
+  const closing = db;
+  // Null the singleton FIRST. A throw inside close() used to leave `db`
+  // pointing at a closed-or-closing handle, so getDatabase() kept answering
+  // queries after quit and the lock was never released — and on the desktop
+  // that throw escaped into Electron's before-quit sequence.
+  db = null;
+  if (closing) {
+    try {
+      closing.close();
+    } catch (error) {
+      console.error('[Database] Error while closing — the lock is still released:', error);
+    }
   }
   releaseDbLock();
 }
@@ -531,6 +643,9 @@ function insertDefaultModelCosts(db: SqlJsWrapper): void {
   }
 }
 
+/** The schema version this build understands. Bump with every new migration. */
+const LATEST_SCHEMA_VERSION = 4;
+
 function runMigrations(db: SqlJsWrapper): void {
   // Check current schema version
   const versionRow = db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get() as { version: number } | undefined;
@@ -539,8 +654,8 @@ function runMigrations(db: SqlJsWrapper): void {
   if (currentVersion === 0) {
     // Fresh install - set up with latest schema (version 4) and models
     insertDefaultModelCosts(db);
-    db.prepare('INSERT INTO schema_version (version) VALUES (4)').run();
-    console.log('Fresh install: Initialized with models (schema v4)');
+    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(LATEST_SCHEMA_VERSION);
+    console.log(`Fresh install: Initialized with models (schema v${LATEST_SCHEMA_VERSION})`);
     return; // No need to run migrations for fresh install
   }
 
@@ -554,14 +669,21 @@ function runMigrations(db: SqlJsWrapper): void {
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(v);
   };
 
-  // Migration 2: Update existing users from old model list to new one
+  // Migration 2: Update existing users from old model list to new one.
+  //
+  // Scoped to the providers this catalog actually owns. An unscoped
+  // `DELETE FROM model_costs` also wiped every OpenRouter row the user had
+  // synced, every Groq row (which insertDefaultModelCosts does NOT re-seed),
+  // and every hand-entered price override. A missing row makes getModelCost
+  // return null, which base.ts prices at $0 — so after this migration those
+  // models billed nothing, totals.usd never grew, and budgetUSD could never
+  // trip. Migration 3 below already used the scoped form.
   if (version === 1) {
     console.log('Running migration 2: Updating model costs to new models...');
-    // Clear old models and insert new ones
-    db.prepare('DELETE FROM model_costs').run();
+    db.prepare("DELETE FROM model_costs WHERE provider IN ('openai', 'anthropic', 'gemini')").run();
     insertDefaultModelCosts(db);
     setVersion(2);
-    console.log('Migration 2 completed - new models loaded');
+    console.log('Migration 2 completed - new models loaded (synced and custom prices preserved)');
     version = 2;
   }
 
@@ -589,4 +711,15 @@ function runMigrations(db: SqlJsWrapper): void {
 
   // Future migrations go here
   // if (version === 4) { ... }
+
+  // A database written by a NEWER build than this one must not be touched:
+  // runMigrations simply fell through anything it did not recognise, so an
+  // older build opened it, queried it, and wrote its own understanding back on
+  // close — silently discarding whatever the newer schema added.
+  if (version > LATEST_SCHEMA_VERSION) {
+    throw new Error(
+      `This database was created by a newer version of PromptEngine (schema v${version}; this build understands v${LATEST_SCHEMA_VERSION}). ` +
+      `Opening it with this build could discard data. Update PromptEngine, or point --db at a different file.`
+    );
+  }
 }

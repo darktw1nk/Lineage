@@ -52,10 +52,15 @@ function isSingleWrapper(text: string): boolean {
  */
 export function stripPromptDelimiters(text: string): string {
   let result = text.trim();
-  while (isSingleWrapper(result)) {
-    const match = result.match(/^<<<\s*([\s\S]*)\s*>>>$/);
-    if (!match) break;
-    result = match[1].trim();
+  // Deliberately NOT a regex. `/^<<<\s*([\s\S]*)\s*>>>$/` has three adjacent
+  // quantifiers, so every FAILING match enumerates their cross-product — and
+  // the failing case is routine: a model wraps its answer in <<< >>> and then
+  // adds a closing sentence. Measured at 90 seconds for 12KB of model output,
+  // growing ~8x per doubling, synchronously on the only thread. That froze the
+  // Electron main process (no IPC, no Stop button) and made the CLI ignore
+  // Ctrl-C. Slicing is linear and does exactly the same job.
+  while (isSingleWrapper(result) && result.startsWith('<<<') && result.endsWith('>>>')) {
+    result = result.slice(3, -3).trim();
   }
   return result;
 }
