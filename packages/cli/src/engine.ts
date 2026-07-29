@@ -390,6 +390,10 @@ export async function runEvolution(
     db.prepare(
       'INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version) VALUES (?, ?, ?, ?, ?)',
     ).run(run.id, run.configId, run.startedAt, JSON.stringify(run), run.version);
+    // Durable before the first paid call: a crash inside the debounce window
+    // left no run row at all, so `--resume <runId>` answered "Run not found"
+    // for a run that had already spent money.
+    db.flush();
   } else {
     const finishedCount = run.generations.flat().filter((n) => n.status === 'finished').length;
     const from = run.generations.length > 0 ? `generation ${run.generations.length - 1}` : 'the start';

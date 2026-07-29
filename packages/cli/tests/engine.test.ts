@@ -12,6 +12,7 @@ let capturedSendUpdate: ((runId: UUID, data: any) => void) | null = null;
 
 const mockDbPrepare = vi.fn();
 const mockDbRun = vi.fn();
+const mockDbFlush = vi.fn();
 
 vi.mock('@promptengine/core', () => ({
   setSendUpdate: (fn: (runId: UUID, data: any) => void) => {
@@ -24,6 +25,7 @@ vi.mock('@promptengine/core', () => ({
       mockDbPrepare(sql);
       return { run: (...args: any[]) => mockDbRun(sql, ...args) };
     },
+    flush: () => mockDbFlush(),
   }),
   closeDatabase: vi.fn(),
   setStore: vi.fn(),

@@ -398,14 +398,32 @@ async function importEvaluation(filePath: string): Promise<EvaluationRun> {
   const fileContent = fs.readFileSync(filePath, 'utf-8');
   const importData = JSON.parse(fileContent);
   
-  // Validate structure
-  if (!importData.run || !importData.config) {
-    throw new Error('Invalid export file format');
+  // Validate structure BEFORE touching the database. A shape check this loose
+  // let a string, a number or an array through, which surfaced later as raw
+  // sql.js text ("tried to bind a value of an unknown type") — or, worse, was
+  // accepted: a truthy non-array `generations` reached CenterView's .reduce and
+  // crashed the render on every subsequent open.
+  const isPlainObject = (v: unknown) => !!v && typeof v === 'object' && !Array.isArray(v);
+  if (!isPlainObject(importData) || !isPlainObject(importData.run) || !isPlainObject(importData.config)) {
+    throw new Error('Invalid export file: expected an object with "run" and "config" objects.');
   }
-  
+
   const run: EvaluationRun = importData.run;
   const config: EvaluationConfig = importData.config;
-  
+
+  if (!Array.isArray(run.generations)) {
+    throw new Error('Invalid export file: "run.generations" must be an array.');
+  }
+  if (typeof run.startedAt !== 'number' || !run.version) {
+    throw new Error('Invalid export file: "run" is missing startedAt or version.');
+  }
+  if (typeof config.name !== 'string') {
+    throw new Error('Invalid export file: "config.name" must be a string.');
+  }
+  if (importData.rawBlobs !== undefined && !Array.isArray(importData.rawBlobs)) {
+    throw new Error('Invalid export file: "rawBlobs" must be an array.');
+  }
+
   // Generate new IDs to avoid conflicts
   const newConfigId = uuidv4();
   const newRunId = uuidv4();
@@ -414,50 +432,52 @@ async function importEvaluation(filePath: string): Promise<EvaluationRun> {
   run.id = newRunId;
   run.configId = newConfigId;
   
-  // Insert config
-  db.prepare(`
-    INSERT INTO evaluation_configs (id, name, config_json, created_at)
-    VALUES (?, ?, ?, ?)
-  `).run(
-    config.id,
-    config.name + ' (imported)',
-    JSON.stringify(config),
-    Date.now()
-  );
-  
-  // Insert run
-  db.prepare(`
-    INSERT INTO evaluation_runs (id, config_id, started_at, finished_at, stop_reason, run_json, version)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    run.id,
-    run.configId,
-    run.startedAt,
-    run.finishedAt || null,
-    run.stopReason || null,
-    JSON.stringify(run),
-    run.version
-  );
-  
-  // Insert raw blobs if any
-  if (importData.rawBlobs && importData.rawBlobs.length > 0) {
-    const blobInsert = db.prepare(`
-      INSERT INTO raw_blobs (id, run_id, node_id, test_id, blob_data, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    
-    for (const blob of importData.rawBlobs) {
-      blobInsert.run(
-        uuidv4(),
-        run.id,
-        blob.nodeId,
-        blob.testId,
-        blob.data,
-        Date.now()
-      );
+  // All three inserts in one transaction. Unwrapped, a run or blob that failed
+  // to insert left the config row committed, so every failed import added
+  // another orphan "… (imported)" entry the user could not see or remove.
+  db.transaction(() => {
+    db.prepare(`
+      INSERT INTO evaluation_configs (id, name, config_json, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(
+      config.id,
+      config.name + ' (imported)',
+      JSON.stringify(config),
+      Date.now()
+    );
+
+    db.prepare(`
+      INSERT INTO evaluation_runs (id, config_id, started_at, finished_at, stop_reason, run_json, version)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      run.id,
+      run.configId,
+      run.startedAt,
+      run.finishedAt || null,
+      run.stopReason || null,
+      JSON.stringify(run),
+      run.version
+    );
+
+    if (importData.rawBlobs && importData.rawBlobs.length > 0) {
+      const blobInsert = db.prepare(`
+        INSERT INTO raw_blobs (id, run_id, node_id, test_id, blob_data, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const blob of importData.rawBlobs) {
+        blobInsert.run(
+          uuidv4(),
+          run.id,
+          blob.nodeId ?? null,
+          blob.testId ?? null,
+          blob.data ?? null,
+          Date.now()
+        );
+      }
     }
-  }
-  
+  })();
+
   return run;
 }
 

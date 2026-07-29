@@ -94,6 +94,21 @@ export class SqlJsWrapper {
     this._scheduleSave();
   }
 
+  /**
+   * Write any pending changes to disk now, skipping the 50ms debounce.
+   *
+   * Call this after a write whose durability is the point — a run checkpoint
+   * that --resume depends on. Ordinary writes should stay debounced; a save is
+   * a whole-file write.
+   */
+  flush(): void {
+    try {
+      this._flushSave();
+    } catch (error) {
+      console.error('[Database] Flush failed (data stays in memory, will retry on next write):', error);
+    }
+  }
+
   pragma(str: string): unknown {
     const results = this._db.exec(`PRAGMA ${str}`);
     if (results.length > 0 && results[0].values.length > 0) {

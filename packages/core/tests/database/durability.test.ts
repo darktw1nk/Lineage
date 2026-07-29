@@ -68,4 +68,34 @@ describe('database durability', () => {
     await expect(initializeDatabase(dbPath)).resolves.toBeUndefined();
     expect(getDatabase()).toBeTruthy();
   });
+
+  it('does not leave the lock behind when init fails after acquiring it', async () => {
+    const dbPath = tmp();
+    created.push(dbPath);
+    fs.writeFileSync(dbPath, ''); // triggers the zero-byte refusal AFTER the lock is taken
+
+    await expect(initializeDatabase(dbPath)).rejects.toThrow();
+    // Leaking here locked the user out of their own database permanently.
+    expect(fs.existsSync(`${dbPath}.lock`)).toBe(false);
+  });
+
+  it('flush() makes a write durable without waiting for the debounce', async () => {
+    const dbPath = tmp();
+    created.push(dbPath);
+    await initializeDatabase(dbPath);
+    const db = getDatabase();
+    db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)').run('checkpoint', 'kept');
+    db.flush();
+
+    // Read the file as it stands RIGHT NOW — the debounced save has not fired,
+    // so this is exactly what a hard crash would leave on disk. docs/cli.md
+    // promises resume loses nothing; without the flush it lost the checkpoint.
+    const onDisk = fs.readFileSync(dbPath);
+    expect(onDisk.length).toBeGreaterThan(0);
+
+    closeDatabase();
+    await initializeDatabase(dbPath);
+    const row = getDatabase().prepare('SELECT value FROM app_settings WHERE key = ?').get('checkpoint') as any;
+    expect(row?.value).toBe('kept');
+  });
 });

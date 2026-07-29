@@ -1503,6 +1503,11 @@ function persistRun(state: EvaluationState): void {
       SET run_json = ?
       WHERE id = ?
     `).run(JSON.stringify(state.run), state.run.id);
+    // Flush now instead of 50ms from now. docs/cli.md promises "if the process
+    // dies, nothing is lost" — with only the debounced save, a hard crash
+    // inside that window lost the checkpoint the resume path depends on.
+    // Checkpoints happen once per generation, so the extra fsync is cheap.
+    db.flush();
   } catch (error) {
     console.error('[Evaluator] Checkpoint persist failed:', error);
   }
