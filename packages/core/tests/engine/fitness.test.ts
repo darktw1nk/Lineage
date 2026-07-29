@@ -231,3 +231,40 @@ describe('evaluateTestResult', () => {
     expect(result.score).toBeLessThanOrEqual(10);
   });
 });
+
+describe('weighted dimensions without a norm (bug-hunt regressions)', () => {
+  it('a cost weight with no costNorm does not cap fitness', () => {
+    // The cost term was skipped when costNorm was absent, but normalizeWeights
+    // still counted the weight in its denominator — so a flawless candidate
+    // scored 7/10 under {quality:0.7, cost:0.3} and any targetFitness above
+    // that was unreachable. costNorm is documented as optional.
+    const node = makeNode({ quality: 10, costUSD: 0 });
+    const result = calculateFitness(node, makeConfig({ weights: { quality: 0.7, cost: 0.3 } }));
+    expect(result.fitness).toBeCloseTo(10, 5);
+  });
+
+  it('a latency weight with no latencyNorm does not cap fitness', () => {
+    const node = makeNode({ quality: 10, latencyMs: 0 });
+    const result = calculateFitness(node, makeConfig({ weights: { quality: 0.5, latency: 0.5 } }));
+    expect(result.fitness).toBeCloseTo(10, 5);
+  });
+
+  it('a negative weight cannot invert the dimension', () => {
+    // {quality:1, cost:-0.5} made the EXPENSIVE candidate score 10 and the free
+    // one 0 — normalizeWeights had no sign guard.
+    const config = makeConfig({
+      weights: { quality: 1, cost: -0.5 } as any,
+      costNorm: { mode: 'absolute', maxUSDPerCall: 0.1 },
+    });
+    const cheap = calculateFitness(makeNode({ quality: 8, costUSD: 0 }), config).fitness;
+    const pricey = calculateFitness(makeNode({ quality: 8, costUSD: 0.05 }), config).fitness;
+    expect(cheap).toBeGreaterThanOrEqual(pricey);
+  });
+
+  it('a NaN weight does not collapse every fitness to zero', () => {
+    const config = makeConfig({ weights: { quality: 1, safety: NaN } as any });
+    const good = calculateFitness(makeNode({ quality: 9 }), config).fitness;
+    const bad = calculateFitness(makeNode({ quality: 2 }), config).fitness;
+    expect(good).toBeGreaterThan(bad); // ranking information survives
+  });
+});

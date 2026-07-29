@@ -103,17 +103,24 @@ export function calculateFitness(
     console.log(`[Fitness] Node ${node.id.slice(0, 8)}: safety=${safety.toFixed(3)}, weight=${normalizedWeights.safety.toFixed(3)}, contribution=${(normalizedWeights.safety * safety).toFixed(3)}`);
   }
   
-  if (costUSD !== undefined && normalizedWeights.cost && config.fitness.costNorm) {
+  // NOT `&& config.fitness.costNorm`. Skipping the term when the norm is
+  // absent while normalizeWeights still counted the weight in its denominator
+  // silently capped fitness: {quality:0.7, cost:0.3} with no costNorm made a
+  // flawless candidate score 7/10, and any targetFitness above that
+  // unreachable. The weight is what enables the dimension; the norm just tunes
+  // it, and every fallback below is a sane default.
+  if (costUSD !== undefined && normalizedWeights.cost) {
+    const costNorm_ = config.fitness.costNorm;
     // Use dynamic max for relative mode, or configured max for absolute mode
     // Every fallback must land on a positive finite number. In relative mode
     // with every node costing $0 there is no dynamic max, and maxUSDPerCall is
     // optional in a hand-written CLI config — leaving maxCost undefined, which
     // threw on .toFixed below and marked the node failed. 0.1 matches the
     // desktop default.
-    const configuredMaxCost = config.fitness.costNorm.maxUSDPerCall;
+    const configuredMaxCost = costNorm_?.maxUSDPerCall;
     const maxCost =
-      (config.fitness.costNorm.mode === 'relative' && dynamicMaxCost && dynamicMaxCost > 0 ? dynamicMaxCost : undefined) ??
-      (Number.isFinite(configuredMaxCost) && configuredMaxCost > 0 ? configuredMaxCost : 0.1);
+      (costNorm_?.mode === 'relative' && dynamicMaxCost && dynamicMaxCost > 0 ? dynamicMaxCost : undefined) ??
+      (typeof configuredMaxCost === 'number' && Number.isFinite(configuredMaxCost) && configuredMaxCost > 0 ? configuredMaxCost : 0.1);
     // Clamp BOTH ends. Only the upper bound was clamped, so a negative cost
     // (a bad price entry) drove costNorm arbitrarily negative and costScore
     // arbitrarily high — a 1/10 prompt reached fitness 84003 and won every
@@ -122,21 +129,25 @@ export function calculateFitness(
     const costScore = (1 - costNorm) * 10; // Scale to 0-10 range
     const costContribution = normalizedWeights.cost * costScore;
     fitness += costContribution;
-    console.log(`[Fitness] Node ${node.id.slice(0, 8)}: cost=$${costUSD.toFixed(6)}, maxCost=$${maxCost.toFixed(6)} (${config.fitness.costNorm.mode}), costNorm=${costNorm.toFixed(3)}, costScore=${costScore.toFixed(3)}, contribution=${costContribution.toFixed(3)}`);
+    console.log(`[Fitness] Node ${node.id.slice(0, 8)}: cost=$${costUSD.toFixed(6)}, maxCost=$${maxCost.toFixed(6)} (${costNorm_?.mode ?? 'default absolute'}), costNorm=${costNorm.toFixed(3)}, costScore=${costScore.toFixed(3)}, contribution=${costContribution.toFixed(3)}`);
   }
   
-  if (latencyMs !== undefined && normalizedWeights.latency && config.fitness.latencyNorm) {
+  // Same reasoning as the cost term: the weight enables the dimension, the norm
+  // only tunes it. Requiring latencyNorm capped fitness at 5/10 for a flawless
+  // candidate under {quality:0.5, latency:0.5}.
+  if (latencyMs !== undefined && normalizedWeights.latency) {
+    const latencyNorm_ = config.fitness.latencyNorm;
     // Use dynamic max for relative mode, or configured max for absolute mode
     // Same guard as maxCost above; 30000 matches the desktop default.
-    const configuredMaxLatency = config.fitness.latencyNorm.maxMs;
+    const configuredMaxLatency = latencyNorm_?.maxMs;
     const maxLatency =
-      (config.fitness.latencyNorm.mode === 'relative' && dynamicMaxLatency && dynamicMaxLatency > 0 ? dynamicMaxLatency : undefined) ??
-      (Number.isFinite(configuredMaxLatency) && configuredMaxLatency > 0 ? configuredMaxLatency : 30000);
+      (latencyNorm_?.mode === 'relative' && dynamicMaxLatency && dynamicMaxLatency > 0 ? dynamicMaxLatency : undefined) ??
+      (typeof configuredMaxLatency === 'number' && Number.isFinite(configuredMaxLatency) && configuredMaxLatency > 0 ? configuredMaxLatency : 30000);
     const latencyNorm = Math.max(0, Math.min(1, latencyMs / maxLatency)); // clamp both ends, as with cost
     const latencyScore = (1 - latencyNorm) * 10; // Scale to 0-10 range
     const latencyContribution = normalizedWeights.latency * latencyScore;
     fitness += latencyContribution;
-    console.log(`[Fitness] Node ${node.id.slice(0, 8)}: latency=${latencyMs.toFixed(1)}ms, maxLatency=${maxLatency.toFixed(1)}ms (${config.fitness.latencyNorm.mode}), latencyNorm=${latencyNorm.toFixed(3)}, latencyScore=${latencyScore.toFixed(3)}, contribution=${latencyContribution.toFixed(3)}`);
+    console.log(`[Fitness] Node ${node.id.slice(0, 8)}: latency=${latencyMs.toFixed(1)}ms, maxLatency=${maxLatency.toFixed(1)}ms (${latencyNorm_?.mode ?? 'default absolute'}), latencyNorm=${latencyNorm.toFixed(3)}, latencyScore=${latencyScore.toFixed(3)}, contribution=${latencyContribution.toFixed(3)}`);
   }
   
   if (stability !== undefined && normalizedWeights.stability) {
@@ -330,21 +341,35 @@ function normalizeWeights(weights: {
   latency?: number;
   stability?: number;
 } {
-  const sum =
-    weights.quality +
-    (weights.safety ?? 0) +
-    (weights.cost ?? 0) +
-    (weights.latency ?? 0) +
-    (weights.stability ?? 0);
-  
+  // A negative weight inverts the dimension — the EXPENSIVE candidate scored 10
+  // and the free one 0 — and a NaN weight poisons the sum so every node's
+  // fitness collapses to 0, destroying all ranking information. Neither is ever
+  // a meaningful configuration, so clamp rather than propagate.
+  const clean = (value: number | undefined, name: string): number => {
+    if (value === undefined) return 0;
+    if (!Number.isFinite(value) || value < 0) {
+      console.error(`[Fitness] Ignoring invalid ${name} weight (${value}) — weights must be finite and >= 0`);
+      return 0;
+    }
+    return value;
+  };
+
+  const quality = clean(weights.quality, 'quality');
+  const safety = clean(weights.safety, 'safety');
+  const cost = clean(weights.cost, 'cost');
+  const latency = clean(weights.latency, 'latency');
+  const stability = clean(weights.stability, 'stability');
+
+  const sum = quality + safety + cost + latency + stability;
+
   if (sum === 0) return { quality: 1 };
-  
+
   return {
-    quality: weights.quality / sum,
-    safety: weights.safety ? weights.safety / sum : undefined,
-    cost: weights.cost ? weights.cost / sum : undefined,
-    latency: weights.latency ? weights.latency / sum : undefined,
-    stability: weights.stability ? weights.stability / sum : undefined,
+    quality: quality / sum,
+    safety: safety ? safety / sum : undefined,
+    cost: cost ? cost / sum : undefined,
+    latency: latency ? latency / sum : undefined,
+    stability: stability ? stability / sum : undefined,
   };
 }
 

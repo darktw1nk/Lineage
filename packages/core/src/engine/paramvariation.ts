@@ -38,9 +38,15 @@ export function varyParameters(
     return result;
   }
   
-  // Temperature variation
-  if (config.operators.paramVariation.temperature?.enabled) {
-    const tempConfig = config.operators.paramVariation.temperature;
+  // Temperature variation.
+  //
+  // `temperature` is documented as optional on paramVariation, and the CLI
+  // replaces the whole sub-object — so enabling the operator without it
+  // produced children that were EXACT clones of their parent, with an empty
+  // changelog and no error. Whole generations of duplicates, no evolution, full
+  // price. Vary by default instead; the operator exists to vary something.
+  const tempConfig = config.operators.paramVariation.temperature;
+  if (tempConfig?.enabled !== false) {
     const min = tempConfig?.min ?? 0.3;
     const max = tempConfig?.max ?? 1.5;
     result.temperature = min + rng() * (max - min);
@@ -48,8 +54,15 @@ export function varyParameters(
       label: 'PARAM',
       text: `Temperature varied to ${result.temperature.toFixed(2)}`,
     });
+  } else {
+    // Explicitly disabled: say so, like the model operator does, rather than
+    // emitting a silent clone.
+    result.changeLog.push({
+      label: 'CARRY',
+      text: 'Parameter variation has nothing enabled to vary — carrying parent parameters',
+    });
   }
-  
+
   return result;
 }
 
