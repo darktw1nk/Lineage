@@ -69,4 +69,28 @@ describe('timeout actually fires and is retryable-then-fatal', () => {
     await expect(new OpenAIAdapter().call({ ...CALL, timeoutMs: 30 }))
       .rejects.toThrow(/timed out after 30ms/);
   }, 30000);
+
+  // Regression guard for the review-caught bug: adapter-level fetch catches were
+  // wrapping RetryableError(408) into a plain Error, killing retryability on the
+  // OpenAI-family adapters. Timeouts MUST exhaust all withRetry attempts.
+  const RETRY_CASES: Array<[string, () => any]> = [
+    ['openai', () => new OpenAIAdapter()],
+    ['groq', () => new GroqAdapter()],
+    ['openrouter', () => new OpenRouterAdapter()],
+    ['anthropic', () => new AnthropicAdapter()],
+    ['gemini', () => new GeminiAdapter()],
+  ];
+  for (const [name, make] of RETRY_CASES) {
+    it(`${name}: a timed-out attempt is retried (4 total attempts)`, async () => {
+      let attempts = 0;
+      vi.stubGlobal('fetch', vi.fn((_url: any, init: any) => new Promise((_, reject) => {
+        attempts++;
+        init?.signal?.addEventListener('abort', () =>
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      })));
+      await expect(make().call({ ...CALL, timeoutMs: 20 }))
+        .rejects.toThrow(/timed out after 20ms/);
+      expect(attempts).toBe(4); // withRetry: maxRetries 3 => 4 total attempts
+    }, 30000);
+  }
 });

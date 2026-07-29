@@ -65,6 +65,8 @@ export class GroqAdapter extends BaseProviderAdapter {
           body: JSON.stringify(body),
         }, timeoutMs);
       } catch (fetchError: any) {
+        // Timeouts must stay retryable — never wrap RetryableError into a plain Error
+        if (fetchError instanceof RetryableError) throw fetchError;
         console.error(`[Groq] Fetch failed:`, fetchError.message);
         throw new Error(`Groq fetch failed: ${fetchError.message}`);
       }

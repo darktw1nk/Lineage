@@ -111,7 +111,13 @@ export async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    // Read the FULL body under the timer: a slow-drip body (bytes trickling in
+    // below undici's idle threshold) would otherwise hang past the timeout.
+    // Reconstructing the Response keeps callers' .json()/.text()/.ok working
+    // unchanged — they now read from memory.
+    const body = await res.text();
+    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
   } catch (error: any) {
     if (controller.signal.aborted || error?.name === 'AbortError') {
       throw new RetryableError(`Request timed out after ${timeoutMs}ms`, 408);

@@ -419,13 +419,17 @@ async function emitOutputs(
   }
 }
 
-async function handleEstimate(configPath: string, dbPath?: string): Promise<void> {
+async function handleEstimate(configPath: string, dbPath?: string, seedOverride?: number): Promise<void> {
   const cliConfig = loadCliConfig(configPath);
   installStoreShim(extractConfigKeys(cliConfig), cliConfig.systemPrompts);
   await initCliDatabase(dbPath);
   const pathMod = await import('path');
   const configDir = pathMod.dirname(pathMod.resolve(configPath));
   const evalConfig = toEvaluationConfig(cliConfig, configDir);
+  if (seedOverride !== undefined) {
+    // Keep the preview faithful: the seed influences the holdout partition
+    evalConfig.seed = seedOverride;
+  }
   const { estimateRunCost, getModelCost, closeDatabase } = await import('@promptengine/core');
   const est = await estimateRunCost(evalConfig, getModelCost);
 
@@ -533,11 +537,14 @@ async function main(): Promise<void> {
       console.error('--estimate requires --config');
       process.exit(1);
     }
-    await handleEstimate(args.config, args.db);
+    await handleEstimate(args.config, args.db, args.seed);
     return;
   }
 
   if (args.resume) {
+    if (args.seed !== undefined) {
+      process.stderr.write('note: --seed is ignored with --resume (the run keeps its original config)\n');
+    }
     await handleResumeRun(args.resume, args.config, args.output, args.db, args.pluginDirs, args.report);
     return;
   }

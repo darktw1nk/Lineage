@@ -234,6 +234,18 @@ export async function runEvolution(
           collector.generations.set(node.generation, genMap);
         }
         genMap.set(node.id, node);
+
+        // Track best here too: resumed runs replay their pre-crash history as
+        // node_created events with metrics intact — without this, the global
+        // best from before an interruption could never win.
+        if (
+          node.metrics?.fitness !== undefined &&
+          (collector.bestNode === null ||
+            node.metrics.fitness > (collector.bestNode.metrics?.fitness ?? 0))
+        ) {
+          collector.bestNode = node;
+        }
+
         display.onNodeCreated(data.node as CandidateNode);
         break;
       }
@@ -343,10 +355,6 @@ export async function runEvolution(
     config.id = configId;
     run.configId = configId;
 
-    db.prepare(
-      'INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version) VALUES (?, ?, ?, ?, ?)',
-    ).run(run.id, run.configId, run.startedAt, JSON.stringify(run), run.version);
-
     process.stderr.write(`Starting evolution: "${config.name}"\n`);
     // Full id up front: if this process dies, the log holds the --resume handle
     process.stderr.write(`Run ID: ${run.id}\n`);
@@ -364,17 +372,27 @@ export async function runEvolution(
       const scope = est.perGeneration ? ' per generation' : '';
       process.stderr.write(`Estimated cost${scope}: $${est.low.toFixed(4)} – $${est.high.toFixed(4)} (~${est.calls} calls)\n`);
       for (const w of est.warnings) process.stderr.write(`  note: ${w}\n`);
-      // Stamp the preflight snapshot on the run: the report compares it to actuals
+      // Stamp the preflight snapshot on the run BEFORE the insert below persists
+      // it — a run killed during initial fill then still carries its estimate
       run.estimate = { calls: est.calls, low: est.low, high: est.high, breakdown: est.breakdown };
     } catch (err: any) {
       process.stderr.write(`Cost estimate unavailable: ${err.message}\n`);
     }
     process.stderr.write('\n');
+
+    db.prepare(
+      'INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version) VALUES (?, ?, ?, ?, ?)',
+    ).run(run.id, run.configId, run.startedAt, JSON.stringify(run), run.version);
   } else {
     const finishedCount = run.generations.flat().filter((n) => n.status === 'finished').length;
     process.stderr.write(
       `Resuming run ${run.id.slice(0, 8)} from generation ${run.generations.length - 1} (${finishedCount} finished nodes, $${run.totals.usd.toFixed(4)} already spent)\n\n`,
     );
+    // Completed playoffs are checkpointed on the run and never re-judged
+    // (dedupe guard) — seed the collector so results.json keeps them.
+    for (const p of run.playoffs ?? []) {
+      collector.playoffs.push({ generation: p.generation, ranking: p.ranking });
+    }
   }
 
   // Start the evaluation — catch synchronous setup errors
