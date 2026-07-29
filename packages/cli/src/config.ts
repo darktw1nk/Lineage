@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import type { EvaluationConfig, ModelRef, TestCase, Provider } from '@promptengine/core';
+import { listProviders } from '@promptengine/core';
 
 export interface CliConfig {
   name?: string;
@@ -98,7 +99,13 @@ export interface CliConfig {
   };
 }
 
-function parseModelRef(modelStr: string): ModelRef {
+/**
+ * @param checkProvider validate the provider name against the registry. Config
+ * validation runs BEFORE plugins load, so it must check format only — plugin
+ * providers (docs/plugins.md documents "ollama/llama3.2") aren't registered yet.
+ * toEvaluationConfig runs after plugin load and does the full check.
+ */
+function parseModelRef(modelStr: string, checkProvider = true): ModelRef {
   const slashIdx = modelStr.indexOf('/');
   if (slashIdx === -1) {
     throw new Error(`Invalid model format "${modelStr}". Expected "provider/model" (e.g., "openai/gpt-4o")`);
@@ -106,9 +113,13 @@ function parseModelRef(modelStr: string): ModelRef {
   const provider = modelStr.slice(0, slashIdx) as Provider;
   const model = modelStr.slice(slashIdx + 1);
 
-  const validProviders: Provider[] = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq'];
-  if (!validProviders.includes(provider)) {
-    throw new Error(`Unknown provider "${provider}". Valid providers: ${validProviders.join(', ')}`);
+  if (checkProvider) {
+    // Consult the registry, not a hardcoded list: plugin providers register
+    // themselves and are perfectly valid here.
+    const validProviders = listProviders();
+    if (!validProviders.includes(provider)) {
+      throw new Error(`Unknown provider "${provider}". Valid providers: ${validProviders.join(', ')}`);
+    }
   }
 
   return { provider, model };
@@ -170,13 +181,15 @@ export function validateCliConfig(config: CliConfig): void {
       }
     }
   }
+  // Format only — plugins haven't loaded yet, so provider names are checked
+  // later in toEvaluationConfig (see parseModelRef's checkProvider param).
   if (config.models) {
     for (const m of config.models) {
-      parseModelRef(m); // validates format
+      parseModelRef(m, false);
     }
   }
   if (config.serviceModel) {
-    parseModelRef(config.serviceModel);
+    parseModelRef(config.serviceModel, false);
   }
 
   // Typo protection: unknown top-level keys silently run with defaults on a
@@ -199,7 +212,9 @@ export function validateCliConfig(config: CliConfig): void {
 }
 
 export function toEvaluationConfig(config: CliConfig, configDir?: string): EvaluationConfig {
-  const enabledModels: ModelRef[] = (config.models || ['openai/gpt-4o-mini']).map(parseModelRef);
+  // Explicit arrow, not .map(parseModelRef): map passes the index as the second
+  // argument, which would land in checkProvider.
+  const enabledModels: ModelRef[] = (config.models || ['openai/gpt-4o-mini']).map(m => parseModelRef(m));
   const serviceModel: ModelRef = config.serviceModel
     ? parseModelRef(config.serviceModel)
     : enabledModels[0];

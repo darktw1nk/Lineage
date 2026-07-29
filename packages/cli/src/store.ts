@@ -2,13 +2,37 @@
  * CLI Store Shim
  *
  * Resolves API keys with priority: env var > CLI config file > electron-store.
- * Reads/writes the electron-store JSON file directly so keys are shared
- * between CLI and desktop app.
+ *
+ * Uses `conf` — the same library electron-store is built on — with the desktop's
+ * encryption key, so both apps read and write ONE format. Hand-rolled JSON
+ * parsing here previously failed silently against the desktop's encrypted file:
+ * every desktop-saved key looked absent, and `--set-key` then rewrote the file
+ * from an empty object, destroying the user's other settings.
  */
 
 import fs from 'fs';
 import path from 'path';
+import Conf from 'conf';
 import type { Provider } from '@promptengine/core';
+
+// Must match apps/desktop/electron/main.ts. It is a hardcoded constant in an
+// open-source repo, so it provides obfuscation rather than security — but the
+// two processes MUST agree on it or they cannot read each other's store.
+const STORE_ENCRYPTION_KEY = 'prompt-evolution-secure-key';
+
+let storeInstance: Conf<Record<string, any>> | null = null;
+let storeDirOverride: string | null = null;
+
+function getStore(): Conf<Record<string, any>> {
+  if (!storeInstance) {
+    storeInstance = new Conf<Record<string, any>>({
+      cwd: storeDirOverride ?? path.dirname(getElectronStorePath()),
+      configName: 'config',
+      encryptionKey: STORE_ENCRYPTION_KEY,
+    });
+  }
+  return storeInstance;
+}
 
 const ENV_VAR_MAP: Partial<Record<Provider, string>> = {
   openai: 'OPENAI_API_KEY',
@@ -51,45 +75,34 @@ export function getElectronStorePath(): string {
  */
 export function readElectronStore(): Record<string, any> {
   try {
-    const storePath = getElectronStorePath();
-    if (fs.existsSync(storePath)) {
-      const raw = fs.readFileSync(storePath, 'utf-8');
-      return JSON.parse(raw);
-    }
-  } catch {
-    // Could not read or parse — fall back gracefully
+    if (!fs.existsSync(getElectronStorePath())) return {};
+    return { ...getStore().store };
+  } catch (error) {
+    // Loud, not silent: an unreadable store used to look identical to
+    // "no keys configured", which sent users hunting the wrong problem.
+    console.error(`[Store] Could not read ${getElectronStorePath()}:`, error instanceof Error ? error.message : error);
+    return {};
   }
-  return {};
 }
 
 /**
  * Write a value to the electron-store JSON (merges with existing data).
  */
 export function writeElectronStore(key: string, value: any): void {
-  const storePath = getElectronStorePath();
-  let data: Record<string, any> = {};
-
-  try {
-    if (fs.existsSync(storePath)) {
-      data = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
-    }
-  } catch {
-    // Start fresh
+  // conf handles dotted keys, merging, atomic writes and encryption — matching
+  // the desktop byte for byte. The previous read-modify-write silently reset
+  // `data` to {} whenever the read failed, wiping every other stored setting.
+  if (value === undefined) {
+    getStore().delete(key); // conf rejects set(key, undefined)
+    return;
   }
+  getStore().set(key, value);
+}
 
-  // Support dotted keys like "apiKey.openrouter"
-  const parts = key.split('.');
-  let obj = data;
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (typeof obj[parts[i]] !== 'object' || obj[parts[i]] === null) {
-      obj[parts[i]] = {};
-    }
-    obj = obj[parts[i]];
-  }
-  obj[parts[parts.length - 1]] = value;
-
-  fs.mkdirSync(path.dirname(storePath), { recursive: true });
-  fs.writeFileSync(storePath, JSON.stringify(data, null, '\t'));
+/** Testing seam: point the store at a scratch directory and drop the cache. */
+export function __setStoreDirForTests(dir: string | null): void {
+  storeDirOverride = dir;
+  storeInstance = null;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import {
   resolveApiKey,
@@ -7,6 +8,7 @@ import {
   readElectronStore,
   writeElectronStore,
   getElectronStorePath,
+  __setStoreDirForTests,
 } from '../src/store.js';
 
 describe('CLI Store - resolveApiKey', () => {
@@ -106,23 +108,18 @@ describe('CLI Store - createCliStore with systemPrompts', () => {
 });
 
 describe('CLI Store - writeElectronStore / readElectronStore', () => {
-  const storePath = getElectronStorePath();
-  let backup: string | null = null;
+  // Never touch the user's real store: back-up-and-restore read the file as
+  // utf-8 text, which silently corrupts the desktop's ENCRYPTED config.
+  const scratchDir = path.join(os.tmpdir(), `pe-store-${process.pid}-${Math.random().toString(36).slice(2)}`);
 
   beforeEach(() => {
-    // Backup existing store if present
-    try {
-      backup = fs.readFileSync(storePath, 'utf-8');
-    } catch {
-      backup = null;
-    }
+    fs.mkdirSync(scratchDir, { recursive: true });
+    __setStoreDirForTests(scratchDir);
   });
 
   afterEach(() => {
-    // Restore backup
-    if (backup !== null) {
-      fs.writeFileSync(storePath, backup);
-    }
+    __setStoreDirForTests(null);
+    fs.rmSync(scratchDir, { recursive: true, force: true });
   });
 
   it('writes and reads a dotted key', () => {
@@ -132,6 +129,33 @@ describe('CLI Store - writeElectronStore / readElectronStore', () => {
 
     // Clean up the test key
     writeElectronStore('apiKey.test_provider', undefined);
+    expect(readElectronStore()?.apiKey?.test_provider).toBeUndefined();
+  });
+
+  it('a write preserves every other stored setting (no read-modify-wipe)', () => {
+    writeElectronStore('apiKey.openai', 'sk-existing');
+    writeElectronStore('disabledPlugins', ['evil-plugin']);
+    writeElectronStore('systemPrompts', { llmGradingPrompt: 'custom' });
+
+    // A later, unrelated write must not erase the rest
+    writeElectronStore('apiKey.groq', 'sk-new');
+
+    const data = readElectronStore();
+    expect(data.apiKey.openai).toBe('sk-existing');
+    expect(data.apiKey.groq).toBe('sk-new');
+    expect(data.disabledPlugins).toEqual(['evil-plugin']);
+    expect(data.systemPrompts).toEqual({ llmGradingPrompt: 'custom' });
+  });
+
+  it('reads the desktop encrypted format (electron-store interop)', async () => {
+    // The desktop writes through electron-store with the shared encryption key;
+    // the CLI must see those keys, not an empty object.
+    const { default: ElectronStore } = await import('electron-store');
+    const desktop = new (ElectronStore as any)({ cwd: scratchDir, encryptionKey: 'prompt-evolution-secure-key' });
+    desktop.set('apiKey.anthropic', 'sk-DESKTOP-anthropic');
+
+    __setStoreDirForTests(scratchDir); // drop the CLI's cached handle
+    expect(readElectronStore()?.apiKey?.anthropic).toBe('sk-DESKTOP-anthropic');
   });
 });
 

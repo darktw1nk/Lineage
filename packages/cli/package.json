@@ -4,16 +4,24 @@
   "description": "Command-line runner for PromptEngine.AI prompt evolution — for CI, scripts, and AI agents.",
   "license": "MIT",
   "type": "module",
-  "bin": { "promptengine": "./dist/index.js" },
-  "files": ["dist", "README.md"],
+  "bin": {
+    "promptengine": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
     "type-check": "tsc --noEmit"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@promptengine/core": "^1.0.0",
+    "conf": "^10.2.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

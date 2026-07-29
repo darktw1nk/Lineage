@@ -81,12 +81,18 @@ describe('CLI Config - validateCliConfig', () => {
     })).toThrow('Expected "provider/model"');
   });
 
-  it('rejects unknown provider', () => {
+  it('rejects unknown provider at config materialization (after plugins load)', () => {
+    // validateCliConfig runs BEFORE plugins register their providers, so it
+    // checks format only; the provider name is checked in toEvaluationConfig.
+    const cfg = { seedPrompt: 'x', testSet: [{ prompt: 'y' }], models: ['unknown/model'] };
+    expect(() => validateCliConfig(cfg)).not.toThrow();
+    expect(() => toEvaluationConfig(cfg)).toThrow('Unknown provider');
+  });
+
+  it('still rejects a malformed model ref during validation', () => {
     expect(() => validateCliConfig({
-      seedPrompt: 'x',
-      testSet: [{ prompt: 'y' }],
-      models: ['unknown/model'],
-    })).toThrow('Unknown provider');
+      seedPrompt: 'x', testSet: [{ prompt: 'y' }], models: ['no-slash-here'],
+    })).toThrow('Invalid model format');
   });
 });
 

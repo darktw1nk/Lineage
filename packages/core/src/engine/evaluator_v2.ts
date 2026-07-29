@@ -305,22 +305,32 @@ export async function startEvaluation(
     return;
   }
 
-  // Create shell population (synchronous, fast)
-  console.log(`[Evaluator] Creating shell population...`);
-  const shellNodes = createShellPopulation(config);
+  // Create shell population (synchronous, fast).
+  // If this throws (missing seed prompt, malformed manual population) the state
+  // must be unregistered — otherwise the run id looks permanently "active":
+  // isEvaluationActive stays true and every retry fails with
+  // "Evaluation already running" until the process restarts.
+  let shellNodes: CandidateNode[];
+  try {
+    console.log(`[Evaluator] Creating shell population...`);
+    shellNodes = createShellPopulation(config);
+  } catch (error) {
+    activeEvaluations.delete(runId);
+    throw error;
+  }
   console.log(`[Evaluator] Created ${shellNodes.length} shell nodes`);
-  
+
   // Add all shell nodes to generation 0
   state.run.generations[0] = shellNodes;
-  
+
   // Send ALL shell nodes to UI immediately
   for (const node of shellNodes) {
     console.log(`[Evaluator] Sending shell node ${node.id.slice(0, 8)}, status=${node.status}`);
     sendUpdate(runId, { type: 'node_created', node });
   }
-  
+
   console.log(`[Evaluator] All ${shellNodes.length} shell nodes sent to UI`);
-  
+
   // Start background mutation (non-blocking)
   mutatePopulationInBackground(runId, state);
   

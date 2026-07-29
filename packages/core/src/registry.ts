@@ -97,6 +97,24 @@ export function registerProvider(plugin: ProviderPlugin): void {
   if (BUILTIN_PROVIDER_IDS.includes(id) || providers.has(id)) {
     throw new Error(`Provider '${id}' is already registered`);
   }
+  // Validate declared model prices BEFORE accepting them: an undefined price
+  // reaches a REAL NOT NULL column and makes sql.js throw out of
+  // initializeDatabase — which, on the desktop, means the app never opens a
+  // window and the user cannot reach Settings to disable the plugin.
+  if (plugin.models?.length) {
+    for (const m of plugin.models) {
+      const bad =
+        !m || typeof m.provider !== 'string' || typeof m.model !== 'string' ||
+        !Number.isFinite(m.promptUSDper1k) || !Number.isFinite(m.completionUSDper1k);
+      if (bad) {
+        throw new Error(
+          `Provider '${id}' declares an invalid model entry ` +
+          `(${JSON.stringify(m)}): provider/model must be strings and both prices finite numbers`
+        );
+      }
+    }
+  }
+
   providers.set(id, plugin.adapter);
   if (plugin.models?.length) {
     pendingModels.push(...plugin.models);
@@ -122,7 +140,13 @@ export function flushPendingPluginModels(db: SqlJsWrapper): void {
   for (const m of pendingModels) {
     // Plugin entries are authored per-1k already (unlike the seeded defaults,
     // which are per-million and divided at insert) — pass through unchanged.
-    insert.run(m.provider, m.model, m.promptUSDper1k, m.completionUSDper1k);
+    // Per-row guard: one bad entry must not abort the whole flush (and with it
+    // database initialization).
+    try {
+      insert.run(m.provider, m.model, m.promptUSDper1k, m.completionUSDper1k);
+    } catch (error) {
+      console.error(`[Registry] Skipping plugin model ${m?.provider}/${m?.model}:`, error);
+    }
   }
   pendingModels = [];
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
@@ -73,6 +73,18 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
+}).catch((error) => {
+  // Without this, a throw during startup (e.g. a malformed plugin poisoning the
+  // model catalog) leaves the app running with NO window and NO error — the
+  // user cannot even reach Settings to disable the offending plugin.
+  console.error('[Main] Startup failed:', error);
+  dialog.showErrorBox(
+    'PromptEngine.AI failed to start',
+    `${error instanceof Error ? error.message : String(error)}\n\n` +
+    `If you recently added a plugin, remove it from the plugins folder and restart:\n` +
+    `${path.join(app.getPath('userData'), 'plugins')}`
+  );
+  app.quit();
 });
 
 app.on('before-quit', () => {

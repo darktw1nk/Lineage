@@ -457,9 +457,12 @@ async function getSettings(): Promise<AppSettings> {
     
     if (row) {
       const settings = JSON.parse(row.value);
-      
-      // Auto-fix: If service model is empty, select first available model
-      if (!settings.serviceModel.model || settings.serviceModel.model === '') {
+
+      // Auto-fix: If service model is empty, select first available model.
+      // Optional chaining is load-bearing: a stored row without `serviceModel`
+      // threw here, and the outer catch then fell through to the defaults block
+      // — which WRITES those defaults over the user's real settings.
+      if (!settings.serviceModel?.model || settings.serviceModel.model === '') {
         const firstModel = db.prepare(`
           SELECT provider, model FROM model_costs LIMIT 1
         `).get() as { provider: string; model: string } | undefined;
@@ -469,8 +472,8 @@ async function getSettings(): Promise<AppSettings> {
             provider: firstModel.provider as any, 
             model: firstModel.model 
           };
-          // Save the fixed settings
-          await setSettings(settings);
+          // Save the fixed settings (merge, never replace the stored row)
+          await setSettings({ ...settings });
           console.log(`[Settings] Auto-selected first available model: ${firstModel.provider}/${firstModel.model}`);
         }
       }
