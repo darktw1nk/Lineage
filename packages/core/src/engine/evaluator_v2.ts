@@ -440,24 +440,34 @@ async function startEvaluationInner(
   sendUpdate(runId, { type: 'status', status: 'running' });
   console.log(`[Evaluator] Status sent: running`);
 
-  if (isResume) {
-    // Adopt any spend the sidecar recorded after the last checkpoint. Taking
-    // the LARGER of the two means a stale or missing sidecar can only
-    // under-report; it can never invent spend.
-    try {
-      const ledger = readSpend(getDatabase().dbPath, state.run.id);
-      if (ledger && ledger.totals.usd > state.run.totals.usd) {
-        const lost = ledger.totals.usd - state.run.totals.usd;
-        const lostCalls = ledger.totals.calls - state.run.totals.calls;
-        console.warn(
-          `[Evaluator] Recovered $${lost.toFixed(6)} over ${lostCalls} call(s) billed after the last checkpoint. ` +
-          `Without this they would be charged by the provider but invisible to totals and to budgetUSD.`,
-        );
-        state.run.totals = { ...ledger.totals };
-        if (ledger.costBreakdown) state.run.costBreakdown = ledger.costBreakdown;
-      }
-    } catch { /* advisory only */ }
+  // Adopt any spend the sidecar recorded after the last checkpoint. Taking the
+  // LARGER of the two means a stale or missing sidecar can only under-report;
+  // it can never invent spend.
+  //
+  // NOT gated on isResume. `isResume` is `run.generations.length > 0`, and the
+  // initial population fill only checkpoints AFTER every mutation completes —
+  // so a crash during the fill leaves `generations: []`, this recovery was
+  // skipped, and the sidecar's durable record was overwritten from zero on the
+  // next attempt. Measured with a $0.0004 cap and four kills during the fill:
+  // the run reported $0.000430 while the wire log showed $0.0011997 actually
+  // billed — 3.0x the cap, and it scales linearly with restarts. The CLI even
+  // printed "0 finished nodes, $0.0000 already spent" while the sidecar on disk
+  // said otherwise. Recovering spend is always safe; it never continues work.
+  try {
+    const ledger = readSpend(getDatabase().dbPath, state.run.id);
+    if (ledger && ledger.totals.usd > state.run.totals.usd) {
+      const lost = ledger.totals.usd - state.run.totals.usd;
+      const lostCalls = ledger.totals.calls - state.run.totals.calls;
+      console.warn(
+        `[Evaluator] Recovered $${lost.toFixed(6)} over ${lostCalls} call(s) billed after the last checkpoint. ` +
+        `Without this they would be charged by the provider but invisible to totals and to budgetUSD.`,
+      );
+      state.run.totals = { ...ledger.totals };
+      if (ledger.costBreakdown) state.run.costBreakdown = ledger.costBreakdown;
+    }
+  } catch { /* advisory only */ }
 
+  if (isResume) {
     const nowFingerprint = graderFingerprint();
     if (state.run.graderFingerprint && state.run.graderFingerprint !== nowFingerprint) {
       activeEvaluations.delete(runId);
@@ -947,7 +957,7 @@ async function evaluationLoop(runId: UUID): Promise<void> {
       if (state.config.targets.maxGenerations !== undefined) {
         if (state.currentGeneration + 1 >= state.config.targets.maxGenerations) {
           console.log(`[Evaluator] Reached max generations (${state.config.targets.maxGenerations})`);
-          state.run.stopReason = 'generations';
+          setStopReason(state, 'generations');
           state.loopRunning = false;
           await finishEvaluation(runId, state);
           return;
@@ -1161,7 +1171,7 @@ async function processNode(
     if (error instanceof BudgetExhaustedError) {
       console.log(`[Evaluator] Node ${node.id.slice(0, 8)} abandoned: budget exhausted`);
       node.status = 'skipped';
-      state.run.stopReason = 'budget';
+      setStopReason(state, 'budget');
       state.inProgress.delete(node.id);
       sendUpdate(runId, { type: 'node_updated', node });
       return;
@@ -1563,7 +1573,7 @@ function shouldStop(state: EvaluationState): boolean {
     const activeElapsed = wallClockElapsed - state.totalPausedMs;
     if (activeElapsed >= config.targets.timeLimitMs) {
       console.log(`[Evaluator] Time limit reached: ${activeElapsed}ms active (${wallClockElapsed}ms total, ${state.totalPausedMs}ms paused)`);
-      state.run.stopReason = 'time';
+      setStopReason(state, 'time');
       return true;
     }
   }
@@ -1572,7 +1582,7 @@ function shouldStop(state: EvaluationState): boolean {
   // nothing", not "no limit")
   if (config.targets.budgetUSD !== undefined) {
     if (run.totals.usd >= config.targets.budgetUSD) {
-      state.run.stopReason = 'budget';
+      setStopReason(state, 'budget');
       return true;
     }
   }
@@ -1586,7 +1596,7 @@ function shouldStop(state: EvaluationState): boolean {
     );
     
     if (bestFitness >= config.targets.targetFitness) {
-      state.run.stopReason = 'target';
+      setStopReason(state, 'target');
       return true;
     }
   }
@@ -1598,7 +1608,7 @@ function shouldStop(state: EvaluationState): boolean {
       // end of every run, while 'target' means the quality bar was actually
       // reached. Reporting both as 'target' made any script branching on
       // stopReason === 'target' wrong on essentially every run.
-      state.run.stopReason = 'generations';
+      setStopReason(state, 'generations');
       return true;
     }
   }
@@ -1737,7 +1747,7 @@ async function moveToNextGeneration(
       (abandonedByBudget ? ` (budgetUSD refused ${state.budgetRefusals} call(s) this run)` : ''),
     );
     if (!state.run.stopReason) {
-      state.run.stopReason = abandonedByBudget ? 'budget' : 'exhausted';
+      setStopReason(state, abandonedByBudget ? 'budget' : 'exhausted');
     }
     return;
   }
@@ -1896,7 +1906,7 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   // and tells agents to branch on it.
   if (!state.run.stopReason) {
     console.warn('[Evaluator] Loop drained with no stop reason recorded — reporting "exhausted"');
-    state.run.stopReason = 'exhausted';
+    setStopReason(state, 'exhausted');
   }
 
   // The final generation never reaches moveToNextGeneration — run its playoff here
@@ -1924,7 +1934,7 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
       `$${state.run.totals.usd.toFixed(4)} of $${state.config.targets.budgetUSD} settled. ` +
       `Reporting stopReason "budget" — the cap, not ${state.run.stopReason}, determined this outcome.`,
     );
-    state.run.stopReason = 'budget';
+    setStopReason(state, 'budget');
   }
 
   state.status = 'stopped';
@@ -2089,6 +2099,31 @@ function releaseCall(state: EvaluationState, reserved: number): void {
   if (reserved > 0) {
     state.reservedUSD = Math.max(0, state.reservedUSD - reserved);
   }
+}
+
+/**
+ * Set the stop reason, refusing to DOWNGRADE an error.
+ *
+ * `error` was set by the grading circuit breaker and then overwritten before
+ * finishEvaluation read it: two unconditional writers run during the
+ * `while (state.inProgress.size > 0)` drain — shouldStop() and processNode's
+ * BudgetExhaustedError branch. Measured with a budget tuned to land in that
+ * window: a run whose judge failed to parse 20/20, every score fabricated,
+ * reported `stopReason: budget` and exited 0. docs/cli.md tells agents to
+ * branch on stopReason, and packages/cli/src/index.ts exits 1 on `error`
+ * precisely so a breaker-aborted run is not mistaken for an ordinary stop.
+ *
+ * `error` and `manual` are decisions already taken; everything else is a
+ * condition that merely became true later.
+ */
+const STICKY_STOP_REASONS = new Set(['error', 'manual']);
+export function setStopReason(state: EvaluationState, reason: NonNullable<EvaluationRun['stopReason']>): void {
+  const current = state.run.stopReason;
+  if (current && STICKY_STOP_REASONS.has(current) && !STICKY_STOP_REASONS.has(reason)) {
+    console.warn(`[Evaluator] Keeping stopReason '${current}' — refusing to downgrade it to '${reason}'.`);
+    return;
+  }
+  state.run.stopReason = reason;
 }
 
 /** Thrown to abandon in-flight work the moment the budget is gone. */
@@ -2398,7 +2433,7 @@ export function stopEvaluation(runId: UUID): void {
     // 'generations', …) — overwriting it with 'manual' made the persisted
     // reason a lie, and docs/cli.md tells agents to branch on that field.
     if (!state.finishing) {
-      state.run.stopReason = 'manual';
+      setStopReason(state, 'manual');
     }
     // stopEvaluation is a sync host API — fire and forget the async finish
     finishEvaluation(runId, state).catch(err => console.error('[Evaluator] finish failed:', err));
