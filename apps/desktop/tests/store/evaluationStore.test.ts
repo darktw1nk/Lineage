@@ -333,3 +333,31 @@ describe('hydrate does not discard events that beat the snapshot', () => {
     expect(gens[0].map(n => n.id)).toContain('fromDb');
   });
 });
+
+describe('every generation-index path is guarded, not just one', () => {
+  beforeEach(() => store().cleanup());
+
+  // The guard existed in updateNodeInEvaluation only. The two identical
+  // padding loops beside it were driven by node_created and
+  // generation_created, both taking `generation` straight off the wire.
+  it('addNodeToEvaluation ignores an implausible index', () => {
+    store().setEvaluation('r', makeRun('r'));
+    store().addNodeToEvaluation('r', makeNode('huge', 200_000));
+    expect(store().evaluations.get('r')!.generations.length).toBeLessThan(10);
+  });
+
+  it('addGenerationToEvaluation ignores an implausible index', () => {
+    store().setEvaluation('r', makeRun('r'));
+    store().addGenerationToEvaluation('r', 2_000_000, []);
+    expect(store().evaluations.get('r')!.generations.length).toBeLessThan(10);
+  });
+
+  it('a FRACTIONAL index does not throw', () => {
+    // `while (len <= 1.5)` stops at 2, then generations[1.5] is undefined and
+    // .findIndex threw inside the zustand set inside the IPC listener.
+    store().setEvaluation('r', makeRun('r'));
+    expect(() => store().addNodeToEvaluation('r', makeNode('frac', 1.5))).not.toThrow();
+    expect(() => store().updateNodeInEvaluation('r', makeNode('frac2', 2.5))).not.toThrow();
+    expect(() => store().addGenerationToEvaluation('r', 3.5, [])).not.toThrow();
+  });
+});

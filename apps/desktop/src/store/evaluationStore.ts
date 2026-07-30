@@ -41,6 +41,27 @@ interface EvaluationStore {
   cleanup: () => void;
 }
 
+/**
+ * Is this a plausible array index for a generation?
+ *
+ * `generation` arrives over IPC and is used directly as an index into a
+ * padding loop, so a node claiming 200000 allocated 200001 arrays and a
+ * FRACTIONAL one threw: `while (len <= 1.5)` stops at 2, then
+ * `generations[1.5]` is undefined and `.findIndex` blows up inside the
+ * zustand set inside the IPC listener. The guard existed in only one of the
+ * three identical loops.
+ *
+ * Padding itself is legitimate — it is how a late-subscribing renderer
+ * catches up on generations it never saw — so this is a sanity ceiling, not
+ * a tight bound. The largest run measured in this project was 60.
+ */
+const MAX_GENERATION_INDEX = 10_000;
+function plausibleGeneration(generation: number, id?: string): boolean {
+  if (Number.isInteger(generation) && generation >= 0 && generation <= MAX_GENERATION_INDEX) return true;
+  console.warn(`[Store] Ignoring ${id ? String(id).slice(0, 8) : 'event'}: generation ${generation} is not a plausible index.`);
+  return false;
+}
+
 export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
   evaluations: new Map(),
   subscriptions: new Map(),
@@ -97,19 +118,7 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       
       const generations = [...evaluation.generations];
 
-      // `node.generation` arrives over IPC and was trusted as an array index,
-      // so a node claiming generation 200000 allocated 200001 arrays in the
-      // padding loop below. Padding itself is legitimate — it is how a
-      // late-subscribing renderer catches up on generations it never saw — so
-      // this is a sanity ceiling, not a tight bound. The largest run measured
-      // in this project was 60 generations.
-      const MAX_GENERATION_INDEX = 10_000;
-      if (!Number.isInteger(node.generation) || node.generation < 0 || node.generation > MAX_GENERATION_INDEX) {
-        console.warn(
-          `[Store] Ignoring node ${String(node.id).slice(0, 8)}: generation ${node.generation} is not a plausible index.`,
-        );
-        return state;
-      }
+      if (!plausibleGeneration(node.generation, node.id)) return state;
       while (generations.length <= node.generation) {
         generations.push([]);
       }
@@ -142,6 +151,7 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       const evaluation = state.evaluations.get(evalId);
       if (!evaluation) return state;
       
+      if (!plausibleGeneration(node.generation, node.id)) return state;
       const generations = [...evaluation.generations];
 
       // Ensure generation exists
@@ -177,6 +187,7 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
         return state;
       }
       
+      if (!plausibleGeneration(generation)) return state;
       const generations = [...evaluation.generations];
       
       // Ensure we have enough generations

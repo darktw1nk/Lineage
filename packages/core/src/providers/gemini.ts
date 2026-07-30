@@ -39,6 +39,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
     maxTokens?: number;
     timeoutMs?: number;
     tools?: ToolDef[];
+    providerOptions?: Record<string, any>;
   }): Promise<{
     output: string;
     promptTokens: number;
@@ -50,7 +51,14 @@ export class GeminiAdapter extends BaseProviderAdapter {
       const startTime = Date.now();
       console.log(`[Gemini] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
       
+      // Raw passthrough of providerOptions, applied BEFORE the engine's own
+      // fields so a stray key cannot rewrite model/messages/tools. README
+      // documents this with no provider caveat, but three adapters ignored it
+      // — openai even declared it in the signature and never read it. A user
+      // sets reasoning_effort: 'high', pays low-effort prices, and concludes
+      // the prompt is the problem.
       const body: any = {
+        ...(opts.providerOptions || {}),
         // inlineData parts carry images. Not declared or read before, so a
         // vision test against Gemini silently sent no image.
         contents: [{
@@ -112,6 +120,16 @@ export class GeminiAdapter extends BaseProviderAdapter {
       }
       if (!Array.isArray(data.candidates) || data.candidates.length === 0) {
         throw new RetryableError(`Gemini response has no candidates (finishReason: ${data.promptFeedback?.blockReason ?? 'unknown'})`, 500);
+      }
+
+      // A candidate PRESENT but blocked is a provider-side failure, not an
+      // empty completion. Only `candidates.length === 0` was checked, so the
+      // commonest Gemini failure billed $0, graded the candidate on "" and
+      // killed the lineage instead of being retried.
+      const finishReason = data.candidates?.[0]?.finishReason;
+      const BLOCKED = ['SAFETY', 'RECITATION', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII', 'MALFORMED_FUNCTION_CALL'];
+      if (typeof finishReason === 'string' && BLOCKED.includes(finishReason)) {
+        throw new RetryableError(`Gemini blocked the response (finishReason: ${finishReason})`, 500);
       }
 
       const parts = data.candidates?.[0]?.content?.parts ?? [];

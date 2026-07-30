@@ -68,7 +68,14 @@ export class OpenAIAdapter extends BaseProviderAdapter {
         messageContent = opts.prompt;
       }
 
+      // Raw passthrough of providerOptions, applied BEFORE the engine's own
+      // fields so a stray key cannot rewrite model/messages/tools. README
+      // documents this with no provider caveat, but three adapters ignored it
+      // — openai even declared it in the signature and never read it. A user
+      // sets reasoning_effort: 'high', pays low-effort prices, and concludes
+      // the prompt is the problem.
       const body: any = {
+        ...(opts.providerOptions || {}),
         model: opts.model,
         messages: [
           ...(opts.system ? [{ role: 'system', content: opts.system }] : []),
@@ -166,8 +173,16 @@ export class OpenAIAdapter extends BaseProviderAdapter {
         }));
       }
 
+      // A content filter is a provider-side failure, not a bad answer.
+      if (data.choices?.[0]?.finish_reason === 'content_filter') {
+        throw new RetryableError('OpenAI stopped the response with finish_reason "content_filter"', 500);
+      }
+
       return {
-        output: normalizeContent(message?.content),
+        // A refusal carries its text in `message.refusal`, not `content`.
+        // Dropping it graded the candidate on an empty string, so a refusal
+        // was indistinguishable from a broken call.
+        output: normalizeContent(message?.content) || normalizeContent(message?.refusal),
         ...(toolCalls ? { toolCalls } : {}),
         promptTokens: data.usage?.prompt_tokens ?? 0,
         completionTokens: data.usage?.completion_tokens ?? 0,

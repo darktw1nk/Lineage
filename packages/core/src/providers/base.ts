@@ -122,7 +122,16 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
 
         return {
           ...result,
-          latencyMs,
+          // Prefer the adapter's own per-ATTEMPT figure. `latencyMs` here is
+          // measured from before callAPI, which contains the whole withRetry
+          // loop — so overwriting with it folded every backoff SLEEP into the
+          // number. That value feeds the fitness latency dimension directly
+          // (latencyScore = (1 - latencyMs/maxLatency) * 10), so one transient
+          // 503 turned a genuinely 300ms candidate into a 3000ms one and
+          // selection discarded a good prompt for a network hiccup.
+          latencyMs: typeof result.latencyMs === 'number' && Number.isFinite(result.latencyMs)
+            ? result.latencyMs
+            : latencyMs,
           usd,
         };
       } catch (error: any) {

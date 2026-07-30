@@ -29,6 +29,7 @@ export class AnthropicAdapter extends BaseProviderAdapter {
     maxTokens?: number;
     timeoutMs?: number;
     tools?: ToolDef[];
+    providerOptions?: Record<string, any>;
   }): Promise<{
     output: string;
     promptTokens: number;
@@ -41,7 +42,14 @@ export class AnthropicAdapter extends BaseProviderAdapter {
       
       console.log(`[Anthropic] Calling model: ${opts.model}, temperature: ${opts.temperature}, API key: ***${opts.apiKey.slice(-4)}`);
       
+      // Raw passthrough of providerOptions, applied BEFORE the engine's own
+      // fields so a stray key cannot rewrite model/messages/tools. README
+      // documents this with no provider caveat, but three adapters ignored it
+      // — openai even declared it in the signature and never read it. A user
+      // sets reasoning_effort: 'high', pays low-effort prices, and concludes
+      // the prompt is the problem.
       const body: any = {
+        ...(opts.providerOptions || {}),
         model: opts.model,
         // Images ride as content blocks. This adapter did not declare or read
         // `images` at all, so a vision test against Claude sent the prompt with
