@@ -8,6 +8,7 @@
 
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 
 /**
  * Resolve the database path for CLI use.
@@ -25,9 +26,15 @@ export function resolveDbPath(explicitPath?: string): string {
   }
 
   // Fallback: CLI-specific path
-  const home = process.env.HOME || process.env.USERPROFILE || '';
+  // os.homedir() as the last resort, not ''. With HOME and USERPROFILE both
+  // unset — a bare CI container, a service account, a stripped-down shell — the
+  // empty string made this a RELATIVE path, so the database landed in whatever
+  // the current working directory happened to be and a second invocation from
+  // another directory silently started from scratch.
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir() || os.tmpdir();
   const cliDir = path.join(home, '.promptengine');
-  return path.join(cliDir, 'evolution.db');
+  const resolved = path.join(cliDir, 'evolution.db');
+  return path.resolve(resolved);
 }
 
 function getElectronDbPath(): string | null {
@@ -71,4 +78,19 @@ export async function initCliDatabase(explicitPath?: string, options: { readOnly
   // Import the engine's database init — it accepts an optional dbPath
   const { initializeDatabase } = await import('@promptengine/core');
   await initializeDatabase(dbPath, { readOnly: options.readOnly });
+}
+
+/**
+ * Is this the database the DESKTOP app owns?
+ *
+ * `--prune-runs` with no --db resolves to the shared desktop database, so
+ * `--prune-runs 0` deleted every run visible in the UI without a prompt.
+ */
+export function isSharedDesktopDb(resolved: string): boolean {
+  try {
+    const desktop = getElectronDbPath();
+    return !!desktop && path.resolve(resolved) === path.resolve(desktop);
+  } catch {
+    return false;
+  }
 }

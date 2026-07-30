@@ -795,7 +795,14 @@ function onBackgroundFillCrash(runId: UUID, error: unknown): void {
   }
   try {
     sendUpdate(runId, { type: 'error', message: `Population fill failed: ${error instanceof Error ? error.message : String(error)}` });
+    // 'stopped' AND then 'finished'. The CLI resolves its finishedPromise only
+    // on 'finished' (packages/cli/src/engine.ts), so a crash here left it
+    // awaiting a promise that never settled: no results.json, no report, and
+    // Node exiting 0 once the loop drained — a paid run reporting success with
+    // nothing to show. 'stopped' stays first so any listener watching for it
+    // still sees it.
     sendUpdate(runId, { type: 'status', status: 'stopped' });
+    sendUpdate(runId, { type: 'status', status: 'finished' });
   } catch {
     // The host's sendUpdate is what failed in the first place.
   }
@@ -831,7 +838,14 @@ function startEvaluationLoop(runId: UUID): void {
     }
     sendUpdate(runId, { type: 'error', message: `Evaluation failed: ${error instanceof Error ? error.message : String(error)}` });
     sendUpdate(runId, { type: 'stop', reason: 'error' });
+    // 'stopped' AND then 'finished'. The CLI resolves its finishedPromise only
+    // on 'finished' (packages/cli/src/engine.ts), so a crash here left it
+    // awaiting a promise that never settled: no results.json, no report, and
+    // Node exiting 0 once the loop drained — a paid run reporting success with
+    // nothing to show. 'stopped' stays first so any listener watching for it
+    // still sees it.
     sendUpdate(runId, { type: 'status', status: 'stopped' });
+    sendUpdate(runId, { type: 'status', status: 'finished' });
   });
 }
 

@@ -418,12 +418,26 @@ Here is the bug report:
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          {estimate && (
+          {estimate && 'error' in estimate && (
+            // A bare null rendered nothing at all, indistinguishable from "no
+            // estimate applies to this config". Say why instead.
+            <span className="text-xs text-amber-500 px-2 text-center" title={String((estimate as any).error)}>
+              Cost estimate unavailable
+            </span>
+          )}
+          {estimate && !('error' in estimate) && (
             <span
               className="text-xs text-muted-foreground px-2 text-center"
               title={estimate.warnings?.join('\n')}
             >
               ≈ ${estimate.low.toFixed(4)} – ${estimate.high.toFixed(4)} · ~{estimate.calls} calls{estimate.perGeneration ? ' /gen' : ''}
+              {/* The warnings — including the worst-case ceiling if every reply
+                  runs to serviceModelMaxTokens — lived only in a title= tooltip,
+                  so the number a user actually budgets against was the one they
+                  never saw. */}
+              {estimate.warnings?.length > 0 && (
+                <span className="block text-amber-500">{estimate.warnings[0]}</span>
+              )}
             </span>
           )}
           {/* Disabled while pending: eval:create awaits a DB insert AND a full

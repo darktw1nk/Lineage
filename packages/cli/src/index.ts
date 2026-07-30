@@ -385,6 +385,22 @@ function handleInit(targetPath: string): void {
 
 async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath?: string): Promise<void> {
   lastResolvedDbPath = resolveDbPath(dbPath);
+
+  // Refuse a destructive prune of the SHARED desktop database unless the user
+  // named it. With no --db, --prune-runs defaults to the same file the desktop
+  // app uses, so `--prune-runs 0` silently deleted every run the user could see
+  // in the UI, with no confirmation and no undo.
+  if (pruneKeep !== undefined && !dbPath) {
+    const { isSharedDesktopDb } = await import('./database.js');
+    if (isSharedDesktopDb(lastResolvedDbPath)) {
+      process.stderr.write(
+        `Refusing to prune ${lastResolvedDbPath} — this is the database the desktop app uses.\n` +
+        'Pass --db <path> explicitly to prune it, or point --db at your own file.\n',
+      );
+      process.exitCode = 1;
+      return;
+    }
+  }
   await initCliDatabase(dbPath);
   const { getDatabase, closeDatabase } = await import('@promptengine/core');
   const db = getDatabase();

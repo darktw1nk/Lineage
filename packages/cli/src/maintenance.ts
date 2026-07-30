@@ -102,6 +102,23 @@ export async function pruneRuns(
   const doomed = onlyIfArchived
     ? olderThanKeep.filter((r: any) => onlyIfArchived.has(r.id))
     : olderThanKeep;
+  // Warn about runs that could still be RESUMED. A prune is about reclaiming
+  // space from finished history, and an unfinished run carries a checkpoint
+  // --resume can pick up; deleting it silently discards work already paid for.
+  const resumable = doomed.filter((r: any) => {
+    try {
+      const run = JSON.parse(r.run_json);
+      return run?.status !== 'finished';
+    } catch { return false; }
+  });
+  if (resumable.length > 0) {
+    const ids = resumable.map((r: any) => `  ${r.id}`).join('\n');
+    process.stderr.write(
+      `WARNING: ${resumable.length} of the ${doomed.length} run(s) being deleted are UNFINISHED and ` +
+      `could still be resumed with --resume. Their checkpoints go with them.\n${ids}\n`,
+    );
+  }
+
   const withheld = olderThanKeep.length - doomed.length;
   if (withheld > 0) {
     process.stderr.write(

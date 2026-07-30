@@ -134,9 +134,16 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
           bgColor = '#dc2626'; // Red for error
           borderColor = '#b91c1c';
           textColor = '#ffffff';
-        } else if (candidate.status === 'pending') {
-          bgColor = '#4a4a5e'; // Lighter gray for pending
+        } else if (candidate.status === 'pending' || candidate.status === 'awaiting') {
+          // `awaiting` is a real NodeStatus — it is what Stop rewinds unfinished
+          // nodes to before checkpointing, so a stopped run is full of them — and
+          // it had no branch here, falling through to the same swatch as a node
+          // that has not been created yet.
+          bgColor = '#4a4a5e'; // Lighter gray for not-yet-run
           borderColor = '#6a6a8e';
+        } else if (candidate.status === 'skipped') {
+          bgColor = '#3a3a3a'; // Dimmed: deliberately not evaluated
+          borderColor = '#5a5a5a';
         }
 
         flowNodes.push({

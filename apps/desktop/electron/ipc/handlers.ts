@@ -61,8 +61,11 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
       const { estimateRunCost, getModelCost } = await import('@promptengine/core');
       return await estimateRunCost(config, getModelCost);
     } catch (error) {
+      // Return the REASON, not a bare null. A null was indistinguishable from
+      // "no estimate applies to this config", so the modal simply showed no cost
+      // line and the user could not tell a missing price from a broken lookup.
       console.error('[IPC] eval:estimate failed:', error);
-      return null;
+      return { error: error instanceof Error ? error.message : String(error) };
     }
   });
   
@@ -125,6 +128,17 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
   });
 
   ipcMain.handle('systemPrompts:set', async (_event, prompts: any) => {
+    // Accepted literally anything — a bare string round-tripped and the engine
+    // read it back, so a bad payload silently replaced the grading and operator
+    // prompts with something no template fill can use.
+    if (!prompts || typeof prompts !== 'object' || Array.isArray(prompts)) {
+      throw new Error('systemPrompts must be an object of prompt-name to string.');
+    }
+    for (const [key, value] of Object.entries(prompts)) {
+      if (value !== undefined && value !== null && typeof value !== 'string') {
+        throw new Error(`systemPrompts.${key} must be a string (got ${typeof value}).`);
+      }
+    }
     return setSystemPrompts(prompts);
   });
 
