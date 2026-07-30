@@ -445,7 +445,12 @@ export function generateReport(
   // A PARTIAL holdout still ran. Requiring both halves printed "No holdout
   // ran" for a run where a holdout test was configured and the champion WAS
   // scored on it — the warning was simply false.
-  const holdoutRan = !!(result.holdout && !result.holdout.skipped &&
+  // `skipped` short-circuited this, but the two are not exclusive: when Stop
+  // lands between scoring the champion and scoring the seed, the run carries a
+  // `champion` result AND a `skipped` marker — and the report then printed "No
+  // holdout ran" while discarding the measured number, which is the exact false
+  // statement this flag exists to prevent. A measured half always counts.
+  const holdoutRan = !!(result.holdout &&
     (result.holdout.seed || result.holdout.champion));
 
   // An unparseable judge reply is scored 5.0 — a number that LOOKS like a
@@ -571,6 +576,17 @@ export function generateReport(
           `${result.holdout.champion.score.toFixed(2)}, ${delta.toFixed(2)}). Evolution improved the training ` +
           'scores above by selecting for them; on tests it never saw, this prompt is WORSE than the seed. ' +
           'Treat the training deltas as overfitting, not as a result.',
+        );
+        lines.push('');
+      } else if (delta === 0) {
+        // A measured ZERO is the commonest real outcome, and it got no marker
+        // at all — so a run with +5.0 of training "improvement" and a flat
+        // holdout read as fine, next to a regression that is flagged loudly.
+        lines.push(
+          `> ⚠️ **No measured improvement on unseen tests** (${result.holdout.seed.score.toFixed(2)} → ` +
+          `${result.holdout.champion.score.toFixed(2)}, ±0.00). Whatever the training table above shows, ` +
+          'this prompt performs exactly like the seed on tests it never saw. The training deltas are what ' +
+          'was selected for, not a result.',
         );
         lines.push('');
       }

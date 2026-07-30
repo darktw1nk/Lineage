@@ -110,3 +110,35 @@ describe('the report admits when scores were fabricated', () => {
     expect(md).not.toMatch(/could not be graded|ungraded/i);
   });
 });
+
+describe('a flat holdout is stated, not left to read as success', () => {
+  it('flags a measured zero — the commonest real outcome', () => {
+    // Measured: training +5.0, holdout 0.00 -> 0.00, and ZERO warning markers
+    // in the Generalization section. A regression is flagged loudly, so the
+    // silence here read as "fine".
+    const md = generateReport(holdout({
+      seed: { score: 0, perTest: [{ testId: 'h1', score: 0 }] },
+      champion: { score: 0, perTest: [{ testId: 'h1', score: 0 }] },
+    }), CONFIG);
+    expect(md).toMatch(/No measured improvement on unseen tests/i);
+  });
+
+  it('still says nothing when the champion genuinely generalises', () => {
+    const md = generateReport(holdout({
+      seed: { score: 4, perTest: [{ testId: 'h1', score: 4 }] },
+      champion: { score: 8, perTest: [{ testId: 'h1', score: 8 }] },
+    }), CONFIG);
+    expect(md).not.toMatch(/No measured improvement/i);
+  });
+
+  it('counts a measured half even when the run was also marked skipped', () => {
+    // Stop landing between the two holdout halves sets BOTH `champion` and
+    // `skipped`; holdoutRan short-circuited on `skipped` and printed
+    // "No holdout ran", discarding a number that was actually measured.
+    const md = generateReport(holdout({
+      skipped: 'stopped',
+      champion: { score: 7, perTest: [{ testId: 'h1', score: 7 }] },
+    }), CONFIG);
+    expect(md).not.toMatch(/No holdout ran/i);
+  });
+});

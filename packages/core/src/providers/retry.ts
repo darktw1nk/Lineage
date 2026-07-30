@@ -56,6 +56,17 @@ export function retryAfterMsFrom(response: { headers?: { get(name: string): stri
 
 /** Ceiling on an honoured Retry-After, so a bad header cannot stall a run. */
 const MAX_RETRY_AFTER_MS = 60_000;
+/**
+ * Ceiling on the TOTAL time one logical call may spend honouring Retry-After.
+ *
+ * MAX_RETRY_AFTER_MS caps each individual sleep, so three retries at the cap
+ * was three minutes — and base.ts wraps withRetry INSIDE withGlobalSemaphore,
+ * so every one of those minutes is a parallel slot held. callTimeoutMs bounds
+ * only the HTTP attempt; timeLimitMs is checked at node boundaries. Nothing
+ * aborted it, and `Retry-After: 3600` on a 503 is routine edge-network
+ * behaviour.
+ */
+const MAX_RETRY_AFTER_TOTAL_MS = 60_000;
 
 export function isRetryableError(error: any): boolean {
   // Retry on network errors or specific HTTP status codes
@@ -133,6 +144,7 @@ export async function withRetry<T>(
 ): Promise<T> {
   const opts = { ...DEFAULT_RETRY_OPTIONS, ...options };
   let lastError: Error;
+  let retryAfterSpent = 0;
   
   for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
     try {
@@ -152,9 +164,26 @@ export async function withRetry<T>(
         // continued hammering it makes the rate limit worse. Capped so a
         // hostile or mistaken header cannot stall a run indefinitely.
         const askedMs = Number((error as any)?.retryAfterMs);
-        const delay = Number.isFinite(askedMs) && askedMs > 0
-          ? Math.min(askedMs, MAX_RETRY_AFTER_MS)
-          : calculateDelay(attempt, opts);
+        const honouring = Number.isFinite(askedMs) && askedMs > 0;
+        let delay = honouring ? Math.min(askedMs, MAX_RETRY_AFTER_MS) : calculateDelay(attempt, opts);
+
+        if (honouring) {
+          // Waiting LESS than the provider asked is worse than not retrying:
+          // it is a guaranteed repeat failure, and providers that extend the
+          // window under continued hammering make the rate limit worse. So
+          // when the remaining budget cannot cover the wait, give up now.
+          const remaining = MAX_RETRY_AFTER_TOTAL_MS - retryAfterSpent;
+          if (delay > remaining) {
+            console.warn(
+              `Provider asked for ${Math.round(askedMs / 1000)}s before retrying and this call has ` +
+              `already waited ${Math.round(retryAfterSpent / 1000)}s — giving up rather than holding a ` +
+              `parallel slot, or retrying early and making the rate limit worse.`,
+            );
+            throw error;
+          }
+          retryAfterSpent += delay;
+        }
+
         console.log(`Retry attempt ${attempt + 1}/${opts.maxRetries} after ${delay}ms...`);
         await sleep(delay);
       }

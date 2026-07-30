@@ -68,3 +68,37 @@ describe('genuinely transient blocks are still retried', () => {
     expect(calls).toBe(4);
   });
 });
+
+/**
+ * MAX_RETRY_AFTER_MS caps each SLEEP, not the call. Three retries at the cap is
+ * three minutes, and base.ts wraps withRetry INSIDE withGlobalSemaphore, so all
+ * of it is a parallel slot held. `callTimeoutMs` bounds only the HTTP attempt
+ * and `timeLimitMs` is only checked at node boundaries, so nothing aborts it.
+ * `Retry-After: 3600` on a 503 is routine edge-network behaviour, and all five
+ * adapters now attach the header.
+ *
+ * Measured: no header 7.4s, `Retry-After: 2` 6.0s, `Retry-After: 3600` 180.0s.
+ */
+describe('Retry-After cannot stall a slot for minutes', () => {
+  it('bounds the TOTAL time spent waiting, not just each sleep', async () => {
+    calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return {
+        ok: false, status: 503, statusText: 'Service Unavailable',
+        headers: { get: (h: string) => (h.toLowerCase() === 'retry-after' ? '3600' : null) },
+        json: async () => ({}), text: async () => 'unavailable',
+      } as any;
+    }) as any;
+
+    const started = Date.now();
+    await expect(run(new OpenAIAdapter())).rejects.toThrow();
+    const elapsed = Date.now() - started;
+
+    expect(elapsed).toBeLessThan(70_000); // was 180_015ms
+    // And it stops rather than retrying EARLIER than the provider asked, which
+    // is a guaranteed repeat failure and extends the window on providers that
+    // penalise continued hammering.
+    expect(calls).toBeLessThan(4);
+  }, 200_000);
+});
