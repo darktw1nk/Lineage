@@ -23,6 +23,7 @@ interface EvaluationStore {
   setEvaluation: (evalId: UUID, evaluation: EvaluationRun) => void;
   /** Apply a DB snapshot without discarding live events that beat it. */
   hydrate: (evalId: UUID, snapshot: EvaluationRun) => void;
+  setRunFields: (evalId: UUID, fields: Partial<EvaluationRun>) => void;
   updateNodeInEvaluation: (evalId: UUID, node: CandidateNode) => void;
   addNodeToEvaluation: (evalId: UUID, node: CandidateNode) => void;
   addGenerationToEvaluation: (evalId: UUID, generation: number, nodes: CandidateNode[]) => void;
@@ -75,6 +76,14 @@ function usableNode(n: unknown): n is CandidateNode {
   return !!n && typeof n === 'object' && typeof (n as CandidateNode).id === 'string';
 }
 
+/**
+ * Events that arrived before the store had an entry for their run. Replayed by
+ * hydrate(), in order, so a subscribe-then-await race cannot lose them.
+ */
+const pendingUpdates = new Map<UUID, any[]>();
+/** Set by subscribe() so hydrate can replay through the same handler. */
+const updateHandlers = new Map<UUID, (event: any, data: any) => void>();
+
 export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
   evaluations: new Map(),
   subscriptions: new Map(),
@@ -98,6 +107,17 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
    * live node when both have the same id: the snapshot is by definition the
    * older view.
    */
+  /** Merge a few run-level fields without disturbing generations. */
+  setRunFields: (evalId, fields) => {
+    set((state) => {
+      const evaluation = state.evaluations.get(evalId);
+      if (!evaluation) return state;
+      const newEvaluations = new Map(state.evaluations);
+      newEvaluations.set(evalId, { ...evaluation, ...fields });
+      return { evaluations: newEvaluations };
+    });
+  },
+
   hydrate: (evalId, snapshot) => {
     set((state) => {
       const live = state.evaluations.get(evalId);
@@ -122,6 +142,16 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       newEvaluations.set(evalId, { ...snapshot, ...live, generations: merged });
       return { evaluations: newEvaluations };
     });
+
+    // Replay anything that arrived before the entry existed, in order. Without
+    // this the buffer would simply be a slower way of dropping them.
+    const queued = pendingUpdates.get(evalId);
+    pendingUpdates.delete(evalId);
+    const handler = updateHandlers.get(evalId);
+    if (queued?.length && handler) {
+      console.log(`[Store] Replaying ${queued.length} update(s) buffered before hydrate`);
+      for (const data of queued) handler(null, data);
+    }
   },
 
   updateNodeInEvaluation: (evalId, node) => {
@@ -324,6 +354,24 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
     
     const handleUpdate = (_event: any, data: any) => {
       if (!data || !data.type) return;
+
+      // BUFFER until the store has an entry for this run.
+      //
+      // Every mutator begins `const evaluation = ...get(evalId); if (!evaluation)
+      // return state;`, and useEvaluation subscribes BEFORE awaiting eval:get —
+      // so anything arriving in that window was silently dropped. Deterministic
+      // on the Resume path (onSelectEvaluation is a plain setState with no wait
+      // like the create flow has): measured 5 of 50 events discarded, including
+      // the run's `status`. `status`, `stop`, `holdout_result` and
+      // `playoff_result` each fire EXACTLY ONCE, at the end, so losing one means
+      // it never appears until the app is restarted.
+      if (!get().evaluations.has(evalId)) {
+        const pending = pendingUpdates.get(evalId) ?? [];
+        // Bounded: a run that is never hydrated must not grow this forever.
+        if (pending.length < 500) pending.push(data);
+        pendingUpdates.set(evalId, pending);
+        return;
+      }
       
       // Type only, and nothing at all for the per-CALL events. Logging the full
       // payload here printed a whole node (250 KB with large outputs) for every
@@ -374,7 +422,15 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
           break;
 
         case 'cost_breakdown':
-          // Persisted on run_json; no live UI yet
+          // These were dropped, so the desktop had ZERO readers for either.
+          // Fabricated placeholder scores were shown as measurements with no
+          // disclosure at all, while the CLI report warns loudly on the very
+          // same data. The Footer now surfaces ungradedTests.
+          store.setRunFields(evalId, {
+            costBreakdown: data.breakdown ?? undefined,
+            estimate: data.estimate ?? undefined,
+            ungradedTests: data.ungradedTests ?? undefined,
+          });
           break;
           
         // Emitted by the engine and previously logged as "unknown". Neither
@@ -395,6 +451,7 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       }
     };
     
+    updateHandlers.set(evalId, handleUpdate);
     const unsubscribe = window.electronAPI.eval.subscribe(evalId, handleUpdate);
     
     set((state) => {

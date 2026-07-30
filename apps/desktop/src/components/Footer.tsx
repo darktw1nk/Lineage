@@ -192,6 +192,20 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
             </div>
           </div>
         )}
+
+        {!!evaluation.ungradedTests && (
+          // The desktop had no reader for this at all, so fabricated 5.0s were
+          // displayed as measurements with no disclosure — while the CLI report
+          // warns loudly on identical data. A run whose judge is unreadable
+          // shows every test as 5/10 and every fitness as 0; without this the
+          // contradiction has no explanation on screen.
+          <div title="The judge could not be read for these tests. Their scores are placeholders, not measurements, and they are scored 0 in fitness.">
+            <div className="text-xs text-amber-500">Ungraded</div>
+            <div className="text-sm font-medium text-amber-500">
+              {evaluation.ungradedTests} test{evaluation.ungradedTests === 1 ? '' : 's'} not measured
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Controls */}

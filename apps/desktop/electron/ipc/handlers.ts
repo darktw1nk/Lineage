@@ -609,6 +609,31 @@ async function importEvaluation(filePath: string): Promise<EvaluationRun> {
   if (!run.generations.every(g => Array.isArray(g))) {
     throw new Error('Invalid export file: every entry in "run.generations" must itself be an array of nodes.');
   }
+  // The SHAPE was checked and the CONTENTS were not, so a node with no
+  // changeLog imported cleanly and then threw a TypeError on every open,
+  // replacing the lineage graph with its ErrorBoundary for that run — reachable
+  // from an ordinary older or hand-edited export, not just a hostile one. A
+  // string `fitness` broke the graph the same way, and fabricated totals
+  // (usd: -999.5, cacheHits: -5) rendered as fact.
+  const nodes = (run.generations as any[]).flat();
+  for (const n of nodes) {
+    if (!n || typeof n !== 'object' || typeof n.id !== 'string') {
+      throw new Error('Invalid export file: every node must be an object with a string id.');
+    }
+    if (n.changeLog !== undefined && !Array.isArray(n.changeLog)) {
+      throw new Error(`Invalid export file: node ${n.id} has a non-array changeLog.`);
+    }
+    const f = n.metrics?.fitness;
+    if (f !== undefined && f !== null && (typeof f !== 'number' || !Number.isFinite(f))) {
+      throw new Error(`Invalid export file: node ${n.id} has a non-numeric fitness (${JSON.stringify(f)}).`);
+    }
+  }
+  for (const [field, value] of [['totals.usd', run.totals?.usd], ['cacheHits', run.cacheHits]] as const) {
+    if (value !== undefined && value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
+      throw new Error(`Invalid export file: ${field} must be a non-negative number (got ${JSON.stringify(value)}).`);
+    }
+  }
+
   if (typeof run.startedAt !== 'number' || !run.version) {
     throw new Error('Invalid export file: "run" is missing startedAt or version.');
   }
