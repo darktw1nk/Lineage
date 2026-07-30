@@ -11,6 +11,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import type { UUID } from '../types';
+import { selectChampion } from '@promptengine/core';
 import { useEvaluation } from '../hooks/useEvaluation';
 
 interface CenterViewProps {
@@ -46,19 +47,39 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
     const generationSpacing = 400; // Vertical spacing between generations
     let edgeCounter = 0; // Global counter for unique edge IDs
 
-    // Find top 3 performers across ALL generations for ranking (excluding elites to avoid duplicates)
-    const allFinishedNodes = evaluation.generations.flatMap(gen => 
-      gen.filter(n => 
-        n.status === 'finished' && 
-        n.metrics?.fitness !== undefined &&
-        n.changeLog[0]?.label !== 'ELITE' // Exclude elite clones from ranking
-      )
-    ).sort((a, b) => (b.metrics?.fitness || 0) - (a.metrics?.fitness || 0));
-    
+    // Rank with the ENGINE's own selector. This used to sort by raw fitness and
+    // filter out elites, so the 🥇 crown could sit on a node that is not the
+    // champion the tool actually reports — the prompt the user copies off the
+    // graph was then not the prompt in the holdout row, the CLI report, or
+    // results.json. Two proven divergences: a decisive playoff (which overrides
+    // fitness and which this ignored), and an elite winning — elites ARE
+    // playoff contenders and are usually the strongest, so that is the ordinary
+    // case rather than an edge one.
+    //
+    // `n.changeLog[0]` also had no optional chain on changeLog itself, so a node
+    // without one — reachable from eval:import, which does not validate node
+    // contents — threw a TypeError and replaced the whole graph with its
+    // ErrorBoundary.
+    const allFinished = evaluation.generations.flatMap((gen, genIndex) =>
+      gen
+        .filter(n => n.status === 'finished' && n.metrics?.fitness !== undefined)
+        .map(n => ({ node: n, generation: n.generation ?? genIndex })),
+    );
+    const champion = selectChampion(
+      allFinished.map(e => ({ id: e.node.id, generation: e.generation, metrics: e.node.metrics })),
+      evaluation.playoffs,
+      n => n.generation ?? 0,
+    );
+    // Runners-up stay fitness-ordered; only the crown is authoritative.
+    const runnersUp = allFinished
+      .map(e => e.node)
+      .filter(n => n.id !== champion.champion?.id)
+      .sort((a, b) => (b.metrics?.fitness || 0) - (a.metrics?.fitness || 0));
+
     const topNodeIds = new Set([
-      allFinishedNodes[0]?.id,
-      allFinishedNodes[1]?.id,
-      allFinishedNodes[2]?.id,
+      champion.champion?.id,
+      runnersUp[0]?.id,
+      runnersUp[1]?.id,
     ].filter(Boolean));
 
     // Create nodes for each candidate
@@ -84,19 +105,19 @@ export function CenterView({ evaluationId, selectedNodeId, onSelectNode }: Cente
         let textColor = '#e0e0e0';
         let rankLabel = '';
         
-        if (candidate.id === allFinishedNodes[0]?.id) {
+        if (candidate.id === champion.champion?.id) {
           // 🥇 Gold - 1st place
           bgColor = 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)';
           borderColor = '#FFD700';
           textColor = '#000000';
           rankLabel = '🥇';
-        } else if (candidate.id === allFinishedNodes[1]?.id) {
+        } else if (candidate.id === runnersUp[0]?.id) {
           // 🥈 Silver - 2nd place
           bgColor = 'linear-gradient(135deg, #C0C0C0 0%, #A8A8A8 100%)';
           borderColor = '#C0C0C0';
           textColor = '#000000';
           rankLabel = '🥈';
-        } else if (candidate.id === allFinishedNodes[2]?.id) {
+        } else if (candidate.id === runnersUp[1]?.id) {
           // 🥉 Bronze - 3rd place
           bgColor = 'linear-gradient(135deg, #CD7F32 0%, #B8860B 100%)';
           borderColor = '#CD7F32';
