@@ -442,7 +442,11 @@ export function generateReport(
   // the true improvement was measured to be exactly zero. Elitism then freezes
   // the lucky draw, so the number never regresses.
   const usesJudge = config.testSet.some(t => (t.mode ?? 'llm_grade') === 'llm_grade');
-  const holdoutRan = !!(result.holdout?.seed && result.holdout?.champion);
+  // A PARTIAL holdout still ran. Requiring both halves printed "No holdout
+  // ran" for a run where a holdout test was configured and the champion WAS
+  // scored on it — the warning was simply false.
+  const holdoutRan = !!(result.holdout && !result.holdout.skipped &&
+    (result.holdout.seed || result.holdout.champion));
 
   lines.push('## Improvement Summary (training tests — selected-for)');
   lines.push('');
@@ -541,6 +545,35 @@ export function generateReport(
         lines.push(`| ${escapeMarkdown(testName(tid))} | ${s.toFixed(1)} | ${c.toFixed(1)} |`);
       }
       lines.push(`| **Average** | **${result.holdout.seed.score.toFixed(2)}** | **${result.holdout.champion.score.toFixed(2)}** |`);
+      lines.push('');
+      // The whole point of a holdout is to catch a champion that won on the
+      // training set and does NOT generalise. That case used to produce a green
+      // tick and three '### Wins' lines and no callout at all, while the case
+      // where a holdout is merely ABSENT got a loud warning.
+      const delta = result.holdout.champion.score - result.holdout.seed.score;
+      if (delta < 0) {
+        lines.push(
+          `> ⚠️ **The champion REGRESSED on unseen tests** (${result.holdout.seed.score.toFixed(2)} → ` +
+          `${result.holdout.champion.score.toFixed(2)}, ${delta.toFixed(2)}). Evolution improved the training ` +
+          'scores above by selecting for them; on tests it never saw, this prompt is WORSE than the seed. ' +
+          'Treat the training deltas as overfitting, not as a result.',
+        );
+        lines.push('');
+      }
+    } else {
+      // A PARTIAL holdout — the section was guarded on
+      // (seed || champion || skipped) but the body only handled `skipped` or
+      // BOTH halves, so a run whose circuit breaker fired between scoring the
+      // champion and the seed emitted this heading followed by nothing at all.
+      const half = result.holdout.champion ?? result.holdout.seed;
+      const which = result.holdout.champion ? 'champion' : 'seed';
+      lines.push(
+        `⚠️ **The holdout evaluation is incomplete** — only the ${which} was scored ` +
+        `(${half!.score.toFixed(2)} on ${result.holdout.testIds.length} unseen test(s)). ` +
+        'Without both halves there is no baseline to compare against, so this number ' +
+        'says nothing about whether the prompt improved. The run was cut short before ' +
+        'the other half could be measured.',
+      );
       lines.push('');
     }
   }
