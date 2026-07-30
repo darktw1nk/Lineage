@@ -239,4 +239,22 @@ describe('a fabricated 5.0 is counted on the run', () => {
     const bd = events.find(e => e.type === 'cost_breakdown');
     expect(bd.ungradedTests).toBe(2);
   }, 60000);
+
+  it('flags the LEAF, so quality can refuse to credit a placeholder', async () => {
+    // The chain has four hops and only the two ENDS were pinned, so the middle
+    // could be broken with the whole suite green. This is the hop that now
+    // drives quality: runSingleSample sets `ungraded` on its own internal
+    // return and evaluatePromptOnTests rebuilds the TestResult from scratch, so
+    // deleting the copy silently restores the fabricated 5.0 to the mean.
+    registerAdapter();
+    judgeRaw = 'I think this answer is quite good, honestly.';
+    const { seedNode } = await run(makeConfig({
+      testSet: [{ id: 't1', name: 'g1', mode: 'llm_grade', prompt: 'A' }],
+    }));
+
+    expect(seedNode.tests[0].score).toBe(5);            // the placeholder itself
+    expect((seedNode.tests[0] as any).ungraded).toBe(true);
+    // ...and because the leaf says so, the placeholder earns nothing.
+    expect(seedNode.metrics.quality).toBe(0);
+  }, 60000);
 });

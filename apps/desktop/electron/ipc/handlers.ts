@@ -515,7 +515,11 @@ async function getEvaluationConfig(runId: string): Promise<EvaluationConfig | nu
   return JSON.parse(row.config_json);
 }
 
-async function exportEvaluation(runId: string): Promise<string> {
+// Returns null when the user cancels the save dialog. The declared type said
+// `string`, and only coincidence kept it working: window.d.ts declares
+// `Promise<string | null>` and the caller handles null, but nothing checked
+// the two against each other until the main process was strict-typed.
+async function exportEvaluation(runId: string): Promise<string | null> {
   const db = getDatabase();
   const fs = await import('fs');
   const path = await import('path');

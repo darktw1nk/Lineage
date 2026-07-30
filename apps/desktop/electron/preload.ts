@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
+import type { ElectronAPI } from '../src/window';
 
 /**
  * Absolute path of a dropped File.
@@ -18,7 +19,12 @@ function pathForFile(file: File): string | null {
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
-contextBridge.exposeInMainWorld('electronAPI', {
+// Typed against the SAME interface the renderer declares. window.d.ts was a
+// hand-maintained mirror that nothing checked against this file: every
+// parameter here was an implicit any, so a signature could drift from the
+// declaration the renderer compiles against and neither side would complain.
+// Annotating the object makes the two verify each other.
+const api: ElectronAPI = {
   // Evaluation methods
   eval: {
     create: (config) => ipcRenderer.invoke('eval:create', config),
@@ -36,7 +42,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     estimate: (config) => ipcRenderer.invoke('eval:estimate', config),
     subscribe: (runId, callback) => {
       const channel = `eval:updates:${runId}`;
-      const listener = (event, data) => callback(event, data);
+      const listener = (event: unknown, data: unknown) => callback(event, data);
       ipcRenderer.on(channel, listener);
       // Return unsubscribe function that removes ONLY this specific listener
       return () => ipcRenderer.removeListener(channel, listener);
@@ -101,7 +107,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dev: {
     createTestEvals: (count: number) => ipcRenderer.invoke('dev:createTestEvals', count),
   },
-});
+};
+
+contextBridge.exposeInMainWorld('electronAPI', api);
 
 // TypeScript definitions are in src/window.d.ts
 

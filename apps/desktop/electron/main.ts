@@ -5,7 +5,7 @@ import Store from 'electron-store';
 import { initializeDatabase, closeDatabase, runningEvaluationIds, setStore, setSendUpdate, loadPlugins, type StoreInterface } from '@promptengine/core';
 import { registerIPCHandlers } from './ipc/handlers.js';
 import { registerPluginHandlers, setPluginState } from './ipc/plugins.js';
-import { initLogger, getLogBuffer } from './logger.js';
+import { initLogger } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

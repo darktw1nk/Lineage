@@ -99,12 +99,9 @@ describe('a fabricated 5.0 does not count as quality', () => {
  * TestResult from scratch, so it must CARRY `ungraded` up from its samples.
  */
 describe('the ungraded flag survives the hop that drives quality', () => {
-  // NOTE: the sample -> TestResult copy in evaluatePromptOnTests is still NOT
-  // pinned by a test. A first attempt here asserted only that the function
-  // exists, which guarantees nothing and is worse than no test at all, so it
-  // was removed rather than left to read as coverage. Pinning it needs an
-  // end-to-end run with an unreadable judge, in the style of
-  // scoring-truth.test.ts, asserting `ungraded` on the leaf itself.
+  // The sample -> TestResult copy is pinned end-to-end by
+  // scoring-truth.test.ts ('flags the LEAF'), which drives a real run with an
+  // unreadable judge and asserts `ungraded` on the leaf itself.
   it('quality reads the flag off the TestResult, not off a sample', () => {
     // If the leaf loses the flag, this node scores 5 instead of 0 — the exact
     // symptom the whole chain exists to prevent.
