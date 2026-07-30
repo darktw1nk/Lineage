@@ -101,8 +101,6 @@ interface EvaluationState {
    * allowed to run as the price probe; the rest wait for its answer, then
    * reserve against real evidence.
    */
-  priceProbe: Promise<void> | null;
-  resolvePriceProbe: (() => void) | null;
   /** Calls that threw. Their provider-side spend, if any, is unknowable here. */
   failedCalls: number;
   /** Times the cap REFUSED a call. Settled spend can sit below the cap while this climbs. */
@@ -417,8 +415,6 @@ async function startEvaluationInner(
     observedCompletion: new Map(),
     maxObservedCallUSD: 0,
     budgetRefusals: 0,
-    priceProbe: null,
-    resolvePriceProbe: null,
     failedCalls: 0,
     lastNodeCheckpointAt: 0, // 0 => the first node always checkpoints
     lastCheckpointCostMs: 0,
@@ -2060,27 +2056,18 @@ async function reserveCall(
   return 0;
 }
 
-/** Release a reservation once the call has settled (or failed). */
+/**
+ * Release a reservation once the call has settled (or failed).
+ *
+ * The reservation model was reverted (a settled-spend gate replaced it), so
+ * `reserved` is always 0 today. The function stays as the single release point
+ * in the `finally`, but the price-probe microtask it used to queue is gone: it
+ * fired on EVERY call to resolve a probe that can no longer be created.
+ */
 function releaseCall(state: EvaluationState, reserved: number): void {
   if (reserved > 0) {
     state.reservedUSD = Math.max(0, state.reservedUSD - reserved);
   }
-  // Fallback only, and DEFERRED.
-  //
-  // The probe should be resolved by accrueCost, once the price is genuinely
-  // known. But releaseCall runs in a `finally`, which fires before the
-  // accrual that follows it — resolving here directly is what made the probe
-  // useless. A microtask runs after the whole synchronous continuation
-  // (including accrueCost), so the precise resolution wins the race, and a
-  // call that THREW — and therefore never accrues — still cannot strand its
-  // waiters forever.
-  queueMicrotask(() => {
-    if (!state.resolvePriceProbe) return;
-    const resolve = state.resolvePriceProbe;
-    state.resolvePriceProbe = null;
-    state.priceProbe = null;
-    resolve();
-  });
 }
 
 /** Thrown to abandon in-flight work the moment the budget is gone. */
@@ -2131,18 +2118,6 @@ function accrueCost(
     observed.set(key, seen);
   }
 
-  // Resolve the price probe HERE, not in releaseCall.
-  //
-  // releaseCall runs in a `finally` that fires BEFORE this function, so every
-  // waiter woke to a still-unknown price, recomputed a ceiling of 0, and
-  // proceeded unreserved — the probe could never teach anyone anything.
-  // Measured 60% over a $0.05 cap with an unpriced model at parallelLimit 8.
-  if (state.resolvePriceProbe) {
-    const resolve = state.resolvePriceProbe;
-    state.resolvePriceProbe = null;
-    state.priceProbe = null;
-    resolve();
-  }
   state.run.totals.usd += c.usd;
   state.run.totals.tokensPrompt += c.promptTokens;
   state.run.totals.tokensCompletion += c.completionTokens;
