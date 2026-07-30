@@ -148,6 +148,13 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
       // tie handed out half a point per side for a judgement that never
       // happened, which is the same free-value error as the unreadable reply.
       console.error('[Playoff] Judge call failed:', error instanceof Error ? error.message : error);
+      // Account for the failed call. accrue() is what increments the run's call
+      // count, so a throw here was invisible: measured 122 requests served
+      // against 118 reported, with the playoff's own breakdown row
+      // byte-identical to a clean run. The candidate path and the grading path
+      // both bill a throw as {usd: 0, calls: 1}; this was 1 of the 2 places
+      // that did not.
+      accrue(0, 0, 0);
       return 'unreadable';
     }
   };

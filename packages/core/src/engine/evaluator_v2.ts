@@ -1846,6 +1846,18 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
     sendUpdate(runId, { type: 'holdout_result', holdout });
     return;
   }
+  // A run aborted by the grading circuit breaker must not pay for a holdout
+  // judged by the SAME model it just declared unusable — measured funding 2
+  // holdout calls after reporting itself aborted, recording neither a champion
+  // nor a seed for the money. A time limit means the same thing as a budget:
+  // the ceiling the user set has been reached.
+  if (state.run.stopReason === 'error' || state.run.stopReason === 'time'
+      || state.run.stopReason === 'manual') {
+    holdout.skipped = state.run.stopReason;
+    console.warn(`[Evaluator] Run ended with '${state.run.stopReason}' — skipping holdout evaluation`);
+    sendUpdate(runId, { type: 'holdout_result', holdout });
+    return;
+  }
   // Same 0-means-zero rule as the playoff gate above.
   if (state.config.targets.budgetUSD !== undefined && state.run.totals.usd >= state.config.targets.budgetUSD) {
     holdout.skipped = 'budget';
@@ -1923,12 +1935,26 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   // so the champion (and the holdout below) reflect the last generation's ranking.
   // Both are billable: a user who pressed Stop wants spending to STOP, not to
   // fund a playoff plus a holdout pass afterwards.
-  if (state.run.stopReason === 'manual') {
-    console.log('[Evaluator] Manual stop — skipping playoff and holdout to stop spending');
+  // 'error' belongs here too. The grading circuit breaker aborts a run whose
+  // judge is broken, and the playoff and holdout are judged by that SAME model
+  // — so a run that had already reported itself aborted went on to fund 12
+  // playoff calls and 2 holdout calls (19% of the run) using the judge it had
+  // just declared unusable, and recorded neither a champion nor a seed for the
+  // money spent. 'budget' and 'time' likewise mean the user set a ceiling that
+  // has been reached; spending past it to compute a nicety is not what either
+  // option asks for.
+  const SKIP_EXTRA_SPEND = new Set(['manual', 'error', 'budget', 'time']);
+  if (state.run.stopReason && SKIP_EXTRA_SPEND.has(state.run.stopReason)) {
+    console.log(
+      `[Evaluator] Stop reason '${state.run.stopReason}' — skipping the playoff to stop spending`,
+    );
   } else {
     await maybeRunPlayoff(runId, state);
-    await runHoldoutEvaluation(runId, state);
   }
+  // The holdout still RUNS, because it has its own gate that records why it was
+  // skipped. Omitting the call entirely lost that marker and the report then
+  // said nothing at all about generalisation.
+  await runHoldoutEvaluation(runId, state);
   console.log(`[Evaluator] Finishing evaluation, reason=${state.run.stopReason}`);
   
   // The budget can decide a run's outcome without settled spend ever reaching

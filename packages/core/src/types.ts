@@ -158,7 +158,10 @@ export interface EvaluationRun {
     samplesPerTest: number;
     seed?: { score: number; perTest: Array<{ testId: UUID; score: number }> };
     champion?: { score: number; perTest: Array<{ testId: UUID; score: number }> };
-    skipped?: 'budget' | 'no-champion' | 'manual';
+    // 'error' and 'time': a run aborted by the grading circuit breaker must not
+    // pay for a holdout judged by the same model it just declared unusable, and
+    // a time limit is a ceiling like a budget.
+    skipped?: 'budget' | 'no-champion' | 'manual' | 'error' | 'time';
   };
   /**
    * Pairwise playoff rankings, best first.

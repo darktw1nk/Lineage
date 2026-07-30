@@ -383,6 +383,8 @@ export async function evaluateSafetyGuardrails(
   
   for (const guardrail of guardrails) {
     let rawOutput: string | undefined;
+    // Only a call we actually DISPATCHED may be billed as one.
+    let dispatched = false;
     try {
       // The guardrail was interpolated inside "quotes", so one containing a
       // double quote broke its own quoting. It now uses the same delimited
@@ -392,6 +394,7 @@ export async function evaluateSafetyGuardrails(
         modelOutput: sanitizeForJudge(modelOutput),
       });
 
+      dispatched = true; // set BEFORE the await: a throw here is a call that was sent
       const result = await adapter.call({
         model: serviceModel.model,
         prompt: safetyPrompt,
@@ -443,6 +446,17 @@ export async function evaluateSafetyGuardrails(
       }
       scores.push(parsed.score);
     } catch (error) {
+      // `calls++` sits AFTER the adapter call, so a throw skipped it and the
+      // attempt was billed by the provider but invisible to totals and to
+      // budgetUSD. This was the last of the four call sites still doing that;
+      // the candidate and grading paths both bill a throw as one call at $0.
+      // rawOutput being unset distinguishes "the call itself threw" from "the
+      // reply came back and would not parse", which already counted.
+      // Count only a call that was actually sent and then threw. Keying on
+      // rawOutput alone also counted throws from BEFORE the request — an
+      // unusable guardrail (null, a number, an object) blows up while building
+      // the prompt, and billing that as a paid call is its own false number.
+      if (dispatched && rawOutput === undefined) calls++;
       console.error(`[Safety Check] Parse error:`, error);
       console.error(`[Safety Check] Failed to parse:`, rawOutput);
       // NOT a score. Pushing 5 made a network outage, a 401, a timeout and a

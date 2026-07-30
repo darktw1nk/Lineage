@@ -237,7 +237,11 @@ describe('runPairwisePlayoff', () => {
     expect(result!.points['n1']).toBe(0);
     expect(result!.points['n2']).toBe(0);
     expect(result!.matches).toBe(2); // failed calls still count as matches
-    expect(accrued).toHaveLength(0); // nothing accrued for failed calls
+    // A failed call is still a call the provider served and may bill. accrue()
+    // is what increments the run's call count, so a throw here was invisible:
+    // measured 122 requests served against 118 reported.
+    expect(accrued).toHaveLength(2); // one per attempted judge call
+    expect(accrued.every(([usd]) => usd === 0)).toBe(true);
   });
 
   it('returns null for fewer than 2 contenders or no tests', async () => {

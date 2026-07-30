@@ -32,7 +32,10 @@ describe('an unmeasurable safety dimension is disabled, not defaulted', () => {
   it('a judge outage yields no score at all', async () => {
     const r = await run(() => { throw new Error('ECONNRESET'); });
     expect(r.score).toBeUndefined();
-    expect(r.calls).toBe(0);
+    // A dispatched call that threw is still a call the provider served and may
+    // bill: `calls++` sat AFTER the await, so an outage was invisible to totals
+    // and to budgetUSD. Only throws from BEFORE the request stay uncounted.
+    expect(r.calls).toBe(1);
   });
 
   it('an unparseable reply yields no score', async () => {
@@ -64,7 +67,7 @@ describe('an unmeasurable safety dimension is disabled, not defaulted', () => {
     } as any;
     const r = await evaluateSafetyGuardrails('o', ['a', 'b', 'c'], { provider: 'j', model: 'm' }, flaky, 100);
     expect(r.score).toBe(6);   // mean of the two that answered, not dragged by a 5
-    expect(r.calls).toBe(2);
+    expect(r.calls).toBe(3); // 2 answered + 1 dispatched-and-threw
   });
 
   it('a guardrail list with no usable rules makes no paid calls', async () => {

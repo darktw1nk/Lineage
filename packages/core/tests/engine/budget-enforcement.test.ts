@@ -223,7 +223,13 @@ describe('budget enforcement', () => {
     // Playoffs already judged during normal evolution are fine; the fix is that
     // Stop must not fund a NEW playoff or a holdout pass afterwards.
     expect(playoffsAfterStop).toBe(0);
-    expect(final.holdout).toBeUndefined();
+    // The holdout is RECORDED as skipped rather than omitted. Omitting it lost
+    // the reason, so the report said nothing at all about generalisation and a
+    // reader could not tell "not run" from "run and found nothing". What
+    // matters is that it costs nothing, which the call bound below asserts.
+    expect(final.holdout?.skipped).toBe('manual');
+    expect(final.holdout?.seed).toBeUndefined();
+    expect(final.holdout?.champion).toBeUndefined();
     void playoffsAtStop;
     // Post-stop spending is bounded by in-flight work only, not a fresh phase
     const postStopCalls = adapterCalls - callsAtStop;
