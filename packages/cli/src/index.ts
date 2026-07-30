@@ -387,12 +387,18 @@ async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath
 
   // Archive BEFORE pruning, always — so `--archive-runs X --prune-runs 5` is a
   // safe one-liner rather than an ordering trap.
+  // docs/cli.md promises these commands "write only to stderr", so an agent can
+  // run them under `npm run --silent` alongside a JSON pipeline. They used
+  // emit(), which is stdout — the doc's own combined example therefore put
+  // prose on a stream the caller is told carries only JSON.
+  const note = (line: string) => { process.stderr.write(line + '\n'); };
+
   let archivedIds: Set<string> | undefined;
   if (archiveDir) {
     const result = await archiveRuns(db, archiveDir);
     // Prune may only remove what actually reached disk.
     archivedIds = new Set(result.archived.map(a => a.runId));
-    emit(`Archived ${result.archived.length} run(s) to ${archiveDir}`);
+    note(`Archived ${result.archived.length} run(s) to ${archiveDir}`);
     for (const skipped of result.skipped) {
       process.stderr.write(`  skipped ${skipped.runId.slice(0, 8)}: ${skipped.reason}\n`);
     }
@@ -402,10 +408,10 @@ async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath
     const result = await pruneRuns(db, pruneKeep, lastResolvedDbPath, archivedIds);
     const mb = (n: number) => `${(n / 1e6).toFixed(1)} MB`;
     if (result.deleted.length === 0) {
-      emit(`Nothing to prune — ${result.kept} run(s) on file, keeping ${pruneKeep}.`);
+      note(`Nothing to prune — ${result.kept} run(s) on file, keeping ${pruneKeep}.`);
     } else {
-      emit(`Pruned ${result.deleted.length} run(s), kept the ${result.kept} most recent.`);
-      emit(`Database ${mb(result.bytesBefore)} → ${mb(result.bytesAfter)}`);
+      note(`Pruned ${result.deleted.length} run(s), kept the ${result.kept} most recent.`);
+      note(`Database ${mb(result.bytesBefore)} → ${mb(result.bytesAfter)}`);
     }
   }
 

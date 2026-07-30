@@ -80,3 +80,27 @@ describe('the candidate cannot forge its own grade', () => {
     expect(r.score).toBe(3);
   });
 });
+
+/**
+ * An EMPTY judge reply took a separate early-return that set neither
+ * `_ungraded` nor `_parseError`, so its fabricated 5.0 was indistinguishable
+ * from a measured one. Measured across a whole run whose judge always returned
+ * "": every generation reported avg/best/worst fitness 5.000, ungradedTests 0,
+ * and the report carried no warning at all — while the sibling prose-reply path
+ * disclosed the identical fabricated 5.0 correctly.
+ *
+ * Real triggers: a refusal with empty text, a 200 with `content: null`, a
+ * zero-token completion.
+ */
+describe('an empty judge reply is disclosed, not passed off as a 5', () => {
+  it('marks the test ungraded', async () => {
+    const r = await grade('', 'Paris');
+    expect((r as any)._ungraded).toBe(true);
+    expect(r.passed).toBe(false);
+  });
+
+  it('feeds the grading circuit breaker like any other failure', async () => {
+    const r = await grade('   \n  ', 'Paris');
+    expect((r as any)._parseError).toBe(true);
+  });
+});

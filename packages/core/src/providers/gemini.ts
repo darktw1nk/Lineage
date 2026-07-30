@@ -69,7 +69,14 @@ export class GeminiAdapter extends BaseProviderAdapter {
             { text: opts.prompt },
           ],
         }],
+        // MERGE, don't replace. The top-level spread above put the caller's
+        // generationConfig in, and this key then overwrote it wholesale —
+        // discarding topP, topK, thinkingConfig and responseMimeType, which are
+        // every knob that matters on Gemini and are rejected at the top level,
+        // so there was no way to set them at all. The engine's own fields still
+        // win over anything the caller puts in the same object.
         generationConfig: {
+          ...((opts.providerOptions as any)?.generationConfig || {}),
           temperature: opts.temperature,
           maxOutputTokens: opts.maxTokens ?? 4096,
           ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
@@ -130,9 +137,20 @@ export class GeminiAdapter extends BaseProviderAdapter {
       // empty completion. Only `candidates.length === 0` was checked, so the
       // commonest Gemini failure billed $0, graded the candidate on "" and
       // killed the lineage instead of being retried.
+      //
+      // Content-policy blocks are DETERMINISTIC — the same prompt is refused
+      // every time — so retrying them bought four billed requests that could
+      // not differ, and the engine accrues a throw as {usd: 0, calls: 1}: four
+      // paid requests reported as one call at $0, invisible to budgetUSD.
+      // MALFORMED_FUNCTION_CALL is different: it is a sampling artefact, and a
+      // re-roll at nonzero temperature really can succeed.
       const finishReason = data.candidates?.[0]?.finishReason;
-      const BLOCKED = ['SAFETY', 'RECITATION', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII', 'MALFORMED_FUNCTION_CALL'];
-      if (typeof finishReason === 'string' && BLOCKED.includes(finishReason)) {
+      const REFUSED = ['SAFETY', 'RECITATION', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII'];
+      const RE_ROLLABLE = ['MALFORMED_FUNCTION_CALL'];
+      if (typeof finishReason === 'string' && REFUSED.includes(finishReason)) {
+        throw new Error(`Gemini blocked the response (finishReason: ${finishReason})`);
+      }
+      if (typeof finishReason === 'string' && RE_ROLLABLE.includes(finishReason)) {
         throw new RetryableError(`Gemini blocked the response (finishReason: ${finishReason})`, 500);
       }
 

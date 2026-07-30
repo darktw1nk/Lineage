@@ -177,9 +177,12 @@ export class OpenAIAdapter extends BaseProviderAdapter {
         }));
       }
 
-      // A content filter is a provider-side failure, not a bad answer.
+      // A content filter is a provider-side failure, not a bad answer — but it
+      // is DETERMINISTIC, so retrying bought four billed requests that could
+      // not differ. Worse, the engine accrues a throw as {usd: 0, calls: 1}:
+      // four paid requests reported as one call at $0, invisible to budgetUSD.
       if (data.choices?.[0]?.finish_reason === 'content_filter') {
-        throw new RetryableError('OpenAI stopped the response with finish_reason "content_filter"', 500);
+        throw new Error('OpenAI stopped the response with finish_reason "content_filter"');
       }
 
       return {

@@ -33,7 +33,13 @@ export class GroqAdapter extends BaseProviderAdapter {
     return withRetry(async () => {
       const startTime = Date.now();
 
+      // providerOptions FIRST, so the engine's own fields below win. It used to
+      // be spread last, directly under a comment claiming the opposite: a
+      // global `temperature` then silently disabled the param operator's
+      // temperature evolution on this provider, and a stray `model` billed the
+      // call against a different model's price.
       const body: any = {
+        ...(opts.providerOptions || {}),
         model: opts.model,
         messages: [
           ...(opts.system ? [{ role: 'system', content: opts.system }] : []),
@@ -55,7 +61,6 @@ export class GroqAdapter extends BaseProviderAdapter {
         ],
         temperature: opts.temperature,
         max_tokens: opts.maxTokens ?? 4096,
-        ...(opts.providerOptions || {}),
       };
 
       if (opts.seed !== undefined) {

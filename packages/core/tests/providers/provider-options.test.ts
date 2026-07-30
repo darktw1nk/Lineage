@@ -62,4 +62,48 @@ describe('providerOptions reaches the wire on every provider', () => {
     expect(body.model).toBe('m');
     expect(Array.isArray(body.messages) && body.messages.length).toBeGreaterThan(0);
   });
+
+  /**
+   * The no-clobber contract was asserted on OpenAI ALONE while the passthrough
+   * test looped all five, so two adapters diverged from the comment written
+   * directly above their own spread. groq.ts and openrouter.ts applied
+   * providerOptions LAST, letting a global `temperature` silently disable the
+   * param operator's temperature evolution and a stray `model` break cost
+   * accounting by billing one model's calls against another's price.
+   */
+  // Where each provider's request actually carries the engine's own fields.
+  // Gemini takes the model from the URL and nests sampling under
+  // generationConfig, so reading them off the top level would pass vacuously.
+  const EFFECTIVE: Record<string, (b: any) => { model?: unknown; temperature: unknown }> = {
+    openai: b => ({ model: b.model, temperature: b.temperature }),
+    anthropic: b => ({ model: b.model, temperature: b.temperature }),
+    groq: b => ({ model: b.model, temperature: b.temperature }),
+    openrouter: b => ({ model: b.model, temperature: b.temperature }),
+    gemini: b => ({ temperature: b.generationConfig?.temperature }),
+  };
+
+  for (const [name, adapter] of ADAPTERS) {
+    it(`${name} keeps the engine's model and temperature against a hostile passthrough`, async () => {
+      const body = await requestBody(name, adapter, {
+        model: 'HIJACKED', temperature: 0.111, max_tokens: 7,
+      });
+      const eff = EFFECTIVE[name](body);
+      if ('model' in eff) expect(eff.model).toBe('m');
+      expect(eff.temperature).toBe(0);
+    });
+  }
+
+  it('gemini MERGES generationConfig instead of discarding it', async () => {
+    // generationConfig was spread first and then overwritten wholesale, so
+    // topP/topK/thinkingConfig/responseMimeType — every knob that matters on
+    // Gemini — were silently dropped. Gemini rejects them at the top level, so
+    // there was no way to set them at all.
+    const body = await requestBody('gemini', new GeminiAdapter(), {
+      generationConfig: { topP: 0.5, thinkingConfig: { thinkingBudget: 128 } },
+    });
+    expect(body.generationConfig.topP).toBe(0.5);
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 128 });
+    expect(body.generationConfig.temperature).toBe(0);   // engine still wins
+    expect(body.generationConfig.maxOutputTokens).toBe(8);
+  });
 });

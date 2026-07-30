@@ -582,17 +582,19 @@ export async function evaluateTestResultLLM(
     
     console.log(`[LLM Grading] Raw response:`, result.output);
     
-    // Check for empty response
+    // Check for empty response.
+    //
+    // This took its own early return that set neither `_ungraded` nor
+    // `_parseError`, so its fabricated 5.0 was indistinguishable from a
+    // measured one — while the prose-reply path a few lines below disclosed the
+    // identical 5.0 correctly. Measured over a run whose judge always answered
+    // "": every generation reported 5.000/5.000/5.000, ungradedTests 0, and the
+    // report carried no warning anywhere. Real triggers are ordinary — a
+    // refusal with empty text, a 200 with `content: null`, a 0-token
+    // completion. Throw into the shared recovery path instead of hand-rolling
+    // a second, quieter one.
     if (!result.output || result.output.trim() === '') {
-      console.error('[LLM Grading] Empty response from service model!');
-      return { 
-        passed: false, 
-        score: 5,
-        usd: result?.usd || 0,
-        promptTokens: result?.promptTokens || 0,
-        completionTokens: result?.completionTokens || 0,
-        reasoning: 'Empty response from LLM judge',
-      };
+      throw new Error('judge returned an empty reply');
     }
     
     // Keep the raw output for reasoning display

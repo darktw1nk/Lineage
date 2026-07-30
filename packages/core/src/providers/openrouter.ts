@@ -72,13 +72,21 @@ export class OpenRouterAdapter extends BaseProviderAdapter {
         body.seed = opts.seed;
       }
 
-      // Translate providerOptions for OpenRouter's API format
+      // Translate providerOptions for OpenRouter's API format.
+      //
+      // Object.assign wrote passthrough keys OVER the engine's, directly under
+      // a comment claiming the opposite ordering: a global `temperature`
+      // silently disabled the param operator's temperature evolution here, and
+      // a stray `model` billed the call against a different model's price.
+      // Assign only the keys the engine does not own.
       if (opts.providerOptions) {
         const { reasoning_effort, ...rest } = opts.providerOptions;
         if (reasoning_effort) {
           body.reasoning = { effort: reasoning_effort };
         }
-        Object.assign(body, rest);
+        for (const [key, value] of Object.entries(rest)) {
+          if (!(key in body)) body[key] = value;
+        }
       }
 
       console.log(`[OpenRouter] Calling model: ${opts.model}, temperature: ${body.temperature}${body.reasoning ? `, reasoning: ${JSON.stringify(body.reasoning)}` : ''}`);
