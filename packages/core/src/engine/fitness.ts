@@ -223,7 +223,14 @@ export function calculateFitness(
     // desktop default.
     const configuredMaxCost = costNorm_?.maxUSDPerCall;
     const maxCost =
-      (costNorm_?.mode === 'relative' && dynamicMaxCost && dynamicMaxCost > 0 ? dynamicMaxCost : undefined) ??
+      // The dynamic max is a per-NODE total (evaluator_v2 takes
+      // Math.max over nodes' metrics.costUSD), so it needs the SAME divisor as
+      // the numerator. Dividing only the numerator collapsed relative mode's
+      // range by a factor of the test count: two candidates 10x apart in cost
+      // scored 0.45 apart instead of 4.5.
+      (costNorm_?.mode === 'relative' && dynamicMaxCost && dynamicMaxCost > 0
+        ? dynamicMaxCost / callCountForNorm
+        : undefined) ??
       (typeof configuredMaxCost === 'number' && Number.isFinite(configuredMaxCost) && configuredMaxCost > 0 ? configuredMaxCost : 0.1);
     // Clamp BOTH ends. Only the upper bound was clamped, so a negative cost
     // (a bad price entry) drove costNorm arbitrarily negative and costScore
@@ -245,7 +252,10 @@ export function calculateFitness(
     // Same guard as maxCost above; 30000 matches the desktop default.
     const configuredMaxLatency = latencyNorm_?.maxMs;
     const maxLatency =
-      (latencyNorm_?.mode === 'relative' && dynamicMaxLatency && dynamicMaxLatency > 0 ? dynamicMaxLatency : undefined) ??
+      // Same divisor as the numerator — see the cost comment above.
+      (latencyNorm_?.mode === 'relative' && dynamicMaxLatency && dynamicMaxLatency > 0
+        ? dynamicMaxLatency / testCountForNorm
+        : undefined) ??
       (typeof configuredMaxLatency === 'number' && Number.isFinite(configuredMaxLatency) && configuredMaxLatency > 0 ? configuredMaxLatency : 30000);
     const latencyNorm = Math.max(0, Math.min(1, (latencyMs / testCountForNorm) / maxLatency)); // clamp both ends, as with cost
     const latencyScore = (1 - latencyNorm) * 10; // Scale to 0-10 range

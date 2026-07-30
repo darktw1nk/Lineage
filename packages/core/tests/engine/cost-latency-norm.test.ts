@@ -92,3 +92,29 @@ describe('cost and latency normalise per CALL, not per candidate', () => {
     expect(threeSamples).toBeCloseTo(oneSample, 6);
   });
 });
+
+describe('relative mode keeps its dynamic range', () => {
+  // The per-call fix divided the NUMERATOR by the call count but left the
+  // dynamic max a per-NODE total (evaluator_v2 computes it as
+  // Math.max(...nodes.map(n => n.metrics.costUSD))). The dimension's range
+  // collapsed by a factor of the test count: two candidates 10x apart in cost
+  // scored 7.0000 vs 7.4500 — a 0.45 spread where it used to be 4.5.
+  const RELATIVE = {
+    costNorm: { mode: 'relative', maxUSDPerCall: 0.01 },
+    latencyNorm: { mode: 'relative', maxMs: 5000 },
+  };
+
+  it('a 10x cost difference still separates two candidates', () => {
+    const cheap = node(10);
+    const dear = node(10);
+    (dear.metrics as any).costUSD = (cheap.metrics as any).costUSD * 10;
+    // dynamicMaxCost is what the engine passes: the largest per-NODE total.
+    const dynamicMax = (dear.metrics as any).costUSD;
+
+    const cfg = config({ quality: 0.5, cost: 0.5 }, RELATIVE);
+    const cheapFitness = calculateFitness(cheap, cfg, dynamicMax).fitness;
+    const dearFitness = calculateFitness(dear, cfg, dynamicMax).fitness;
+
+    expect(cheapFitness - dearFitness).toBeGreaterThan(2);
+  });
+});

@@ -614,6 +614,16 @@ async function emitOutputs(
   if (!result.best) {
     process.stderr.write(`\nEvolution produced no usable result${result.error ? `: ${result.error}` : ''}\n`);
     process.exitCode = 1;
+  } else if (result.stopReason === 'error') {
+    // The exit code tracked "is there a best prompt", not "did the run
+    // error". A run aborted by the grading circuit breaker produced a champion
+    // AND stopReason 'error', printed "The run did not complete", and exited 0
+    // — so an agent branching on $? read a broken run as success, which
+    // docs/cli.md explicitly promises it will not.
+    process.stderr.write(`
+Run ended with stopReason "error"${result.error ? `: ${result.error}` : ''}
+`);
+    process.exitCode = 1;
   } else if (outputWriteFailed) {
     // The evolution itself succeeded, but the deliverable did not land where
     // it was asked to. A script that only checks the exit code must not read
