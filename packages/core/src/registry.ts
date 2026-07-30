@@ -68,22 +68,30 @@ function callWithTimeout<T>(
   let resolveOuter!: (value: T) => void;
   let rejectOuter!: (reason: unknown) => void;
   const promise = new Promise<T>((res, rej) => { resolveOuter = res; rejectOuter = rej; });
-
-  const timer = setTimeout(
-    () => rejectOuter(new Error(
-      `Provider '${name}' did not respond within callTimeoutMs (${ms}ms) — treating it as timed out`,
-    )),
-    ms as number,
-  );
+  let abandoned = false;
 
   void withGlobalSemaphore(async () => {
+    // Arm the timer HERE, not before the acquire. `callTimeoutMs` is documented
+    // as a per-ATTEMPT abort; starting the clock outside made it measure queue
+    // wait + call, so a call could be rejected while still queued, before
+    // start() had ever run. Measured at parallelLimit 8 with 200 calls of 100ms
+    // and callTimeoutMs 1500ms: 44% of callers failed although no single call
+    // took over 100ms — and the queue only gets deeper as a provider slows, so
+    // the failures cluster exactly when the run can least afford them.
+    if (abandoned) return; // caller is gone; never spend money on it
+    const timer = setTimeout(() => {
+      abandoned = true;
+      rejectOuter(new Error(
+        `Provider '${name}' did not respond within callTimeoutMs (${ms}ms) — treating it as timed out`,
+      ));
+    }, ms as number);
     try {
       const value = await start();          // permit held until the work truly settles
-      clearTimeout(timer);
       resolveOuter(value);
     } catch (error) {
-      clearTimeout(timer);
       rejectOuter(error);
+    } finally {
+      clearTimeout(timer);
     }
   }, label).catch(() => { /* already routed to the caller above */ });
 

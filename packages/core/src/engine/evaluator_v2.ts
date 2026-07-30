@@ -1284,6 +1284,13 @@ export async function evaluatePromptOnTests(
       outputText: samples[0].output,
       llmGradeReasoning: samples[0].reasoning,
       ...(state.samplesPerTest > 1 ? { samples: samples.map(s => s.score) } : {}),
+      // Carry the flag up from the samples. runSingleSample set it on its own
+      // internal return and this literal rebuilt the TestResult from scratch,
+      // so `ungraded` was written in exactly one place and read nowhere:
+      // results.json still showed a bare "score": 5 indistinguishable from a
+      // judge that genuinely said 5. If ANY sample was ungraded, the mean is
+      // part-fabricated and the leaf has to say so.
+      ...(samples.some(s => (s as any).ungraded) ? { ungraded: true } : {}),
     };
     return testResult;
   }));

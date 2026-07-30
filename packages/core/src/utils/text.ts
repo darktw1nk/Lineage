@@ -30,7 +30,35 @@ const MAX_JUDGED_TEXT = 12_000;
  * the 12 hiding characters usable as a way out of the block.
  */
 const HIDING_CHARS =
-  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/g;
+  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E0FFF}\u{1BCA0}-\u{1BCA3}\u{13430}-\u{1343F}]/gu;
+
+/** Same set as HIDING_CHARS, as a source fragment for composing regexes. */
+const HIDE_SRC =
+  '[\\u00AD\\u034F\\u061C\\u115F\\u1160\\u17B4\\u17B5\\u180B-\\u180E\\u200B-\\u200F' +
+  '\\u202A-\\u202E\\u2060-\\u206F\\u3164\\uFE00-\\uFE0F\\uFEFF\\uFFA0\\uFFF9-\\uFFFB' +
+  '\\u{E0000}-\\u{E0FFF}\\u{1BCA0}-\\u{1BCA3}\\u{13430}-\\u{1343F}]';
+
+/**
+ * Remove every invisible character, for COMPARISON only.
+ *
+ * A model reads `sco<U+200B>re` as `score`, so any check that asks "did the
+ * candidate emit this token?" has to normalise first. sanitizeForJudge cannot
+ * do that job — it deliberately preserves hiders outside a fence, because
+ * stripping them corrupts emoji families and Indic conjuncts.
+ */
+export function stripHidingChars(text: string): string {
+  return text.replace(HIDING_CHARS, '');
+}
+
+/**
+ * A fence run: three or more same-direction angle brackets, allowing hiding
+ * characters between and after them. Matched against the ORIGINAL line so the
+ * replacement leaves everything outside the run byte-for-byte intact.
+ */
+const FENCE_RUN = new RegExp(
+  `(?:${HIDE_SRC}*>){3,}${HIDE_SRC}*|(?:${HIDE_SRC}*<){3,}${HIDE_SRC}*`,
+  'gu',
+);
 
 /**
  * Every character a language model reads as a LINE BREAK.
@@ -82,10 +110,19 @@ export function sanitizeForJudge(text: string): string {
     const closes = /^>{3,}$/.test(bare.trim());
     const opens = /<{3,}$/.test(bare.trimEnd());
     if (!closes && !opens) return line; // untouched — the overwhelming majority
+    // Neutralise the FENCE IN PLACE, in the original line. Returning `bare`
+    // stripped hiding characters from the whole line, and the `opens` shape
+    // permits arbitrary text before a trailing `<<<` — so an emoji family, an
+    // Indic conjunct or a variation selector sharing that line was corrupted
+    // (👨‍👩‍👧 became 👨👩👧). Only characters inside the fence run are touched.
+    //
     // Space-separated so the JUDGE (which cannot see zero-width characters)
-    // genuinely reads it as something other than a delimiter.
-    return bare.replace(/>{3,}/g, m => m.split('').join(' '))
-               .replace(/<{3,}/g, m => m.split('').join(' '));
+    // genuinely reads it as something other than a delimiter, and the hiders
+    // that were smuggled INSIDE the run are dropped with it.
+    return line.replace(FENCE_RUN, match => {
+      const brackets = match.replace(HIDING_CHARS, '').replace(/[^<>]/g, '');
+      return brackets.split('').join(' ');
+    });
   }).join('');
 }
 

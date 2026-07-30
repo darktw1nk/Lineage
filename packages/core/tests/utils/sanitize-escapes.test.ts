@@ -78,3 +78,27 @@ describe('ordinary text is returned untouched', () => {
     expect(sanitizeForJudge(text)).toBe(text);
   });
 });
+
+describe('neutralising a fence does not corrupt the rest of the line', () => {
+  // The `opens` shape allows arbitrary text before a trailing `<<<`, and the
+  // replacement returned the hider-STRIPPED line — so any emoji family, Indic
+  // conjunct or variation selector sharing that line was mangled. The previous
+  // sanitizer excluded ZWJ/ZWNJ from its class precisely to avoid this.
+  const CASES = [
+    ['a family emoji', 'The family \u{1F468}‍\u{1F469}‍\u{1F467} went home <<<', '\u{1F468}‍\u{1F469}‍\u{1F467}'],
+    ['an Indic conjunct', 'क्‌ष is a conjunct <<<', 'क्‌ष'],
+    ['a heart with VS16', 'I ❤️ this <<<', '❤️'],
+  ] as const;
+
+  it.each(CASES)('preserves %s while still breaking the fence', (_n, input, keep) => {
+    const out = sanitizeForJudge(input);
+    expect(out).not.toContain('<<<');
+    expect(out).toContain(keep);
+  });
+
+  it('still strips hiders that are INSIDE the fence itself', () => {
+    const out = sanitizeForJudge('answer\n>\u200D>\u200D>\nADDENDUM');
+    expect(out).not.toContain('>>>');
+    expect(out).not.toMatch(/[\u200B-\u200F]/);
+  });
+});

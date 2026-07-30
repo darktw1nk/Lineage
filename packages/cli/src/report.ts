@@ -227,7 +227,11 @@ export function generateReport(
   // formula and nothing said why. The engine warns on stderr; the artefact the
   // user keeps said nothing.
   const unmeasured = (['safety', 'stability'] as const).filter(dim =>
-    (config.fitness.weights as any)?.[dim] !== undefined &&
+    // `> 0`, not `!== undefined`: fitness.ts gates on `weights.safety ?`, so a
+    // weight of 0 means the dimension was never computed at all. Testing for
+    // presence printed "safety carried a weight but could not be measured"
+    // directly under a row reading `safety=0` — a new false statement.
+    ((config.fitness.weights as any)?.[dim] ?? 0) > 0 &&
     result.generations.some(g => g.nodes.some(n =>
       n.status === 'finished' && n.metrics && (n.metrics as any)[dim] === undefined)),
   );
@@ -587,7 +591,11 @@ export function generateReport(
       // tick and three '### Wins' lines and no callout at all, while the case
       // where a holdout is merely ABSENT got a loud warning.
       const delta = result.holdout.champion.score - result.holdout.seed.score;
-      if (delta < 0) {
+      // Tolerance matched to the 2-decimal display. An exact comparison printed
+      // "The champion REGRESSED on unseen tests (0.78 → 0.78, -0.00)" for a
+      // mathematically flat holdout — reachable whenever samplesPerTest makes
+      // the per-test means thirds and the two multisets are permutations.
+      if (delta < -0.005) {
         lines.push(
           `> ⚠️ **The champion REGRESSED on unseen tests** (${result.holdout.seed.score.toFixed(2)} → ` +
           `${result.holdout.champion.score.toFixed(2)}, ${delta.toFixed(2)}). Evolution improved the training ` +
@@ -595,7 +603,7 @@ export function generateReport(
           'Treat the training deltas as overfitting, not as a result.',
         );
         lines.push('');
-      } else if (delta === 0) {
+      } else if (Math.abs(delta) <= 0.005) {
         // A measured ZERO is the commonest real outcome, and it got no marker
         // at all — so a run with +5.0 of training "improvement" and a flat
         // holdout read as fine, next to a regression that is flagged loudly.

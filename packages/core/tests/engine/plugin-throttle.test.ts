@@ -29,6 +29,23 @@ function registerPlainPlugin() {
   });
 }
 
+/**
+ * Wait until every permit is back. The global semaphore is a module singleton
+ * shared by every test in this file, and abandoned work keeps its permit until
+ * the real call settles — so a test that leaves work in flight silently
+ * starves the ones after it.
+ */
+async function drainSemaphore(): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    let free = false;
+    // A probe that resolves immediately means a permit was available.
+    const probe = withGlobalSemaphore(async () => { free = true; }, 'drain-probe');
+    await Promise.race([probe, new Promise(r => setTimeout(r, 25))]);
+    if (free) return;
+    await new Promise(r => setTimeout(r, 25));
+  }
+}
+
 beforeEach(() => { resetRegistry(); inFlight = 0; peak = 0; });
 
 describe('plugin providers obey parallelLimit', () => {
@@ -130,7 +147,15 @@ describe('callTimeoutMs is enforced for plugin adapters too', () => {
     registerProvider({ adapter: {
       name: 'hangs',
       estimateTokens: () => ({ prompt: 1 }),
-      call: () => new Promise(() => { /* never resolves, never reads timeoutMs */ }),
+      // Settles far too late to be useful, rather than never. The permit now
+      // follows the WORK, so a promise that never settles holds its slot for
+      // the life of the process — which starved every test after this one in
+      // this file. Late-but-finite keeps the assertion (the CALLER is freed at
+      // 300ms) without leaking a permit into the next test.
+      call: () => new Promise(resolve => setTimeout(
+        () => resolve({ output: 'late', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 }),
+        1200,
+      )),
     } as any });
     const adapter = getProviderAdapter('hangs' as any);
     const started = Date.now();
@@ -138,6 +163,7 @@ describe('callTimeoutMs is enforced for plugin adapters too', () => {
       adapter.call({ model: 'm', prompt: 'p', temperature: 0, timeoutMs: 300 } as any),
     ).rejects.toThrow(/timed out|timeout/i);
     expect(Date.now() - started).toBeLessThan(3000);
+    await drainSemaphore();
   }, 30000);
 
   it('a plugin that answers in time is untouched', async () => {
@@ -161,14 +187,14 @@ describe('the timeout must not break the concurrency cap it sits beside', () => 
   // stop the engine WAITING. The permit must follow the work, not the race.
   it('peak concurrency stays at parallelLimit even when every call times out', async () => {
     initGlobalSemaphore(2);
-    let inFlight = 0, peak = 0;
+    let inFlight = 0, peak = 0, done = 0;
     registerProvider({ adapter: {
       name: 'slowplug',
       estimateTokens: () => ({ prompt: 1 }),
       call: async () => {
         inFlight++; peak = Math.max(peak, inFlight);
         await new Promise(r => setTimeout(r, 600));
-        inFlight--;
+        inFlight--; done++;
         return { output: 'x', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 };
       },
     } as any });
@@ -179,8 +205,69 @@ describe('the timeout must not break the concurrency cap it sits beside', () => 
     const results = await Promise.all(calls);
 
     expect(results.every(r => r === 'timeout')).toBe(true); // callers freed fast
-    // Let the abandoned work drain before asserting the peak.
-    await new Promise(r => setTimeout(r, 1500));
+    // Drain on the real signal, not a sleep. Abandoned work still holds its
+    // permit, so a fixed wait that guesses short leaves permits checked out and
+    // starves every later test in this file — which is what a 1500ms guess did.
+    while (done < 8) await new Promise(r => setTimeout(r, 50));
+    // done++ runs inside the plugin, BEFORE withGlobalSemaphore's finally has
+    // released the permit. The semaphore is a singleton and setPermits computes
+    // permits = limit - inUse, so a permit still checked out here leaves the
+    // NEXT test's initGlobalSemaphore with zero free permits and starves it.
+    await drainSemaphore();
     expect(peak).toBeLessThanOrEqual(2);
+  }, 30000);
+});
+
+describe('callTimeoutMs measures the CALL, not the queue wait', () => {
+  // The timer was armed before withGlobalSemaphore was entered, so a call that
+  // sat in the queue could be rejected before start() had ever run. Measured at
+  // parallelLimit 8 with 200 calls of 100ms and callTimeoutMs 1500ms: 44% of
+  // callers failed though no single call took over 100ms. Worse, the detached
+  // task stayed queued and ISSUED the request anyway — paid requests whose
+  // caller had already been told the provider did not respond, and the engine
+  // accrues a throw as {usd: 0, calls: 1}, so that spend is invisible to
+  // budgetUSD.
+  it('does not time out a call that merely queued', async () => {
+    initGlobalSemaphore(1);
+    let issued = 0;
+    registerProvider({ adapter: {
+      name: 'queued',
+      estimateTokens: () => ({ prompt: 1 }),
+      call: async () => {
+        issued++;
+        await new Promise(r => setTimeout(r, 200));
+        return { output: 'x', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 };
+      },
+    } as any });
+    const adapter = getProviderAdapter('queued' as any);
+    // 4 serialised calls of 200ms each. The last waits 600ms in the queue, but
+    // its own call still takes 200ms — well inside a 600ms per-call timeout.
+    const results = await Promise.all(Array.from({ length: 4 }, () =>
+      adapter.call({ model: 'm', prompt: 'p', temperature: 0, timeoutMs: 600 } as any)
+        .then(() => 'ok', () => 'timeout')));
+    expect(results).toEqual(['ok', 'ok', 'ok', 'ok']);
+    expect(issued).toBe(4);
+  }, 30000);
+
+  it('never issues a request whose caller already gave up', async () => {
+    initGlobalSemaphore(1);
+    let issued = 0;
+    registerProvider({ adapter: {
+      name: 'abandoned',
+      estimateTokens: () => ({ prompt: 1 }),
+      call: async () => {
+        issued++;
+        await new Promise(r => setTimeout(r, 400));
+        return { output: 'x', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 };
+      },
+    } as any });
+    const adapter = getProviderAdapter('abandoned' as any);
+    const results = await Promise.all(Array.from({ length: 3 }, () =>
+      adapter.call({ model: 'm', prompt: 'p', temperature: 0, timeoutMs: 500 } as any)
+        .then(() => 'ok', () => 'timeout')));
+    const gaveUp = results.filter(r => r === 'timeout').length;
+    await new Promise(r => setTimeout(r, 1600)); // let the queue drain
+    // Whatever timed out must NOT have been sent to the provider.
+    expect(issued).toBe(3 - gaveUp);
   }, 30000);
 });

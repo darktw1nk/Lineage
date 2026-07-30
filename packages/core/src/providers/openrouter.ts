@@ -85,7 +85,9 @@ export class OpenRouterAdapter extends BaseProviderAdapter {
           body.reasoning = { effort: reasoning_effort };
         }
         for (const [key, value] of Object.entries(rest)) {
-          if (!(key in body)) body[key] = value;
+          // hasOwnProperty, not `in`: `in` walks the prototype chain, so a
+          // passthrough named toString/constructor/valueOf was silently dropped.
+          if (!Object.prototype.hasOwnProperty.call(body, key)) body[key] = value;
         }
       }
 

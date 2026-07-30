@@ -172,8 +172,13 @@ export async function withRetry<T>(
           // it is a guaranteed repeat failure, and providers that extend the
           // window under continued hammering make the rate limit worse. So
           // when the remaining budget cannot cover the wait, give up now.
+          // Compare what the provider ASKED for, not the clamped sleep. Testing
+          // the clamped value meant `Retry-After: 3600` produced delay = 60000,
+          // `60000 > 60000` was false, and the call still stalled a parallel
+          // slot for a full 60s — while waiting far less than asked, which the
+          // rule right here says is a guaranteed repeat failure.
           const remaining = MAX_RETRY_AFTER_TOTAL_MS - retryAfterSpent;
-          if (delay > remaining) {
+          if (askedMs > remaining || delay > remaining) {
             console.warn(
               `Provider asked for ${Math.round(askedMs / 1000)}s before retrying and this call has ` +
               `already waited ${Math.round(retryAfterSpent / 1000)}s — giving up rather than holding a ` +
