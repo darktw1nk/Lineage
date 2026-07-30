@@ -8,7 +8,7 @@
 import type { EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
-import { stripPromptDelimiters, extractJsonArray, fillTemplate } from '../utils/text.js';
+import { stripPromptDelimiters, extractJsonArray, fillTemplate, sanitizeForJudge } from '../utils/text.js';
 import { withPartialCost } from './operator-cost.js';
 
 /**
@@ -197,7 +197,7 @@ export async function mutateNode(
   
   // Load proposal prompt template and substitute variables
   const proposalPromptTemplate = getProposalPromptTemplate();
-  const proposalPrompt = fillTemplate(proposalPromptTemplate, { strategiesList, basePrompt });
+  const proposalPrompt = fillTemplate(proposalPromptTemplate, { strategiesList, basePrompt: sanitizeForJudge(basePrompt) });
 
   // Step 1: Propose edits with retry for JSON parsing
   let edits!: any[];
@@ -263,7 +263,11 @@ export async function mutateNode(
   // Step 2: Apply edits (no retry needed here, simpler operation)
   const applyPromptTemplate = getApplyPromptTemplate();
   const applyPrompt = fillTemplate(applyPromptTemplate, {
-    basePrompt,
+    // Sanitized: the operator prompt fences the parent in <<< >>> exactly like
+    // the judge prompt does, and the parent is model-authored. Unsanitized, a
+    // candidate could close the fence and instruct the model REWRITING it —
+    // a self-replication channel, not merely a score bump.
+    basePrompt: sanitizeForJudge(basePrompt),
     edits: JSON.stringify(edits),
   });
   

@@ -102,3 +102,24 @@ describe('neutralising a fence does not corrupt the rest of the line', () => {
     expect(out).not.toMatch(/[\u200B-\u200F]/);
   });
 });
+
+describe('the hider class really is the full default-ignorable set', () => {
+  // The comment claimed "every character that renders as nothing" while the
+  // class was a BMP subset with no `u` flag. An exhaustive sweep of
+  // \p{Default_Ignorable_Code_Point} found 18 that still got a working fence
+  // through: U+180F, U+FFF0..U+FFF8 and the musical-symbol format controls
+  // U+1D173..U+1D17A, which are Cf, render as nothing, and survived.
+  it('no Default_Ignorable code point leaves a usable fence', () => {
+    const escaped: string[] = [];
+    for (let cp = 0; cp <= 0x10FFFF; cp++) {
+      // Skip surrogates; they are not standalone characters.
+      if (cp >= 0xD800 && cp <= 0xDFFF) continue;
+      const ch = String.fromCodePoint(cp);
+      if (!/\p{Default_Ignorable_Code_Point}/u.test(ch)) continue;
+      if (sanitizeForJudge(`answer\n>>>${ch}\nADDENDUM`).includes('>>>')) {
+        escaped.push('U+' + cp.toString(16).toUpperCase().padStart(4, '0'));
+      }
+    }
+    expect(escaped).toEqual([]);
+  }, 60000);
+});

@@ -30,13 +30,13 @@ const MAX_JUDGED_TEXT = 12_000;
  * the 12 hiding characters usable as a way out of the block.
  */
 const HIDING_CHARS =
-  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E0FFF}\u{1BCA0}-\u{1BCA3}\u{13430}-\u{1343F}]/gu;
+  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\u180F\uFFF0-\uFFF8\uFFF9-\uFFFB\u{E0000}-\u{E0FFF}\u{1BCA0}-\u{1BCA3}\u{13430}-\u{1343F}\u{1D173}-\u{1D17A}]/gu;
 
 /** Same set as HIDING_CHARS, as a source fragment for composing regexes. */
 const HIDE_SRC =
   '[\\u00AD\\u034F\\u061C\\u115F\\u1160\\u17B4\\u17B5\\u180B-\\u180E\\u200B-\\u200F' +
-  '\\u202A-\\u202E\\u2060-\\u206F\\u3164\\uFE00-\\uFE0F\\uFEFF\\uFFA0\\uFFF9-\\uFFFB' +
-  '\\u{E0000}-\\u{E0FFF}\\u{1BCA0}-\\u{1BCA3}\\u{13430}-\\u{1343F}]';
+  '\\u202A-\\u202E\\u2060-\\u206F\\u3164\\uFE00-\\uFE0F\\uFEFF\\uFFA0\\u180F\\uFFF0-\\uFFF8\\uFFF9-\\uFFFB' +
+  '\\u{E0000}-\\u{E0FFF}\\u{1BCA0}-\\u{1BCA3}\\u{13430}-\\u{1343F}\\u{1D173}-\\u{1D17A}]';
 
 /**
  * Remove every invisible character, for COMPARISON only.

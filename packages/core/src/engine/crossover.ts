@@ -9,7 +9,7 @@ import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../types.js
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
 import { withPartialCost } from './operator-cost.js';
-import { stripPromptDelimiters, fillTemplate } from '../utils/text.js';
+import { stripPromptDelimiters, fillTemplate, sanitizeForJudge } from '../utils/text.js';
 
 const DEFAULT_CROSSOVER_PROMPT = `SYSTEM: Merge best parts of A and B into a coherent prompt without redundancy.
 USER: A: <<<
@@ -53,8 +53,12 @@ export async function crossoverNodes(
   
   const crossoverPromptTemplate = getCrossoverPromptTemplate();
   const crossoverPrompt = fillTemplate(crossoverPromptTemplate, {
-    parentA: parentA.prompt,
-    parentB: parentB.prompt,
+    // Sanitized: the operator prompt fences the parent in <<< >>> exactly like
+    // the judge prompt does, and the parent is model-authored. Unsanitized, a
+    // candidate could close the fence and instruct the model REWRITING it —
+    // a self-replication channel, not merely a score bump.
+    parentA: sanitizeForJudge(parentA.prompt),
+    parentB: sanitizeForJudge(parentB.prompt),
   });
   
   const result = await serviceAdapter.call({

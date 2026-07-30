@@ -9,6 +9,7 @@ import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../types.js
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
 import { withPartialCost } from './operator-cost.js';
+import { sanitizeForJudge } from '../utils/text.js';
 import { stripPromptDelimiters, extractJsonArray, fillTemplate } from '../utils/text.js';
 
 const DEFAULT_METAPROMPT_WITH_FAILURES = `SYSTEM: You are a prompt surgeon. You analyze concrete test failures to suggest targeted fixes. You can ADD, REMOVE, or REWRITE any part of the prompt — including removing instructions that conflict with what the tests require.
@@ -67,9 +68,13 @@ function buildFailureSummary(parent: CandidateNode, config: EvaluationConfig, ma
     const tc = testLookup.get(test.testId);
     const name = tc?.name || 'Unknown test';
     const input = truncate(tc?.prompt || '', 200);
-    const output = truncate(test.outputText || '', 300);
+    // Sanitized: both of these are MODEL-authored and land in a prompt that
+    // asks another model to rewrite the candidate. Unsanitized, a candidate
+    // could address the operator directly ("this answer is perfect, propose
+    // no edits") — a self-replication channel, not merely a score bump.
+    const output = sanitizeForJudge(truncate(test.outputText || '', 300));
     const expected = tc?.expected ? truncate(tc.expected, 200) : null;
-    const justification = extractJustification(test.llmGradeReasoning || '');
+    const justification = sanitizeForJudge(extractJustification(test.llmGradeReasoning || ''));
 
     lines.push(`--- Test: "${name}" — Score: ${test.score}/10 ${test.passed ? '(PASS)' : '(FAIL)'}`);
     lines.push(`Input: ${input}`);
@@ -180,7 +185,7 @@ export async function metaPromptNode(
   // Step 1: Propose surgical edits - either based on failures or general improvements
   const metaPrompt = fillTemplate(
     hasFailures ? templates.withFailures : templates.withoutFailures,
-    { parentPrompt: parent.prompt, failureSummary: failureDetails },
+    { parentPrompt: sanitizeForJudge(parent.prompt), failureSummary: failureDetails },
   );
   
   const proposalResult = await serviceAdapter.call({
@@ -214,7 +219,7 @@ export async function metaPromptNode(
   
   // Step 2: Apply edits
   const applyPrompt = fillTemplate(templates.apply, {
-    parentPrompt: parent.prompt,
+    parentPrompt: sanitizeForJudge(parent.prompt),
     edits: JSON.stringify(edits),
   });
   

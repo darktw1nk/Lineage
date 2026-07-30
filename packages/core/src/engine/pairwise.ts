@@ -54,7 +54,10 @@ function getPairwiseTemplate(): string {
   return DEFAULT_PAIRWISE_JUDGING_PROMPT;
 }
 
-function parseVerdict(raw: string): 'A' | 'B' | 'tie' {
+/** Verdict-shaped text in a CANDIDATE output — the shape that breaks the judge. */
+const VERDICT_TOKEN = /"?winner"?\s*[:=]|\boutput\s*[ab]\s+is\s+(?:better|superior|preferred|stronger)\b/i;
+
+function parseVerdict(raw: string): 'A' | 'B' | 'tie' | 'unreadable' {
   let text = raw.trim();
   if (text.startsWith('```')) {
     text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
@@ -101,8 +104,13 @@ function parseVerdict(raw: string): 'A' | 'B' | 'tie' {
     if (verdict) return verdict;
   }
 
-  console.warn('[Playoff] Unparseable verdict, counting as tie:', raw.slice(0, 120));
-  return 'tie';
+  // NOT a tie. A judge-DECLARED tie is evidence; an unreadable reply is the
+  // absence of evidence, and conflating them handed a candidate the playoff for
+  // one character: make the reply unparseable, collect 0.5/0.5, and the margin
+  // drops under MIN_DECISIVE_MARGIN so the entire playoff is discarded — and
+  // the inflated fitness it exists to check stands unopposed.
+  console.warn('[Playoff] Unreadable verdict:', raw.slice(0, 120));
+  return 'unreadable';
 }
 
 function outputFor(node: CandidateNode, testId: string): string | undefined {
@@ -120,7 +128,7 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
   const points: Record<UUID, number> = Object.fromEntries(contenders.map(c => [c.id, 0]));
   let matches = 0;
 
-  const judge = async (test: TestCase, first: string, second: string): Promise<'A' | 'B' | 'tie'> => {
+  const judge = async (test: TestCase, first: string, second: string): Promise<'A' | 'B' | 'tie' | 'unreadable'> => {
     const expectedBlock = test.expected ? `EXPECTED (reference): <<<\n${test.expected}\n>>>\n` : '';
     const prompt = fillTemplate(template, {
       testPrompt: test.prompt,
@@ -136,8 +144,11 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
       return parseVerdict(result.output);
     } catch (error) {
       matches++;
-      console.error('[Playoff] Judge call failed, counting as tie:', error instanceof Error ? error.message : error);
-      return 'tie';
+      // A failed CALL is also absence of evidence, not a draw. Counting it as a
+      // tie handed out half a point per side for a judgement that never
+      // happened, which is the same free-value error as the unreadable reply.
+      console.error('[Playoff] Judge call failed:', error instanceof Error ? error.message : error);
+      return 'unreadable';
     }
   };
 
@@ -174,6 +185,21 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
       judge(test, outA, outB), // 'A' -> a, 'B' -> b
       judge(test, outB, outA), // 'A' -> b, 'B' -> a
     ]);
+    // Attribute an unreadable verdict before scoring it. A candidate whose own
+    // output carries verdict-shaped text is what made the reply unparseable, so
+    // it LOSES the unit — voiding it, or calling it a tie, makes corrupting the
+    // judge free or profitable, and evolution takes free.
+    if (v1 === 'unreadable' || v2 === 'unreadable') {
+      const aPoisoned = VERDICT_TOKEN.test(outA ?? '');
+      const bPoisoned = VERDICT_TOKEN.test(outB ?? '');
+      if (aPoisoned && !bPoisoned) { points[b.id] += 1; return; }
+      if (bPoisoned && !aPoisoned) { points[a.id] += 1; return; }
+      // Neither side implicated: genuine judge trouble. Award nothing rather
+      // than manufacturing evidence in either direction.
+      console.warn('[Playoff] Unreadable verdict not attributable to either output — unit voided.');
+      return;
+    }
+
     const w1 = v1 === 'A' ? a.id : v1 === 'B' ? b.id : null;
     const w2 = v2 === 'A' ? b.id : v2 === 'B' ? a.id : null;
 
