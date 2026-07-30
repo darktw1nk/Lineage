@@ -1452,6 +1452,11 @@ async function runSingleSample(
 
       // Track grading parse failures for circuit breaker
       state.gradingTotal++;
+      if ((gradingResult as any)._ungraded) {
+        // Surface the fabricated 5.0s. The circuit breaker only fires past 8%;
+        // below that the invented scores reached the report unannounced.
+        state.run.ungradedTests = (state.run.ungradedTests ?? 0) + 1;
+      }
       if ((gradingResult as any)._parseError) {
         state.gradingFailures++;
         const failRate = state.gradingFailures / state.gradingTotal;
@@ -1910,7 +1915,7 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   // checkpoint — the resume path takes the larger of the two either way.
   try { clearSpend(getDatabase().dbPath, state.run.id); } catch { /* best effort */ }
 
-  sendUpdate(runId, { type: 'cost_breakdown', breakdown: state.run.costBreakdown, estimate: state.run.estimate });
+  sendUpdate(runId, { type: 'cost_breakdown', breakdown: state.run.costBreakdown, estimate: state.run.estimate, ungradedTests: state.run.ungradedTests });
 
   // Send final updates
   if (state.run.stopReason) {

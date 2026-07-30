@@ -93,3 +93,20 @@ describe('the report is honest about the holdout', () => {
     expect(md).not.toMatch(/No holdout ran/i);
   });
 });
+
+describe('the report admits when scores were fabricated', () => {
+  it('warns when some tests could not be graded', () => {
+    // An unparseable judge reply becomes 5.0. results.json is honest at the
+    // leaf, but nothing counted it and the report printed the 5.0s in the
+    // Improvement table as though they were measured — every number in that
+    // table fabricated, with no warning anywhere.
+    const md = generateReport(makeResult({ ungradedTests: 4 } as any), CONFIG);
+    expect(md).toMatch(/could not be graded|ungraded/i);
+    expect(md).toContain('4');
+  });
+
+  it('says nothing when every test graded cleanly', () => {
+    const md = generateReport(makeResult(), CONFIG);
+    expect(md).not.toMatch(/could not be graded|ungraded/i);
+  });
+});

@@ -97,3 +97,29 @@ describe('a readable judge reply never counts as a parse failure', () => {
     expect((r as any)._parseError).toBe(true);
   });
 });
+
+describe('an unreadable judge reply is not a fabricated 5.0', () => {
+  it('marks the result as ungraded rather than inventing a mid score', () => {
+    // A judge that answers in prose produced score 5.0 — a number that looks
+    // like a real grade. Measured: 2 parse failures produced 4 node-test rows
+    // scored 5.0 where ground truth was 10, and with a judge that fails on all
+    // low-quality outputs the seed reported EXACTLY 5.0 on every test when the
+    // truth was 1.0. The report then printed 5.0 -> 7.0 '+2.0' with every
+    // number fabricated. results.json is honest at the leaf, but nothing
+    // counts it and the report never says a word.
+    return grade('I think this answer is quite good, honestly.', 'PARIS').then(r => {
+      expect((r as any)._parseError).toBe(true);
+      // The score must be identifiable as 'not graded', not indistinguishable
+      // from a judge that genuinely said 5.
+      expect((r as any)._ungraded).toBe(true);
+    });
+  });
+
+  it('a judge that genuinely says 5 is NOT marked ungraded', () => {
+    return grade('{"score": 5, "justification": "middling"}', 'PARIS').then(r => {
+      expect(r.score).toBe(5);
+      expect((r as any)._ungraded).toBeFalsy();
+      expect((r as any)._parseError).toBeFalsy();
+    });
+  });
+});

@@ -139,6 +139,12 @@ export interface EvaluationRun {
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
   generations: CandidateNode[][]; // 2D grid
   cacheHits: number;
+  /**
+   * Test results whose judge reply could not be parsed and were scored 5.0.
+   * 5.0 looks like a grade, so without a count the report presents fabricated
+   * numbers as measured ones.
+   */
+  ungradedTests?: number;
   holdout?: {
     testIds: UUID[];
     samplesPerTest: number;

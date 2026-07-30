@@ -59,6 +59,7 @@ export interface EvolutionResult {
   testSet: Array<{ id: UUID; name: string; mode: string; holdout: boolean }>;
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
   cacheHits: number;
+  ungradedTests?: number;
   best: {
     prompt: string;
     fitness: number;
@@ -83,6 +84,8 @@ interface RunCollector {
   generations: Map<number, Map<UUID, CandidateNode>>;
   totals: { tokensPrompt: number; tokensCompletion: number; usd: number; calls: number };
   cacheHits: number;
+  /** Test results scored 5.0 because the judge reply was unparseable. */
+  ungradedTests: number;
   bestNode: CandidateNode | null;
   error: string | null;
   stopReason: string | null;
@@ -102,6 +105,7 @@ function createCollector(): RunCollector {
     generations: new Map(),
     totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 0, calls: 0 },
     cacheHits: 0,
+    ungradedTests: 0,
     bestNode: null,
     error: null,
     stopReason: null,
@@ -197,6 +201,7 @@ function buildResult(
     })),
     totals: { ...collector.totals },
     cacheHits: collector.cacheHits,
+    ungradedTests: collector.ungradedTests,
     holdout: collector.holdout ?? undefined,
     ...(config.seed !== undefined ? { seed: config.seed } : {}),
     ...(collector.playoffs.length ? { playoffs: collector.playoffs } : {}),
@@ -317,6 +322,7 @@ export async function runEvolution(
       case 'totals':
         collector.totals = { ...data.totals };
         collector.cacheHits = data.cacheHits ?? collector.cacheHits;
+
         display.onTotals(data.totals, data.cacheHits);
         break;
       case 'population_ready':
@@ -340,6 +346,7 @@ export async function runEvolution(
       case 'cost_breakdown':
         collector.costBreakdown = data.breakdown ?? null;
         collector.estimate = data.estimate ?? null;
+        collector.ungradedTests = data.ungradedTests ?? collector.ungradedTests;
         break;
       case 'error':
         collector.error = data.message;
@@ -359,6 +366,7 @@ export async function runEvolution(
     totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 0, calls: 0 },
     generations: [],
     cacheHits: 0,
+    ungradedTests: 0,
     version: '1.0',
   };
 
@@ -430,6 +438,9 @@ export async function runEvolution(
     );
     // Completed playoffs are checkpointed on the run and never re-judged
     // (dedupe guard) — seed the collector so results.json keeps them.
+    // Same for the ungraded count — a resumed run must not forget that some
+    // of its scores were fabricated.
+    collector.ungradedTests = run.ungradedTests ?? collector.ungradedTests;
     for (const p of run.playoffs ?? []) {
       collector.playoffs.push({ generation: p.generation, ranking: p.ranking, decisive: p.decisive });
     }

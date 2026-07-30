@@ -448,6 +448,20 @@ export function generateReport(
   const holdoutRan = !!(result.holdout && !result.holdout.skipped &&
     (result.holdout.seed || result.holdout.champion));
 
+  // An unparseable judge reply is scored 5.0 — a number that LOOKS like a
+  // grade. Measured: a seed reported exactly 5.0 on every test where the truth
+  // was 1.0, and this table then printed '5.0 -> 7.0  +2.0' with every figure
+  // fabricated. results.json was honest at the leaf; the report said nothing.
+  const ungraded = (result as any).ungradedTests as number | undefined;
+  if (ungraded && ungraded > 0) {
+    lines.push(
+      `> ⚠️ **${ungraded} test result(s) could not be graded** — the judge's reply was unparseable and each ` +
+      'was scored 5.0. Those 5.0s are placeholders, not measurements, and they are included in the ' +
+      'averages below. Treat any delta of similar size as noise.',
+    );
+    lines.push('');
+  }
+
   lines.push('## Improvement Summary (training tests — selected-for)');
   lines.push('');
   lines.push(

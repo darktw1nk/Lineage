@@ -652,6 +652,13 @@ export async function evaluateTestResultLLM(
     // Complete failure — no score recoverable
     return {
       passed: false,
+      // 5.0 is a NUMBER THAT LOOKS LIKE A GRADE. A judge answering in prose
+      // produced results indistinguishable from a judge that genuinely said 5:
+      // measured, a seed reported exactly 5.0 on every test where the truth was
+      // 1.0, and the report printed '5.0 -> 7.0  +2.0' with every figure
+      // fabricated. The score has to stay a number (quality averages it), but
+      // `_ungraded` lets the run count these and say so.
+      _ungraded: true,
       score: 5,
       usd: result?.usd || 0,
       promptTokens: result?.promptTokens || 0,
