@@ -29,6 +29,34 @@ import { BaseProviderAdapter } from './providers/base.js';
  * Subclasses of BaseProviderAdapter already acquire it and must NOT be
  * double-wrapped: nested acquisition of a 1-permit semaphore self-deadlocks.
  */
+/**
+ * Bound a plugin call by `callTimeoutMs`.
+ *
+ * docs/cli.md promises the option 'aborts any single LLM HTTP attempt after
+ * that long — a hung request is retried with a fresh budget instead of stalling
+ * a parallel slot forever'. Built-in adapters honour it via fetchWithTimeout,
+ * but a plugin adapter is arbitrary code: the option is passed in and the
+ * shipped Ollama example ignores it, so a hung local server stalled the run
+ * indefinitely with a permit held.
+ *
+ * This cannot cancel the plugin's own work — nothing can — but it stops the
+ * ENGINE waiting on it, which is what the promise is about.
+ */
+function withPluginTimeout<T>(work: Promise<T>, opts: { timeoutMs?: number }, name: string): Promise<T> {
+  const ms = opts?.timeoutMs;
+  if (!Number.isFinite(ms) || (ms as number) <= 0) return work;
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    work,
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Provider '${name}' did not respond within callTimeoutMs (${ms}ms) — treating it as timed out`)),
+        ms as number,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function throttleIfNeeded(adapter: ProviderAdapter): ProviderAdapter {
   if (adapter instanceof BaseProviderAdapter) return adapter;
   const inner = adapter.call.bind(adapter);
@@ -36,7 +64,7 @@ function throttleIfNeeded(adapter: ProviderAdapter): ProviderAdapter {
     get(target, prop, receiver) {
       if (prop === 'call') {
         return (opts: Parameters<ProviderAdapter['call']>[0]) =>
-          withGlobalSemaphore(() => inner(opts), `${adapter.name}:${opts.model}`);
+          withGlobalSemaphore(() => withPluginTimeout(inner(opts), opts, adapter.name), `${adapter.name}:${opts.model}`);
       }
       return Reflect.get(target, prop, receiver);
     },

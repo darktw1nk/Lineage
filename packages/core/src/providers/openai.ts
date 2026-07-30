@@ -1,6 +1,6 @@
 import { BaseProviderAdapter, normalizeContent, normalizeToolArguments, logSafeBody } from './base.js';
 import type { Provider, ToolDef } from '../types.js';
-import { withRetry, RetryableError, fetchWithTimeout, withCause, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
+import { withRetry, RetryableError, fetchWithTimeout, withCause, DEFAULT_CALL_TIMEOUT_MS, retryAfterMsFrom } from './retry.js';
 import { store } from '../store.js';
 
 export class OpenAIAdapter extends BaseProviderAdapter {
@@ -144,7 +144,11 @@ export class OpenAIAdapter extends BaseProviderAdapter {
         const error = await response.text();
         console.error(`[OpenAI] API error ${response.status}:`, error);
         if (response.status === 429 || response.status >= 500) {
-          throw new RetryableError(`OpenAI API error: ${response.status} - ${error}`, response.status);
+          // Carry Retry-After so withRetry waits the window the provider
+          // asked for instead of hammering inside it.
+          const retryable: any = new RetryableError(`OpenAI API error: ${response.status} - ${error}`, response.status);
+          retryable.retryAfterMs = retryAfterMsFrom(response as any);
+          throw retryable;
         }
         throw new Error(`OpenAI API error: ${response.status} - ${error}`);
       }

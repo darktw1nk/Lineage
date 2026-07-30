@@ -118,3 +118,37 @@ describe('the throttle wrapper cannot deadlock a run', () => {
     expect(await ranTo(all, 2500)).toBe('ok');
   }, 30000);
 });
+
+describe('callTimeoutMs is enforced for plugin adapters too', () => {
+  // docs/cli.md promises callTimeoutMs 'aborts any single LLM HTTP attempt
+  // after that long — a hung request is retried with a fresh budget instead of
+  // stalling a parallel slot forever'. Built-ins honour it via fetchWithTimeout;
+  // a plugin adapter is arbitrary code and the shipped Ollama example ignores
+  // the option entirely, so a hung local server stalled the run indefinitely.
+  it('a plugin that ignores timeoutMs is still aborted', async () => {
+    initGlobalSemaphore(4);
+    registerProvider({ adapter: {
+      name: 'hangs',
+      estimateTokens: () => ({ prompt: 1 }),
+      call: () => new Promise(() => { /* never resolves, never reads timeoutMs */ }),
+    } as any });
+    const adapter = getProviderAdapter('hangs' as any);
+    const started = Date.now();
+    await expect(
+      adapter.call({ model: 'm', prompt: 'p', temperature: 0, timeoutMs: 300 } as any),
+    ).rejects.toThrow(/timed out|timeout/i);
+    expect(Date.now() - started).toBeLessThan(3000);
+  }, 30000);
+
+  it('a plugin that answers in time is untouched', async () => {
+    initGlobalSemaphore(4);
+    registerProvider({ adapter: {
+      name: 'quick',
+      estimateTokens: () => ({ prompt: 1 }),
+      call: async () => ({ output: 'x', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 }),
+    } as any });
+    const r = await getProviderAdapter('quick' as any)
+      .call({ model: 'm', prompt: 'p', temperature: 0, timeoutMs: 300 } as any);
+    expect(r.output).toBe('x');
+  }, 30000);
+});

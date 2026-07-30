@@ -37,9 +37,40 @@ export function withCause<E extends Error>(error: E, cause: unknown): E {
   return error;
 }
 
+/**
+ * Read a `Retry-After` header into milliseconds.
+ *
+ * Accepts both documented forms: delta-seconds (`Retry-After: 2`) and an
+ * HTTP-date. Returns undefined when absent or unparseable, so the caller falls
+ * back to exponential backoff.
+ */
+export function retryAfterMsFrom(response: { headers?: { get(name: string): string | null } }): number | undefined {
+  const raw = response?.headers?.get?.('retry-after');
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  const at = Date.parse(raw);
+  if (!Number.isNaN(at)) return Math.max(0, at - Date.now());
+  return undefined;
+}
+
+/** Ceiling on an honoured Retry-After, so a bad header cannot stall a run. */
+const MAX_RETRY_AFTER_MS = 60_000;
+
 export function isRetryableError(error: any): boolean {
   // Retry on network errors or specific HTTP status codes
   if (error instanceof RetryableError) return true;
+
+  // A 200 whose BODY is not JSON — a Cloudflare HTML error page, an SSE stream
+  // sent to a non-stream request — surfaces as a SyntaxError from
+  // response.json(). It carries no status and no cause.code, so it was
+  // classified non-retryable: the transient gateway blip killed the node on the
+  // first try, while a merely empty JSON body got four attempts. The worse
+  // failure failed permanently. Match only the shape response parsing produces,
+  // so a genuine programming SyntaxError still fails fast.
+  if (error instanceof SyntaxError && /is not valid JSON|Unexpected (token|end of JSON)/i.test(error.message ?? '')) {
+    return true;
+  }
   
   const retryableStatusCodes = [
     408, // Request Timeout
@@ -115,7 +146,15 @@ export async function withRetry<T>(
       }
 
       if (attempt < opts.maxRetries) {
-        const delay = calculateDelay(attempt, opts);
+        // Honour Retry-After when the provider sent one. Backoff alone put all
+        // four attempts INSIDE the window the provider asked us to wait out —
+        // guaranteed 429s, and on providers that extend the window under
+        // continued hammering it makes the rate limit worse. Capped so a
+        // hostile or mistaken header cannot stall a run indefinitely.
+        const askedMs = Number((error as any)?.retryAfterMs);
+        const delay = Number.isFinite(askedMs) && askedMs > 0
+          ? Math.min(askedMs, MAX_RETRY_AFTER_MS)
+          : calculateDelay(attempt, opts);
         console.log(`Retry attempt ${attempt + 1}/${opts.maxRetries} after ${delay}ms...`);
         await sleep(delay);
       }

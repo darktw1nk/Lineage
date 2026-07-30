@@ -1,6 +1,6 @@
 import { BaseProviderAdapter, logSafeBody } from './base.js';
 import type { Provider, ToolDef } from '../types.js';
-import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS } from './retry.js';
+import { withRetry, RetryableError, fetchWithTimeout, DEFAULT_CALL_TIMEOUT_MS, retryAfterMsFrom } from './retry.js';
 
 // Gemini's proto-backed functionDeclarations schema rejects some common JSON
 // Schema keywords ($schema, additionalProperties) with a hard 400. Strip them
@@ -102,7 +102,11 @@ export class GeminiAdapter extends BaseProviderAdapter {
       if (!response.ok) {
         const error = await response.text();
         if (response.status === 429 || response.status >= 500) {
-          throw new RetryableError(`Gemini API error: ${response.status} - ${error}`, response.status);
+          // Carry Retry-After so withRetry waits the window the provider
+          // asked for instead of hammering inside it.
+          const retryable: any = new RetryableError(`Gemini API error: ${response.status} - ${error}`, response.status);
+          retryable.retryAfterMs = retryAfterMsFrom(response as any);
+          throw retryable;
         }
         throw new Error(`Gemini API error: ${response.status} - ${error}`);
       }
