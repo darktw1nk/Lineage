@@ -378,7 +378,21 @@ export class SqlJsWrapper {
     }
   }
 
-  close(): void {
+  /**
+   * @param save pass `{ save: false }` to DISCARD instead of persisting. Used
+   * when an open is refused: that handle must never touch the file, because the
+   * lock is about to be released and the whole point of the refusal was that
+   * writing could destroy data.
+   */
+  close(opts: { save?: boolean } = {}): void {
+    if (opts.save === false) {
+      if (this._saveTimer) {
+        clearTimeout(this._saveTimer);
+        this._saveTimer = null;
+      }
+      this._db.close();
+      return;
+    }
     // The final save must not prevent the handle from being released. An
     // unguarded _flushSave() here threw on quit (a locked file, a full disk),
     // escaped into Electron's before-quit sequence, and left the sql.js handle
@@ -564,7 +578,28 @@ export async function initializeDatabase(dbPath: string, options: InitializeData
     // must go too: openDatabase assigns it before validating, so a failure left
     // getDatabase() handing out a live, WRITABLE handle onto a bad file — and
     // its next save would export that over the user's database.
+    //
+    // Nulling the singleton is NOT enough. openDatabase runs createTables
+    // before the checks that can refuse, and createTables arms the wrapper's
+    // debounced save — so the orphaned wrapper fired ~50ms after the refusal
+    // and exported its whole-file snapshot over the very database we declined
+    // to open, with the lock ALREADY RELEASED. Measured: a commit landed by
+    // another writer just after the refusal was erased. That breaks both the
+    // guard's own premise ("opening it with this build could discard data") and
+    // the standing invariant that no handle may write without holding the lock.
+    //
+    // Reachable from every refusal that happens after the wrapper exists: the
+    // newer-schema guard, a flushPendingPluginModels failure, and a torn file
+    // whose corruption lies past page 1.
+    const halfBuilt = db;
     db = null;
+    if (halfBuilt) {
+      try {
+        halfBuilt.close({ save: false });
+      } catch (closeError) {
+        console.error('[Database] Could not discard the half-built handle:', closeError);
+      }
+    }
     releaseDbLock();
     throw error;
   }
@@ -597,6 +632,17 @@ async function openDatabase(dbPath: string, readOnly: boolean): Promise<void> {
       // the first statement — so this probe is what turns a non-database file
       // into an error we can attach the PATH to.
       sqlDb.exec('PRAGMA schema_version');
+      // PRAGMA schema_version reads PAGE 1 ONLY, so a file with an intact
+      // header and a corrupt body walked straight past it — a torn save, a
+      // half-synced OneDrive copy, a bad sector: precisely what the atomic save
+      // and renameWithRetry exist to prevent, and precisely the case where the
+      // user needs the path and the recovery advice. The failure surfaced much
+      // later out of runMigrations as sql.js's bare "database disk image is
+      // malformed". Reading the schema table costs nothing and catches a little
+      // more; the rest is caught where it actually surfaces, below — a full
+      // PRAGMA integrity_check would read every page on every open, which is
+      // O(file size) on a database this design already exports whole.
+      sqlDb.exec('SELECT count(*) FROM sqlite_master');
     } catch (error) {
       // sql.js says only "file is not a database" or "database disk image is
       // malformed" — no path, no advice. A user who mistyped `--db notes.txt`
@@ -619,11 +665,22 @@ async function openDatabase(dbPath: string, readOnly: boolean): Promise<void> {
   // invisibly.
   db.pragma('foreign_keys = ON');
 
-  // Create tables
-  createTables(db);
-
-  // Run migrations if needed
-  runMigrations(db);
+  // Corruption past page 1 slips through the probe above and surfaces HERE,
+  // as sql.js's bare "database disk image is malformed" with no path and no
+  // advice. Re-dress it so a torn file reads the same as a mistyped --db.
+  try {
+    createTables(db);
+    runMigrations(db);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (/malformed|not a database|corrupt|disk image/i.test(detail)) {
+      throw new Error(
+        `${dbPath} is not a readable database (${detail}). ` +
+        `Check the --db path, restore the file from backup, or delete it to start clean.`,
+      );
+    }
+    throw error;
+  }
 
   // Plugin providers registered before the database opened queued their
   // model catalog entries — flush them now. (Dynamic import avoids a static
