@@ -284,8 +284,22 @@ describe('sections that only appear on the unhappy paths', () => {
   it('warns that a judge-graded run with NO holdout cannot show improvement', () => {
     // This is the loudest honesty warning in the report and the fixture with a
     // holdout can never reach it.
-    const md = generateReport(makeRichResult({ holdout: undefined } as any), CONFIG);
+    // The config must ALSO declare no holdout. A config that marks a test
+    // `holdout: true` whose holdout merely did not run is a different case, and
+    // telling that user to 'add held-out tests' sends them to fix something
+    // that is not broken — the Generalization section already says why.
+    const noHoldoutConfig = {
+      ...CONFIG,
+      testSet: CONFIG.testSet.map(t => ({ ...t, holdout: false })),
+    } as any;
+    const md = generateReport(makeRichResult({ holdout: undefined } as any), noHoldoutConfig);
     expect(md).toContain('**No holdout ran, and this run is graded by an LLM judge.**');
+  });
+
+  it('does NOT tell a user to add a holdout they already configured', () => {
+    const md = generateReport(makeRichResult({ holdout: undefined } as any), CONFIG);
+    expect(md).not.toContain('**No holdout ran, and this run is graded by an LLM judge.**');
+    expect(md).toContain('A holdout was configured but did not run');
   });
 
   it('ignores generations with nothing scored when deciding which is newest', () => {

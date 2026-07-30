@@ -42,7 +42,7 @@ npm run --silent cli -- --config c.json 2>/dev/null > results.json   # clean JSO
 npm run --silent cli -- --archive-runs ./run-archive --prune-runs 20 --db ./evolution.db
 ```
 
-**Cost estimation**: every run prints `Estimated cost: $low – $high (~N calls)` at startup, and `--estimate --config cfg.json` prints the same estimate (JSON on stdout, per-phase breakdown on stderr) without running anything. The band brackets the one true unknown — completion lengths; treat `high` as the commit number. Warnings call out uncatalogued models and budgets below the low bound.
+**Cost estimation**: every run prints `Estimated cost: $low – $high (~N calls)` at startup, and `--estimate --config cfg.json` prints the same estimate (JSON on stdout, per-phase breakdown on stderr) without running anything. The band brackets the one true unknown — completion lengths; treat `high` as a forecast, not a ceiling — the only real bound is the estimator's own worst-case note, which assumes every reply runs to `serviceModelMaxTokens`. Measured: a run with long completions came in at 1.085x `high`, still far under that note's $0.44. Warnings call out uncatalogued models and budgets below the low bound.
 
 **Cost breakdown**: results.json also carries the ACTUAL spend split by purpose and by model (`costBreakdown`) plus the stamped preflight `estimate` — the report's "Where the money went" table shows them side by side. If judge spend ("LLM grading"/"Pairwise playoffs") dominates, pick a cheaper `serviceModel`.
 
@@ -338,7 +338,7 @@ Each entry in `testSet`:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `prompt` | string | **required** | The test input sent to the candidate prompt. |
-| `expected` | string | - | Reference answer. Used by `exact_match`, and by `json_schema` when it is itself a valid instance of the schema (a reference no conforming document could equal is ignored with a warning). |
+| `expected` | string | - | Reference answer. Used by `exact_match`, and by `json_schema` when it is itself a valid instance of the schema (a reference no conforming document could equal is a CONFIG ERROR: the test scores 0 and the reason is in its `llmGradeReasoning`). |
 | `mode` | `"llm_grade"` / `"exact_match"` / `"json_schema"` / `"tool_call"` | `"llm_grade"` | How to score the output. See [Agent-builder test modes](#agent-builder-test-modes). |
 | `name` | string | `"Test N"` | Display name. |
 | `id` | string | auto UUID | Stable identifier. |

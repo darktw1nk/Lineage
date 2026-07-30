@@ -55,22 +55,29 @@ function findNodeById(result: EvolutionResult, nodeId: string): EvolutionResultN
   return null;
 }
 
-function computeGenStats(nodes: EvolutionResultNode[]): { avg: number; best: number; worst: number; scored: number; failed: number } {
+function computeGenStats(nodes: EvolutionResultNode[]): { avg: number; best: number; worst: number; scored: number; failed: number; skipped: number } {
   const fitnesses: number[] = [];
   let failed = 0;
+  let skipped = 0;
   for (const n of nodes) {
     if (n.status === 'failed') failed++;
+    // `skipped` is what the budget gate sets when it abandons a node. Only
+    // `failed` was counted, so a generation of 4 with 3 skipped printed
+    // avg/best/worst from ONE node with no note — and at 8 of 8 skipped (164
+    // calls, $0.0065 spent) the only candidate-level signal was a row of dashes.
+    if (n.status === 'skipped') skipped++;
     if (n.metrics?.fitness !== undefined) {
       fitnesses.push(n.metrics.fitness);
     }
   }
-  if (fitnesses.length === 0) return { avg: 0, best: 0, worst: 0, scored: 0, failed };
+  if (fitnesses.length === 0) return { avg: 0, best: 0, worst: 0, scored: 0, failed, skipped };
   const sum = fitnesses.reduce((a, b) => a + b, 0);
   return {
     avg: sum / fitnesses.length,
     best: Math.max(...fitnesses),
     worst: Math.min(...fitnesses),
     scored: fitnesses.length,
+    skipped,
     failed,
   };
 }
@@ -358,7 +365,10 @@ export function generateReport(
     // A generation with no fitness at all rendered as 0.000, which reads as
     // "everything scored zero" rather than "nothing was scored".
     const cell = (value: number) => (stats.scored === 0 ? '—' : value.toFixed(3));
-    const note = stats.failed > 0 ? ` ⚠️ ${stats.failed}/${gen.nodes.length} failed` : '';
+    const notes: string[] = [];
+    if (stats.failed > 0) notes.push(`${stats.failed}/${gen.nodes.length} failed`);
+    if (stats.skipped > 0) notes.push(`${stats.skipped}/${gen.nodes.length} skipped (budget)`);
+    const note = notes.length > 0 ? ` ⚠️ ${notes.join(', ')}` : '';
     lines.push(`| ${prefix}${gen.generation}${suffix} | ${prefix}${cell(stats.avg)}${suffix} | ${prefix}${cell(stats.best)}${suffix} | ${prefix}${cell(stats.worst)}${suffix}${note} |`);
   }
   lines.push('');
@@ -495,11 +505,23 @@ export function generateReport(
     'Treat this as "what was selected", not as measured improvement.',
   );
   lines.push('');
-  if (usesJudge && !holdoutRan) {
+  // A holdout that was CONFIGURED but skipped is not the same as none being
+  // configured. Telling a user to 'add held-out tests' when their config
+  // already marks one `holdout: true` — and the Generalization section two
+  // sections down correctly says why it was skipped — sends them to fix
+  // something that is not broken.
+  const holdoutConfigured = !!result.holdout || config.testSet.some(t => (t as any).holdout === true);
+  if (usesJudge && !holdoutRan && !holdoutConfigured) {
     lines.push(
       '> ⚠️ **No holdout ran, and this run is graded by an LLM judge.** With a noisy judge, picking the best of many ' +
       'measurements produces a positive delta here even when nothing actually improved. Add held-out tests ' +
       '(`"holdout": true`, or `holdoutShare`) and quote the Generalization number instead.',
+    );
+    lines.push('');
+  } else if (usesJudge && !holdoutRan && holdoutConfigured) {
+    lines.push(
+      '> ⚠️ **A holdout was configured but did not run** — see the Generalization section below for ' +
+      'why. Without it, the best-of-many selection above may be judge noise rather than improvement.',
     );
     lines.push('');
   }
@@ -578,11 +600,21 @@ export function generateReport(
       lines.push('| Test | Seed | Champion |');
       lines.push('|------|------|----------|');
       const testName = (id: string) => config.testSet.find(t => t.id === id)?.name ?? id.slice(0, 8);
+      // Mark rows whose score is a PLACEHOLDER, not a measurement. An ungraded
+      // holdout row scores 0 (so a candidate cannot profit from breaking its own
+      // grading), and this table read only `.score` — so ONE unparseable judge
+      // reply on the seed half printed `seed 0.00 -> champion 1.00` for two
+      // BYTE-IDENTICAL prompts whose true delta is exactly 0. The docs call this
+      // the honest number; a fabricated POSITIVE delta got no marker at all,
+      // because the callouts only fire on a regression or a flat result.
+      let contaminated = 0;
       for (let i = 0; i < result.holdout.testIds.length; i++) {
         const tid = result.holdout.testIds[i];
-        const s = result.holdout.seed.perTest.find(p => p.testId === tid)?.score ?? 0;
-        const c = result.holdout.champion.perTest.find(p => p.testId === tid)?.score ?? 0;
-        lines.push(`| ${escapeMarkdown(testName(tid))} | ${s.toFixed(1)} | ${c.toFixed(1)} |`);
+        const sRow = result.holdout.seed.perTest.find(p => p.testId === tid) as any;
+        const cRow = result.holdout.champion.perTest.find(p => p.testId === tid) as any;
+        const mark = (row: any) => (row?.ungraded ? ' ⚠️' : '');
+        if (sRow?.ungraded || cRow?.ungraded) contaminated++;
+        lines.push(`| ${escapeMarkdown(testName(tid))} | ${(sRow?.score ?? 0).toFixed(1)}${mark(sRow)} | ${(cRow?.score ?? 0).toFixed(1)}${mark(cRow)} |`);
       }
       lines.push(`| **Average** | **${result.holdout.seed.score.toFixed(2)}** | **${result.holdout.champion.score.toFixed(2)}** |`);
       lines.push('');
@@ -591,11 +623,22 @@ export function generateReport(
       // tick and three '### Wins' lines and no callout at all, while the case
       // where a holdout is merely ABSENT got a loud warning.
       const delta = result.holdout.champion.score - result.holdout.seed.score;
+      if (contaminated > 0) {
+        lines.push(
+          `> ⚠️ **This comparison is not trustworthy.** ${contaminated} of the ` +
+          `${result.holdout.testIds.length} unseen test(s) could not be graded, and an ungraded row ` +
+          'scores 0 — a placeholder, not a measurement. A gap between the two columns may be entirely ' +
+          'an artefact of which half failed to grade. Re-run before believing this number.',
+        );
+        lines.push('');
+      }
       // Tolerance matched to the 2-decimal display. An exact comparison printed
       // "The champion REGRESSED on unseen tests (0.78 → 0.78, -0.00)" for a
       // mathematically flat holdout — reachable whenever samplesPerTest makes
       // the per-test means thirds and the two multisets are permutations.
-      if (delta < -0.005) {
+      if (contaminated > 0) {
+        // Delta callouts suppressed: it is not a measurement.
+      } else if (delta < -0.005) {
         lines.push(
           `> ⚠️ **The champion REGRESSED on unseen tests** (${result.holdout.seed.score.toFixed(2)} → ` +
           `${result.holdout.champion.score.toFixed(2)}, ${delta.toFixed(2)}). Evolution improved the training ` +
