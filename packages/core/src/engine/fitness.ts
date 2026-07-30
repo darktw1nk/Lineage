@@ -291,10 +291,26 @@ export function calculateFitness(
 
 function calculateQualityScore(node: CandidateNode): number {
   if (!node.tests || node.tests.length === 0) return 0;
-  
-  // Average score across all tests
-  const totalScore = node.tests.reduce((sum, test) => sum + test.score, 0);
-  return totalScore / node.tests.length;
+
+  // An ungraded test's 5.0 is a PLACEHOLDER, not a measurement, so it must not
+  // be averaged in. This is the free-10 bug class that already hit `stability`
+  // and `safety`: an unmeasurable dimension gets DISABLED, never defaulted to a
+  // neutral-looking number.
+  //
+  // It was also directly exploitable. The echo defence discards any "score"
+  // token the candidate itself emitted, so a candidate that emits one for every
+  // value 0..10 makes every possible verdict look echoed — nothing is trusted,
+  // the test goes ungraded, and it collected 5.0. Measured: a genuinely 2/10
+  // candidate scored 5.0 by making itself unmeasurable, a gain it authored
+  // itself, and evolution selects for exactly that.
+  //
+  // With nothing left to measure the score is 0, not 5 — the same answer this
+  // function already gives a node with no tests at all.
+  const graded = node.tests.filter(test => !(test as any).ungraded);
+  if (graded.length === 0) return 0;
+
+  const totalScore = graded.reduce((sum, test) => sum + test.score, 0);
+  return totalScore / graded.length;
 }
 
 function calculateSafetyScore(node: CandidateNode): number | undefined {
