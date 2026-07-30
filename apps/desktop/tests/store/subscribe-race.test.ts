@@ -51,22 +51,49 @@ describe('events arriving before hydrate are not lost', () => {
     expect(after.stopReason).toBe('budget');
   });
 
-  it('does not double-apply once hydrated', () => {
+  it('drains the buffer, so a re-hydrate cannot replay it again', () => {
+    // The old version used a status event, which is IDEMPOTENT — it passed
+    // whether or not the buffer was drained. Use a CUMULATIVE event instead, so
+    // a second replay is visible.
     const store = useEvaluationStore.getState();
     store.subscribe(RUN);
-    handler!(null, { type: 'status', status: 'finished' });
+    handler!(null, { type: 'totals', totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 1, calls: 7 } });
     useEvaluationStore.getState().hydrate(RUN, snapshot());
-    // A second hydrate must not replay a drained buffer again.
+    const afterFirst = useEvaluationStore.getState().evaluations.get(RUN)!.totals;
     useEvaluationStore.getState().hydrate(RUN, snapshot());
-    expect(useEvaluationStore.getState().evaluations.get(RUN)!.status).toBe('finished');
+    expect(useEvaluationStore.getState().evaluations.get(RUN)!.totals).toEqual(afterFirst);
   });
 
-  it('bounds the buffer for a run that is never hydrated', () => {
+  it('keeps the TERMINAL events when the buffer overflows', () => {
+    // The cap kept the OLDEST and silently discarded everything after it — and
+    // what arrives last is status/stop/holdout_result, each firing exactly once.
+    // Reachable on Resume, where node_created replays for every node in one
+    // tick before eval:get returns.
     const store = useEvaluationStore.getState();
     store.subscribe(RUN);
-    for (let i = 0; i < 900; i++) handler!(null, { type: 'totals', totals: { calls: i } });
-    // Must not grow without limit; hydrate still works afterwards.
+    for (let i = 0; i < 3000; i++) {
+      handler!(null, { type: 'totals', totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 0, calls: i } });
+    }
+    handler!(null, { type: 'status', status: 'finished' });
+    handler!(null, { type: 'stop', reason: 'budget' });
+
     useEvaluationStore.getState().hydrate(RUN, snapshot());
-    expect(useEvaluationStore.getState().evaluations.get(RUN)).toBeDefined();
+    const after = useEvaluationStore.getState().evaluations.get(RUN)!;
+    expect(after.status).toBe('finished');
+    expect(after.stopReason).toBe('budget');
+  });
+
+  it('forgets the buffer on unsubscribe, so it cannot rewind a fresh snapshot', () => {
+    // A buffered `totals` survived unsubscribe and was replayed over the next
+    // hydrate, rewinding a run's spend to a stale value.
+    const store = useEvaluationStore.getState();
+    store.subscribe(RUN);
+    handler!(null, { type: 'totals', totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 0.001, calls: 3 } });
+    useEvaluationStore.getState().unsubscribe(RUN);
+
+    useEvaluationStore.getState().subscribe(RUN);
+    const fresh = { ...snapshot(), totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 2.5, calls: 500 } };
+    useEvaluationStore.getState().hydrate(RUN, fresh as any);
+    expect(useEvaluationStore.getState().evaluations.get(RUN)!.totals.calls).toBe(500);
   });
 });

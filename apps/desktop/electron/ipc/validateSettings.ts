@@ -24,7 +24,9 @@ export function validateSettings(settings: unknown): AppSettings {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
     throw new Error('settings must be an object');
   }
-  const s = settings as Record<string, unknown>;
+  // COPY: this used to coerce in place, rewriting the caller's object. The
+  // shipped test passed `{ ...ok }`, whose spread is exactly what hid it.
+  const s: Record<string, unknown> = { ...(settings as Record<string, unknown>) };
   for (const [key, { min, max }] of Object.entries(SETTINGS_LIMITS)) {
     const v = s[key];
     if (v === undefined || v === null) continue;

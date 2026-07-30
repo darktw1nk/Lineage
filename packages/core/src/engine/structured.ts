@@ -204,7 +204,24 @@ export function scoreJsonSchema(
   // task; it is the format the task must be delivered in.
   const expectedValue = (() => {
     if (expected === undefined || expected === null || expected === '') return undefined;
-    try { return JSON.parse(stripFences(expected)); } catch { return undefined; }
+    let parsed: unknown;
+    try { parsed = JSON.parse(stripFences(expected)); } catch { return undefined; }
+    // The reference must itself CONFORM, or no output can both validate and
+    // equal it — so every conforming candidate, perfect or garbage, is capped at
+    // 6 with `passed` permanently false, and the test carries zero signal.
+    // docs/cli.md documents `expected` as used by exact_match only, so it is
+    // routinely set on json_schema tests where it used to be inert; the
+    // desktop's mode switch is a merge, so it can also be left behind invisibly.
+    // An unsatisfiable reference is ignored, loudly.
+    if (!validate(parsed)) {
+      console.warn(
+        '[Structured] This json_schema test has an `expected` value that does not conform to its own ' +
+        'schema, so no answer could ever match it. Ignoring the reference and scoring shape only — ' +
+        'remove `expected`, or make it a valid instance of the schema.',
+      );
+      return undefined;
+    }
+    return parsed;
   })();
 
   // 1. The whole response. This is the only candidate that can earn a perfect
@@ -226,7 +243,11 @@ export function scoreJsonSchema(
         // (5) and a clean correct one (10): the format contract WAS met.
         return {
           passed: false,
-          score: 6,
+          // BELOW the prose-wrapped conformer at 5. Scoring 6 put a cleanly
+          // formatted WRONG answer above a CORRECT one that happened to be
+          // wrapped in prose — rewarding format over correctness, which is
+          // backwards, and formatting is exactly what a constant stub gets free.
+          score: 4,
           detail: `conforms to schema but does not match the expected value: expected ${safeStringify(expectedValue)}, got ${safeStringify(wholeTextParsed)}`,
         };
       }

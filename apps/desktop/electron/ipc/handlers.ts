@@ -646,7 +646,15 @@ async function importEvaluation(filePath: string): Promise<EvaluationRun> {
       throw new Error(`Invalid export file: node ${n.id} has a non-numeric fitness (${JSON.stringify(f)}).`);
     }
   }
-  for (const [field, value] of [['totals.usd', run.totals?.usd], ['cacheHits', run.cacheHits]] as const) {
+  // Every numeric total, not just two of them: calls, tokensPrompt and
+  // tokensCompletion accepted -999 and rendered as fact.
+  const numericTotals = [
+    ['totals.usd', run.totals?.usd], ['totals.calls', run.totals?.calls],
+    ['totals.tokensPrompt', run.totals?.tokensPrompt],
+    ['totals.tokensCompletion', run.totals?.tokensCompletion],
+    ['cacheHits', run.cacheHits],
+  ] as const;
+  for (const [field, value] of numericTotals) {
     if (value !== undefined && value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
       throw new Error(`Invalid export file: ${field} must be a non-negative number (got ${JSON.stringify(value)}).`);
     }

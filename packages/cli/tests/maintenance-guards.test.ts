@@ -42,10 +42,19 @@ describe('the shared desktop database is recognised', () => {
     expect(isSharedDesktopDb(scratch)).toBe(false);
   });
 
-  it('flags whatever resolveDbPath picks with no --db, when that is the desktop file', () => {
-    // With no --db the CLI deliberately shares the desktop database; the guard
-    // exists so a DESTRUCTIVE command refuses it unless named explicitly.
+  it('flags the path resolveDbPath picks with no --db', () => {
+    // The first version asserted only `typeof ... === 'boolean'`, which passes
+    // for `() => false` — i.e. for the guard being completely broken.
+    // With no --db the CLI deliberately shares the desktop database, so this
+    // must be true wherever that database is discoverable.
     const shared = resolveDbPath();
-    expect(typeof isSharedDesktopDb(shared)).toBe('boolean');
+    const looksLikeDesktopDb = shared.includes('evolution2');
+    if (looksLikeDesktopDb) {
+      expect(isSharedDesktopDb(shared)).toBe(true);
+    } else {
+      // No Electron userData on this machine: the CLI fell back to
+      // ~/.promptengine, which is NOT the desktop file and must not be guarded.
+      expect(isSharedDesktopDb(shared)).toBe(false);
+    }
   });
 });

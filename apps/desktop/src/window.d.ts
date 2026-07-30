@@ -43,7 +43,7 @@ export interface ElectronAPI {
     import: (filePath: string) => Promise<EvaluationRun>;
     delete: (runId: string) => Promise<void>;
     getConfig: (runId: string) => Promise<EvaluationConfig | null>;
-    estimate: (config: EvaluationConfig) => Promise<import('@promptengine/core').CostEstimate | null>;
+    estimate: (config: EvaluationConfig) => Promise<CostEstimate | { error: string } | null>;
     subscribe: (runId: string, callback: (event: any, data: any) => void) => () => void;
   };
   settings: {

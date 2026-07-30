@@ -119,7 +119,14 @@ app.whenReady().then(async () => {
 // reappeared as `interrupted` with nothing explaining why.
 let quitConfirmed = false;
 app.on('before-quit', (event) => {
-  const running = quitConfirmed ? [] : runningEvaluationIds();
+  // Only ask while a WINDOW still exists. Clicking X destroys the window, which
+  // fires window-all-closed -> app.quit() -> here; choosing 'Keep running' then
+  // preventDefault()s a quit for an app that has no UI left, so the run cannot
+  // be observed, paused or stopped and every further quit re-raises a
+  // parent-less modal. Before the prompt existed, closing the window simply
+  // ended the process.
+  const hasWindow = BrowserWindow.getAllWindows().length > 0;
+  const running = quitConfirmed || !hasWindow ? [] : runningEvaluationIds();
   if (running.length > 0) {
     event.preventDefault();
     const keep = dialog.showMessageBoxSync({

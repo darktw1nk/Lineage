@@ -348,11 +348,14 @@ describe('structured modes score the ANSWER, not just the shape', () => {
     expect(scoreJsonSchema('{"city":"x","population":0}', schema).score).toBe(10);
   });
 
-  it('a right-shaped wrong answer still beats prose', () => {
+  it('a CORRECT answer outranks a wrong one, however it is wrapped', () => {
     const correct = '{"city":"Paris","population":2148000}';
     const wrongValue = scoreJsonSchema('{"city":"Lyon","population":1}', schema, undefined, correct).score;
     const inProse = scoreJsonSchema('Here you go: {"city":"Paris","population":2148000}', schema, undefined, correct).score;
-    expect(wrongValue).toBeGreaterThan(inProse);
+    // This first asserted the OPPOSITE — that a cleanly formatted wrong answer
+    // beat a correct one wrapped in prose. That rewards format over
+    // correctness, and formatting is what a constant stub gets for free.
+    expect(inProse).toBeGreaterThan(wrongValue);
   });
 
   it('extra tool calls are a failure, not something to look past', () => {
@@ -369,5 +372,47 @@ describe('structured modes score the ANSWER, not just the shape', () => {
     expect(withExtra.passed).toBe(false);
     expect(withExtra.score).toBeLessThan(10);
     expect(withExtra.detail).toContain('delete_everything');
+  });
+});
+
+describe('an unsatisfiable expected value does not flatten the gradient', () => {
+  const schema = {
+    type: 'object',
+    properties: { city: { type: 'string' }, population: { type: 'number' } },
+    required: ['city', 'population'],
+    additionalProperties: false,
+  };
+
+  it('ignores a reference no conforming document could ever equal', () => {
+    // Reference names only `city`; the schema requires `population` too. Nothing
+    // can both validate and deep-equal it, so EVERY conforming candidate —
+    // perfect or garbage — scored exactly 6 with passed permanently false, and
+    // the test carried zero signal.
+    const partialRef = '{"city":"Paris"}';
+    const perfect = scoreJsonSchema('{"city":"Paris","population":2148000}', schema, undefined, partialRef);
+    expect(perfect.score).toBe(10);
+    expect(perfect.passed).toBe(true);
+  });
+
+  it('ignores a non-object reference on a json_schema test', () => {
+    // `expected` is documented as exact_match-only, so it is routinely present
+    // and meaningless on other modes.
+    const r = scoreJsonSchema('{"city":"Paris","population":1}', schema, undefined, '42');
+    expect(r.score).toBe(10);
+  });
+
+  it('still enforces a reference that IS satisfiable', () => {
+    const ref = '{"city":"Paris","population":2148000}';
+    expect(scoreJsonSchema(ref, schema, undefined, ref).score).toBe(10);
+    expect(scoreJsonSchema('{"city":"Lyon","population":1}', schema, undefined, ref).score).toBeLessThan(10);
+  });
+
+  it('a correct answer always outranks a wrong one, however it is wrapped', () => {
+    // The previously shipped ordering had wrong-but-clean (6) ABOVE
+    // correct-but-prose-wrapped (5), which rewards the wrong answer.
+    const ref = '{"city":"Paris","population":2148000}';
+    const wrongClean = scoreJsonSchema('{"city":"Lyon","population":1}', schema, undefined, ref).score;
+    const rightProse = scoreJsonSchema(`Here: ${ref}`, schema, undefined, ref).score;
+    expect(rightProse).toBeGreaterThan(wrongClean);
   });
 });

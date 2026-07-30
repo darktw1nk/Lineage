@@ -80,6 +80,7 @@ function usableNode(n: unknown): n is CandidateNode {
  * Events that arrived before the store had an entry for their run. Replayed by
  * hydrate(), in order, so a subscribe-then-await race cannot lose them.
  */
+const MAX_BUFFERED_UPDATES = 2000;
 const pendingUpdates = new Map<UUID, any[]>();
 /** Set by subscribe() so hydrate can replay through the same handler. */
 const updateHandlers = new Map<UUID, (event: any, data: any) => void>();
@@ -368,7 +369,16 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       if (!get().evaluations.has(evalId)) {
         const pending = pendingUpdates.get(evalId) ?? [];
         // Bounded: a run that is never hydrated must not grow this forever.
-        if (pending.length < 500) pending.push(data);
+        // Keep the NEWEST, not the oldest. `if (length < 500) push` silently
+        // discarded everything after the cap — and the events that arrive last
+        // are `status`, `stop`, `holdout_result` and `playoff_result`, each of
+        // which fires exactly once, at the end. That is precisely what this
+        // buffer exists to save. Reachable on Resume, where node_created is
+        // replayed for every node in every generation in a single tick.
+        pending.push(data);
+        if (pending.length > MAX_BUFFERED_UPDATES) {
+          pending.splice(0, pending.length - MAX_BUFFERED_UPDATES);
+        }
         pendingUpdates.set(evalId, pending);
         return;
       }
@@ -468,6 +478,14 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
       console.log(`[Store] Unsubscribing from ${evalId.slice(0, 8)}`);
       unsubscribe();
     }
+    // Drop the buffer and handler too. Neither was cleared here, so a `totals`
+    // event buffered before an unsubscribe survived it and was replayed on top
+    // of a FRESH snapshot when the run was re-opened — measured rewinding 500
+    // calls / $2.50 back to 3 calls / $0.001. Buffered node payloads are whole
+    // nodes (250 KB with large outputs), so this also reintroduced the per-run
+    // retention releaseInactive exists to prevent, in a map it cannot see.
+    pendingUpdates.delete(evalId);
+    updateHandlers.delete(evalId);
     // Drop the cached graph too. Keeping it meant a deleted run's full node
     // set stayed resident for the whole session, and a late event could still
     // resurrect it in the UI.
@@ -512,6 +530,8 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
   cleanup: () => {
     const state = get();
     state.subscriptions.forEach((unsubscribe) => unsubscribe());
+    pendingUpdates.clear();
+    updateHandlers.clear();
     set({ subscriptions: new Map(), evaluations: new Map(), loading: new Set() });
   },
 }));

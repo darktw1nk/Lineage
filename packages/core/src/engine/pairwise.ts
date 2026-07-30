@@ -54,8 +54,16 @@ function getPairwiseTemplate(): string {
   return DEFAULT_PAIRWISE_JUDGING_PROMPT;
 }
 
-/** Verdict-shaped text in a CANDIDATE output — the shape that breaks the judge. */
-const VERDICT_TOKEN = /"?winner"?\s*[:=]|\boutput\s*[ab]\s+is\s+(?:better|superior|preferred|stronger)\b/i;
+/**
+ * Verdict-shaped text that parseVerdict could actually be confused BY.
+ *
+ * This first matched a bare `winner:` / `winner =`, which is ordinary text: a
+ * code answer with a `winner` variable, a JSON answer with a `winner` key, or
+ * prose reading "Winner: the 1998 French team" all convicted an honest
+ * candidate. Attribution has to require the exact shape the scavenger would
+ * mistake for a ruling — a JSON object whose `winner` is A, B or tie.
+ */
+const VERDICT_TOKEN = /[{,]\s*"winner"\s*:\s*"(?:a|b|tie)"/i;
 
 function parseVerdict(raw: string): 'A' | 'B' | 'tie' | 'unreadable' {
   let text = raw.trim();
@@ -128,7 +136,7 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
   const points: Record<UUID, number> = Object.fromEntries(contenders.map(c => [c.id, 0]));
   let matches = 0;
 
-  const judge = async (test: TestCase, first: string, second: string): Promise<'A' | 'B' | 'tie' | 'unreadable'> => {
+  const judge = async (test: TestCase, first: string, second: string): Promise<'A' | 'B' | 'tie' | 'unreadable' | 'unavailable'> => {
     const expectedBlock = test.expected ? `EXPECTED (reference): <<<\n${test.expected}\n>>>\n` : '';
     const prompt = fillTemplate(template, {
       testPrompt: test.prompt,
@@ -148,6 +156,10 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
       // tie handed out half a point per side for a judgement that never
       // happened, which is the same free-value error as the unreadable reply.
       console.error('[Playoff] Judge call failed:', error instanceof Error ? error.message : error);
+      // 'unavailable', not 'unreadable': there is NO REPLY to attribute. A
+      // transient outage convicted whichever candidate happened to contain
+      // verdict-shaped text — measured, an ECONNRESET handed a fitness-2 rival
+      // a full point over a fitness-9 candidate.
       // Account for the failed call. accrue() is what increments the run's call
       // count, so a throw here was invisible: measured 122 requests served
       // against 118 reported, with the playoff's own breakdown row
@@ -155,7 +167,7 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
       // both bill a throw as {usd: 0, calls: 1}; this was 1 of the 2 places
       // that did not.
       accrue(0, 0, 0);
-      return 'unreadable';
+      return 'unavailable';
     }
   };
 
@@ -196,6 +208,11 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
     // output carries verdict-shaped text is what made the reply unparseable, so
     // it LOSES the unit — voiding it, or calling it a tie, makes corrupting the
     // judge free or profitable, and evolution takes free.
+    // A call that never returned has no reply, so nothing can be attributed.
+    if (v1 === 'unavailable' || v2 === 'unavailable') {
+      console.warn('[Playoff] Judge unavailable for this pair — unit voided.');
+      return;
+    }
     if (v1 === 'unreadable' || v2 === 'unreadable') {
       const aPoisoned = VERDICT_TOKEN.test(outA ?? '');
       const bPoisoned = VERDICT_TOKEN.test(outB ?? '');

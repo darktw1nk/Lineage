@@ -91,7 +91,7 @@ If the response is prose *containing* JSON ("Sure, here you go: {…}"), the JSO
   "expectedTool": { "name": "get_weather", "args": { "city": "Paris" }, "argsMode": "subset" } }
 ```
 
-Scoring: no tool called → 0; wrong tool → 2; right tool, wrong args → 6; right tool + args → 10. `argsMode` `"subset"` (default): every expected key must deep-equal the actual value, extra actual args are fine; `"exact"`: whole-object deep equality. When multiple tools are called, the FIRST call is judged. Omit `expectedTool.args` to accept any arguments. Tool definitions use the OpenAI function shape and are translated per provider (OpenAI/Groq/OpenRouter natively, Gemini `functionDeclarations`, Anthropic `input_schema`). Gemini's schema dialect rejects some JSON Schema keywords — `$schema` and `additionalProperties` are stripped automatically before sending.
+Scoring: no tool called → 0; wrong tool → 2; right tool, wrong args → 6; right tool + args → 10. `argsMode` `"subset"` (default): every expected key must deep-equal the actual value, extra actual args are fine; `"exact"`: whole-object deep equality. Calling more than one tool is a FAILURE (score 2): a test that asks for one call and gets three did not pass, and judging only the first made an extra destructive call invisible. Omit `expectedTool.args` to accept any arguments. Tool definitions use the OpenAI function shape and are translated per provider (OpenAI/Groq/OpenRouter natively, Gemini `functionDeclarations`, Anthropic `input_schema`). Gemini's schema dialect rejects some JSON Schema keywords — `$schema` and `additionalProperties` are stripped automatically before sending.
 
 ## Resuming interrupted runs
 
@@ -338,7 +338,7 @@ Each entry in `testSet`:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `prompt` | string | **required** | The test input sent to the candidate prompt. |
-| `expected` | string | - | Expected output (used by `exact_match` mode). |
+| `expected` | string | - | Reference answer. Used by `exact_match`, and by `json_schema` when it is itself a valid instance of the schema (a reference no conforming document could equal is ignored with a warning). |
 | `mode` | `"llm_grade"` / `"exact_match"` / `"json_schema"` / `"tool_call"` | `"llm_grade"` | How to score the output. See [Agent-builder test modes](#agent-builder-test-modes). |
 | `name` | string | `"Test N"` | Display name. |
 | `id` | string | auto UUID | Stable identifier. |

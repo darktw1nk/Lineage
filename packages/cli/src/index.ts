@@ -316,7 +316,7 @@ function parseArgs(argv: string[]): {
 
 async function handleSetKey(provider: Provider, key: string): Promise<void> {
   saveApiKey(provider, key);
-  const masked = key.length > 4 ? '***' + key.slice(-4) : '****';
+  const masked = key.length > 8 ? '***' + key.slice(-4) : '***';
   // stderr, not stdout: docs/cli.md promises --init, --set-key,
   // --archive-runs and --prune-runs "write only to stderr" so an agent can
   // run them under `npm run --silent` beside a JSON pipeline. Two of the four
@@ -386,22 +386,6 @@ function handleInit(targetPath: string): void {
 async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath?: string): Promise<void> {
   lastResolvedDbPath = resolveDbPath(dbPath);
 
-  // Refuse a destructive prune of the SHARED desktop database unless the user
-  // named it. With no --db, --prune-runs defaults to the same file the desktop
-  // app uses, so `--prune-runs 0` silently deleted every run the user could see
-  // in the UI, with no confirmation and no undo.
-  if (pruneKeep !== undefined && !dbPath) {
-    const { isSharedDesktopDb } = await import('./database.js');
-    if (isSharedDesktopDb(lastResolvedDbPath)) {
-      process.stderr.write(
-        `Refusing to prune ${lastResolvedDbPath} — this is the database the desktop app uses.\n` +
-        'Pass --db <path> explicitly to prune it, or point --db at your own file.\n',
-      );
-      process.exitCode = 1;
-      return;
-    }
-  }
-  await initCliDatabase(dbPath);
   const { getDatabase, closeDatabase } = await import('@promptengine/core');
   const db = getDatabase();
   const { archiveRuns, pruneRuns } = await import('./maintenance.js');
@@ -422,6 +406,28 @@ async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath
     note(`Archived ${result.archived.length} run(s) to ${archiveDir}`);
     for (const skipped of result.skipped) {
       process.stderr.write(`  skipped ${skipped.runId.slice(0, 8)}: ${skipped.reason}\n`);
+    }
+  }
+
+  // Refuse a destructive prune of the SHARED desktop database unless the user
+  // named it. With no --db this defaults to the file the desktop app uses, so
+  // `--prune-runs 0` silently deleted every run visible in the UI.
+  //
+  // Checked HERE, not before archiving: returning early skipped archiveRuns
+  // too, so `--archive-runs X --prune-runs N` produced an empty directory and
+  // exit 1. The archive is additive and non-destructive — refusing it because
+  // the destructive half was refused destroys the backup the user asked for.
+  if (pruneKeep !== undefined && !dbPath) {
+    const { isSharedDesktopDb } = await import('./database.js');
+    if (isSharedDesktopDb(lastResolvedDbPath)) {
+      note(
+        `Refusing to prune ${lastResolvedDbPath} — this is the database the desktop app uses.
+` +
+        'Pass --db <path> explicitly to prune it, or point --db at your own file.',
+      );
+      process.exitCode = 1;
+      closeDatabase();
+      return;
     }
   }
 
