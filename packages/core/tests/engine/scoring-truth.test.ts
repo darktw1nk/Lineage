@@ -146,13 +146,15 @@ describe('a misconfigured test scores ZERO, never a plausible middle', () => {
     expect(seedNode.tests[0].passed).toBe(false);
   }, 60000);
 
-  it('an unknown distanceMetric scores 5 and does NOT pass', async () => {
+  it('an unknown distanceMetric scores 0, not a plausible middle', async () => {
     registerAdapter();
     const { seedNode } = await run(makeConfig({
       testSet: [{ id: 't1', name: 'bad-metric', mode: 'exact_match', prompt: 'A', expected: 'SEED',
                   grading: { distanceMetric: 'nonsense' } }],
     }));
-    expect(seedNode.tests[0].score).toBe(5);
+    // Was 5.0 with no ungraded flag, so it counted fully in the quality mean:
+    // a misspelt option granted every candidate a permanent free 5.0.
+    expect(seedNode.tests[0].score).toBe(0);
     expect(seedNode.tests[0].passed).toBe(false);
   }, 60000);
 

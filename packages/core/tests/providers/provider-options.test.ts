@@ -107,3 +107,20 @@ describe('providerOptions reaches the wire on every provider', () => {
     expect(body.generationConfig.maxOutputTokens).toBe(8);
   });
 });
+
+describe('a passthrough named like an Object.prototype member survives', () => {
+  // `key in body` walks the prototype chain, so a passthrough called
+  // toString/constructor/valueOf was silently dropped. Mutation testing found
+  // reverting hasOwnProperty to `in` left the whole suite green.
+  it.each(['toString', 'constructor', 'valueOf', 'hasOwnProperty'])(
+    'openrouter forwards %s', async (key) => {
+      const body = await requestBody('openrouter', new OpenRouterAdapter(), { [key]: 'passthrough-value' });
+      expect(body[key]).toBe('passthrough-value');
+    },
+  );
+
+  it('still refuses to let one clobber an engine field', async () => {
+    const body = await requestBody('openrouter', new OpenRouterAdapter(), { model: 'HIJACKED' });
+    expect(body.model).toBe('m');
+  });
+});

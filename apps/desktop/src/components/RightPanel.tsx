@@ -529,7 +529,24 @@ function FitnessBreakdown({ node, config, evaluation }: { node: CandidateNode; c
     });
   }
 
-  const totalFitness = components.reduce((sum, c) => sum + c.contribution, 0);
+  // Show the ENGINE's fitness, not a re-derivation of it.
+  //
+  // The breakdown above reimplements the formula and drifted from
+  // calculateFitness three ways: it normalises over the RAW weights rather than
+  // the effective ones (the engine drops unmeasurable dimensions from the
+  // denominator and redistributes), it requires costNorm/latencyNorm to show a
+  // term while still counting that weight in its denominator, and it omits the
+  // per-call and per-test divisors. Measured gaps: -4.000 with a stability
+  // weight — the DEFAULT path, since samplesPerTest is 1 — -2.700 with a cost
+  // weight and no costNorm, and -1.485 on the exact weight block in
+  // docs/cli.md. The engine's own number is printed two panels up, so the
+  // screen contradicted itself.
+  //
+  // The rows stay as an illustration of where the score comes from; the TOTAL
+  // is the authoritative value.
+  const derivedTotal = components.reduce((sum, c) => sum + c.contribution, 0);
+  const totalFitness = node.metrics?.fitness ?? derivedTotal;
+  const breakdownDrifted = Math.abs(derivedTotal - totalFitness) > 0.0005;
 
   return (
     <div className="space-y-3">
@@ -572,6 +589,13 @@ function FitnessBreakdown({ node, config, evaluation }: { node: CandidateNode; c
         <span className="text-foreground">Total Fitness:</span>
         <span className="font-mono text-lg text-primary">{totalFitness.toFixed(3)}</span>
       </div>
+      {breakdownDrifted && (
+        <div className="text-[10px] text-muted-foreground">
+          The rows above are an illustration and sum to {derivedTotal.toFixed(3)}. The engine drops
+          dimensions it could not measure from the denominator, so the total it recorded is the
+          authoritative one.
+        </div>
+      )}
     </div>
   );
 }

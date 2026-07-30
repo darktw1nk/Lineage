@@ -102,3 +102,37 @@ describe('Retry-After cannot stall a slot for minutes', () => {
     expect(calls).toBeLessThan(4);
   }, 200_000);
 });
+
+describe('Retry-After has no cliff at an ordinary value', () => {
+  const retryAfter = (secs: string) => {
+    calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return {
+        ok: false, status: 503, statusText: 'Service Unavailable',
+        headers: { get: (h: string) => (h.toLowerCase() === 'retry-after' ? secs : null) },
+        json: async () => ({}), text: async () => 'unavailable',
+      } as any;
+    }) as any;
+  };
+
+  it('a 61-second wait is honoured, not failed instantly', async () => {
+    // Clamping the sleep and then comparing the CLAMPED value to the budget put
+    // a hard cliff here: `Retry-After: 60` slept and retried, `Retry-After: 61`
+    // threw in 0ms regardless of the configured retries. One to two minutes is
+    // an ordinary value from an edge network.
+    retryAfter('61');
+    const started = Date.now();
+    await expect(run(new OpenAIAdapter())).rejects.toThrow();
+    expect(Date.now() - started).toBeGreaterThan(60_000);
+    expect(calls).toBeGreaterThan(1);
+  }, 200_000);
+
+  it('still refuses a wait it cannot afford', async () => {
+    retryAfter('3600');
+    const started = Date.now();
+    await expect(run(new OpenAIAdapter())).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(calls).toBe(1);
+  }, 30_000);
+});

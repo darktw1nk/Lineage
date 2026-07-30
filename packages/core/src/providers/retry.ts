@@ -54,19 +54,19 @@ export function retryAfterMsFrom(response: { headers?: { get(name: string): stri
   return undefined;
 }
 
-/** Ceiling on an honoured Retry-After, so a bad header cannot stall a run. */
-const MAX_RETRY_AFTER_MS = 60_000;
 /**
  * Ceiling on the TOTAL time one logical call may spend honouring Retry-After.
  *
- * MAX_RETRY_AFTER_MS caps each individual sleep, so three retries at the cap
- * was three minutes — and base.ts wraps withRetry INSIDE withGlobalSemaphore,
- * so every one of those minutes is a parallel slot held. callTimeoutMs bounds
- * only the HTTP attempt; timeLimitMs is checked at node boundaries. Nothing
- * aborted it, and `Retry-After: 3600` on a 503 is routine edge-network
- * behaviour.
+ * base.ts wraps withRetry INSIDE withGlobalSemaphore, so every second spent
+ * waiting is a parallel slot held; callTimeoutMs bounds only the HTTP attempt
+ * and timeLimitMs is checked at node boundaries, so nothing else aborts it.
+ * `Retry-After: 3600` on a 503 is routine edge-network behaviour and used to
+ * stall a slot for three minutes across the retries.
+ *
+ * A single budget, deliberately: a separate per-sleep clamp made this a hard
+ * cliff at 61s and left both its own clauses dead code.
  */
-const MAX_RETRY_AFTER_TOTAL_MS = 60_000;
+const MAX_RETRY_AFTER_TOTAL_MS = 120_000;
 
 export function isRetryableError(error: any): boolean {
   // Retry on network errors or specific HTTP status codes
@@ -165,7 +165,14 @@ export async function withRetry<T>(
         // hostile or mistaken header cannot stall a run indefinitely.
         const askedMs = Number((error as any)?.retryAfterMs);
         const honouring = Number.isFinite(askedMs) && askedMs > 0;
-        let delay = honouring ? Math.min(askedMs, MAX_RETRY_AFTER_MS) : calculateDelay(attempt, opts);
+        // No per-sleep clamp. Clamping asked-for time and THEN comparing the
+        // clamped value to the budget made both clauses dead and put a hard
+        // cliff at 61s: `Retry-After: 60` slept and retried, `Retry-After: 61`
+        // failed in 0ms regardless of the configured retries. A minute or two
+        // is an ordinary value from an edge network. Honour what was asked when
+        // the budget can cover it; refuse outright when it cannot, because
+        // waiting LESS than asked is a guaranteed repeat failure.
+        let delay = honouring ? askedMs : calculateDelay(attempt, opts);
 
         if (honouring) {
           // Waiting LESS than the provider asked is worse than not retrying:
@@ -178,7 +185,7 @@ export async function withRetry<T>(
           // slot for a full 60s — while waiting far less than asked, which the
           // rule right here says is a guaranteed repeat failure.
           const remaining = MAX_RETRY_AFTER_TOTAL_MS - retryAfterSpent;
-          if (askedMs > remaining || delay > remaining) {
+          if (askedMs > remaining) {
             console.warn(
               `Provider asked for ${Math.round(askedMs / 1000)}s before retrying and this call has ` +
               `already waited ${Math.round(retryAfterSpent / 1000)}s — giving up rather than holding a ` +

@@ -1521,9 +1521,19 @@ async function runSingleSample(
           score = numericAbsScore0to10(test.expected, result.output);
           passed = score >= 7;
         } else {
-          console.warn(`[Test] Unknown distance metric: ${distanceMetric}`);
-          score = 5.0;
+          // A config typo must not hand out a plausible middle score. 5.0 with
+          // no `ungraded` flag counted FULLY in the quality mean, so every
+          // candidate got a permanent free 5.0 indistinguishable from a
+          // measurement — the free-value bug class again, this time triggered by
+          // a misspelt option rather than by the candidate. Nothing was measured,
+          // so nothing is credited.
+          console.warn(
+            `[Test] Unknown distanceMetric "${distanceMetric}" — scoring 0. Valid values are ` +
+            `levenshtein, json_diff, numeric_abs.`,
+          );
+          score = 0;
           passed = false;
+          ungraded = true;
         }
       }
     } else if (test.mode === 'json_schema') {
