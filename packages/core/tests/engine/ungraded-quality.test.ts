@@ -47,14 +47,18 @@ const config = {
 beforeEach(() => resetFitnessWarnings());
 
 describe('a fabricated 5.0 does not count as quality', () => {
-  it('excludes ungraded tests from the average', () => {
-    // Two real 2s and two placeholders. Averaging the placeholders in yields
-    // 3.5; the truth on what could actually be measured is 2.0.
+  it('scores an ungraded test 0 rather than excluding it', () => {
+    // SUPERSEDED ASSERTION. This first demanded exclusion (expecting 2.0), on
+    // the reasoning that a placeholder must not be averaged in. Exclusion turned
+    // out to be exploitable in the other direction: a candidate that poisons
+    // only the tests it FAILS deletes those scores and lifts its own mean —
+    // measured, [10,10,1,1] honest = 5.5 against [10,10,ungraded,ungraded] = 10.0
+    // on identical answers. 0 is the only value the candidate cannot gain from.
     const q = calculateFitness(
       node([{ score: 2 }, { score: 2 }, { score: 5, ungraded: true }, { score: 5, ungraded: true }]),
       config,
     ).quality;
-    expect(q).toBe(2);
+    expect(q).toBe(1); // (2 + 2 + 0 + 0) / 4
   });
 
   it('gives a candidate nothing for forcing every test ungraded', () => {

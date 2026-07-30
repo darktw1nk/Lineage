@@ -1835,8 +1835,22 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
   }
 
   console.log(`[Evaluator] Holdout: evaluating seed + champion on ${state.holdoutTests.length} unseen test(s)`);
-  const meanScore = (rs: TestResult[]) => rs.reduce((a, r) => a + r.score, 0) / rs.length;
-  const perTest = (rs: TestResult[]) => rs.map(r => ({ testId: r.testId, score: r.score }));
+  // Ungraded tests count 0 here too. This mean had NO ungraded filter while
+  // calculateQualityScore argues at length that a placeholder 5.0 must never be
+  // averaged in — so the holdout, the number docs/cli.md calls "the honest one:
+  // it can't be overfit", was the one place still inflating them. Measured: an
+  // honest judge scored the champion 1 on the unseen test, exactly like the
+  // seed, and the report printed `seed 1.00 -> champion 5.00` — a +4.0
+  // generalisation gain authored entirely by the candidate.
+  const scoreOf = (r: TestResult) => ((r as any).ungraded ? 0 : r.score);
+  const meanScore = (rs: TestResult[]) => rs.reduce((a, r) => a + scoreOf(r), 0) / rs.length;
+  // Carry the flag through so results.json and the desktop can tell a
+  // placeholder from a measurement instead of showing a bare `score: 5`.
+  const perTest = (rs: TestResult[]) => rs.map(r => ({
+    testId: r.testId,
+    score: scoreOf(r),
+    ...((r as any).ungraded ? { ungraded: true } : {}),
+  }));
 
   state.costContext = 'holdout';
   try {

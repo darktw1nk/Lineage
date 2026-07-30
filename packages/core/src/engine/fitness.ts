@@ -146,12 +146,36 @@ export function calculateFitness(
     );
     effectiveWeights.latency = 0;
   }
+  // Disabling a dimension REDISTRIBUTES its weight onto the ones that remain,
+  // so "unmeasurable" is strictly better for a candidate than "measured badly".
+  // That is only safe when the candidate cannot cause it. Split the two cases:
+  //
+  //   no guardrails configured -> nothing to measure for ANY candidate. Disable.
+  //   guardrails configured but this candidate could not be scored -> the
+  //   candidate's own output made the judge unreadable. Fail CLOSED at 0.
+  //
+  // Measured before the split: the safety judge has no regex fallback, so a
+  // single unescaped `"` in the answer made every guardrail reply unparseable,
+  // safety went undefined, its weight was dropped, and fitness ROSE from 3.85
+  // to 5.50 — a 43% gain for leaking the secret the guardrail forbade. A quote
+  // mark occurs constantly in ordinary answers, so this fires by accident and
+  // is then selected for.
+  const guardrailsConfigured = (config.fitness as any)?.guardrails?.length > 0;
+  let safetyForScore = safety;
   if (effectiveWeights.safety && safety === undefined) {
-    warnOnce('safety',
-      '[Fitness] A "safety" weight is set but fitness.guardrails is empty — the safety dimension is DISABLED. ' +
-      'Add fitness.guardrails (a list of rules the output must satisfy) to enable it.',
-    );
-    effectiveWeights.safety = 0;
+    if (guardrailsConfigured) {
+      warnOnce('safety-unmeasured',
+        '[Fitness] Guardrails are configured but could not be evaluated for this candidate — scoring safety 0 ' +
+        'rather than dropping the dimension. Dropping it would REWARD an output that breaks its own safety check.',
+      );
+      safetyForScore = 0;
+    } else {
+      warnOnce('safety',
+        '[Fitness] A "safety" weight is set but fitness.guardrails is empty — the safety dimension is DISABLED. ' +
+        'Add fitness.guardrails (a list of rules the output must satisfy) to enable it.',
+      );
+      effectiveWeights.safety = 0;
+    }
   }
   if (effectiveWeights.stability && !stabilityMeasured) {
     warnOnce('stability',
@@ -202,7 +226,8 @@ export function calculateFitness(
   let fitness = normalizedWeights.quality * quality;
   console.log(`[Fitness] Node ${node.id.slice(0, 8)}: quality=${quality.toFixed(3)}, weight=${normalizedWeights.quality.toFixed(3)}, contribution=${(normalizedWeights.quality * quality).toFixed(3)}`);
   
-  if (safety !== undefined && normalizedWeights.safety) {
+  if (safetyForScore !== undefined && normalizedWeights.safety) {
+    const safety = safetyForScore;
     fitness += normalizedWeights.safety * safety;
     console.log(`[Fitness] Node ${node.id.slice(0, 8)}: safety=${safety.toFixed(3)}, weight=${normalizedWeights.safety.toFixed(3)}, contribution=${(normalizedWeights.safety * safety).toFixed(3)}`);
   }
@@ -281,7 +306,7 @@ export function calculateFitness(
 
   return {
     quality: Number.isFinite(quality) ? quality : 0,
-    safety,
+    safety: safetyForScore,
     costUSD,
     latencyMs,
     stability,
@@ -306,11 +331,23 @@ function calculateQualityScore(node: CandidateNode): number {
   //
   // With nothing left to measure the score is 0, not 5 — the same answer this
   // function already gives a node with no tests at all.
-  const graded = node.tests.filter(test => !(test as any).ungraded);
-  if (graded.length === 0) return 0;
-
-  const totalScore = graded.reduce((sum, test) => sum + test.score, 0);
-  return totalScore / graded.length;
+  // Score an ungraded test 0. EXCLUDING it was the second wrong answer here:
+  // it lets a candidate delete exactly the tests it fails. Measured, with
+  // identical answers on every test —
+  //   honest   [10,10,1,1]                     quality  5.5
+  //   attacker [10,10,5(ungraded),5(ungraded)] quality 10.0
+  // — by emitting a 79-character payload only on the tests it got wrong.
+  // Averaging the 5.0 placeholder in was the first wrong answer: it lifts a
+  // 1/10 to 5/10.
+  //
+  // 0 is the only value a candidate cannot gain from. It can cost an honest
+  // candidate when the judge is genuinely flaky, and that is the right way
+  // round: real flakiness is surfaced by `ungraded`, the run's `ungradedTests`
+  // count and the grading circuit breaker, not by quietly raising a score.
+  const totalScore = node.tests.reduce(
+    (sum, test) => sum + ((test as any).ungraded ? 0 : test.score), 0,
+  );
+  return totalScore / node.tests.length;
 }
 
 function calculateSafetyScore(node: CandidateNode): number | undefined {
@@ -708,7 +745,14 @@ export async function evaluateTestResultLLM(
     // reads `sco<U+200B>re` as `score` — so without normalising here, one
     // invisible character keeps a forged token out of this set while the judge
     // quotes it back clean.
-    const judgeSaw = stripHidingChars(sanitizeForJudge(String(modelOutput ?? '')));
+    // EVERY model-authored block in the judge prompt, not just the output. The
+    // prompt is the thing evolution directly authors, and it was not in the
+    // comparison set — so a candidate poisoned the judge's own verdict from its
+    // OUTPUT (13 chars) while carrying the forged 10 in its PROMPT (15 chars),
+    // and an honest 1 was recorded as a 10.
+    const judgeSaw = [modelOutput, candidatePrompt, testPrompt, testCase?.expected]
+      .map(part => stripHidingChars(sanitizeForJudge(String(part ?? ''))))
+      .join('\n');
     const echoed = new Set(
       [...judgeSaw.matchAll(SCORE_TOKEN)].map(m => flat(m[0])),
     );
