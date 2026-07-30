@@ -311,3 +311,23 @@ describe('a hung provider must not wedge the run forever', () => {
     expect(settled.every(s => s === 'error')).toBe(true);
   }, 30000);
 });
+
+describe('an absurd callTimeoutMs does not become an instant one', () => {
+  // setTimeout stores its delay in a 32-bit int, so >= 2^31 wraps and Node
+  // fires after 1ms with a TimeoutOverflowWarning. Measured: 2147483647 (24.9d)
+  // resolved normally, 2147483648 REJECTED in 15ms — a 25-day timeout behaving
+  // as an instant one, failing every call.
+  it.each([2_147_483_648, 8.64e7 * 1000, Number.MAX_SAFE_INTEGER])(
+    'timeoutMs %s still lets a fast call succeed', async (timeoutMs) => {
+      initGlobalSemaphore(4);
+      registerProvider({ adapter: {
+        name: 'quick2',
+        estimateTokens: () => ({ prompt: 1 }),
+        call: async () => ({ output: 'x', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 }),
+      } as any });
+      const r = await getProviderAdapter('quick2' as any)
+        .call({ model: 'm', prompt: 'p', temperature: 0, timeoutMs } as any);
+      expect(r.output).toBe('x');
+    },
+  );
+});

@@ -172,6 +172,14 @@ export function scoreJsonSchema(
   output: string,
   schema: object | undefined,
   cacheKey?: string,
+  /**
+   * The reference answer, when the test provides one. Without it this mode
+   * scores SHAPE ONLY: one fixed reply such as `{"city":"x","population":0}`
+   * validates and scored 10/10 on EVERY json_schema test in a set regardless of
+   * what was asked — a free perfect score for zero task ability, which is
+   * exactly the gradient evolution climbs.
+   */
+  expected?: string,
 ): { passed: boolean; score: number; detail: string } {
   if (!schema) return { passed: false, score: 0, detail: 'no schema configured on this json_schema test' };
 
@@ -192,6 +200,13 @@ export function scoreJsonSchema(
 
   const text = stripFences(output);
 
+  // When a reference is given, VALUES must match too. Shape alone is not the
+  // task; it is the format the task must be delivered in.
+  const expectedValue = (() => {
+    if (expected === undefined || expected === null || expected === '') return undefined;
+    try { return JSON.parse(stripFences(expected)); } catch { return undefined; }
+  })();
+
   // 1. The whole response. This is the only candidate that can earn a perfect
   //    score — a model that wraps its JSON in prose has failed the
   //    structured-output contract, and letting that reach 10 handed evolution a
@@ -205,7 +220,18 @@ export function scoreJsonSchema(
   } catch { /* fall through to extraction */ }
 
   if (parsed) {
-    if (validate(wholeTextParsed)) return { passed: true, score: 10, detail: 'conforms to schema' };
+    if (validate(wholeTextParsed)) {
+      if (expectedValue !== undefined && !deepEqual(wholeTextParsed, expectedValue)) {
+        // Right shape, wrong answer. Scored between a prose-wrapped conformer
+        // (5) and a clean correct one (10): the format contract WAS met.
+        return {
+          passed: false,
+          score: 6,
+          detail: `conforms to schema but does not match the expected value: expected ${safeStringify(expectedValue)}, got ${safeStringify(wholeTextParsed)}`,
+        };
+      }
+      return { passed: true, score: 10, detail: 'conforms to schema' };
+    }
     const errors = validate.errors ?? [];
     // 1..5 by fraction of the schema satisfied: more nearly-correct scores
     // higher, and a totally wrong shape lands at the floor.
@@ -275,7 +301,20 @@ export function scoreToolCall(
     return { passed: false, score: 0, detail: 'no tool call (plain text response)' };
   }
 
-  const call = toolCalls[0]; // first call is judged; sequences are out of scope
+  // EXTRA calls are a failure, not something to look past. Only toolCalls[0]
+  // was judged, so `correct_call + delete_everything` scored a clean 10/10 and
+  // the destructive second call was invisible to the ladder. A test that asks
+  // for one tool call and gets three did not pass.
+  if (toolCalls.length > 1) {
+    const extras = toolCalls.slice(1).map(c => c.name).join(', ');
+    return {
+      passed: false,
+      score: 2,
+      detail: `made ${toolCalls.length} tool calls, expected 1 (extra: ${extras})`,
+    };
+  }
+
+  const call = toolCalls[0];
   if (call.name !== expected.name) {
     return { passed: false, score: 2, detail: `called ${call.name}, expected ${expected.name}` };
   }

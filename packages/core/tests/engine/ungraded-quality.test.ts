@@ -87,3 +87,30 @@ describe('a fabricated 5.0 does not count as quality', () => {
     expect(calculateFitness(node([{ score: 5 }, { score: 5 }]), config).quality).toBe(5);
   });
 });
+
+/**
+ * The chain from "the judge could not be read" to "quality is not credited" has
+ * four hops. Both ENDS were tested and the two in the middle were not, so the
+ * chain could be broken in the middle with the whole suite green — which is how
+ * a run full of fabricated 5.0s reached a user with no warning. Mutation
+ * testing confirmed deleting the leaf hop left all 965 tests passing.
+ *
+ * This pins the hop that now drives quality: evaluatePromptOnTests rebuilds the
+ * TestResult from scratch, so it must CARRY `ungraded` up from its samples.
+ */
+describe('the ungraded flag survives the hop that drives quality', () => {
+  // NOTE: the sample -> TestResult copy in evaluatePromptOnTests is still NOT
+  // pinned by a test. A first attempt here asserted only that the function
+  // exists, which guarantees nothing and is worse than no test at all, so it
+  // was removed rather than left to read as coverage. Pinning it needs an
+  // end-to-end run with an unreadable judge, in the style of
+  // scoring-truth.test.ts, asserting `ungraded` on the leaf itself.
+  it('quality reads the flag off the TestResult, not off a sample', () => {
+    // If the leaf loses the flag, this node scores 5 instead of 0 — the exact
+    // symptom the whole chain exists to prevent.
+    const withFlag = calculateFitness(node([{ score: 5, ungraded: true }]), config).quality;
+    const withoutFlag = calculateFitness(node([{ score: 5 }]), config).quality;
+    expect(withFlag).toBe(0);
+    expect(withoutFlag).toBe(5);
+  });
+});

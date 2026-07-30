@@ -1538,7 +1538,7 @@ async function runSingleSample(
       }
     } else if (test.mode === 'json_schema') {
       const { scoreJsonSchema } = await import('./structured.js');
-      const r = scoreJsonSchema(effectiveOutput, test.schema, test.id);
+      const r = scoreJsonSchema(effectiveOutput, test.schema, test.id, test.expected);
       score = r.score; passed = r.passed; llmGradeReasoning = r.detail;
     } else if (test.mode === 'tool_call') {
       const { scoreToolCall } = await import('./structured.js');

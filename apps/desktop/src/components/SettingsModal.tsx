@@ -34,6 +34,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     anthropic: '',
     gemini: '',
     openrouter: '',
+    groq: '',
   });
 
   const [syncingModels, setSyncingModels] = useState(false);
@@ -50,11 +51,12 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     let cancelled = false;
     const loadKeys = async () => {
       try {
-        const [openaiKey, anthropicKey, geminiKey, openrouterKey] = await Promise.all([
+        const [openaiKey, anthropicKey, geminiKey, openrouterKey, groqKey] = await Promise.all([
           window.electronAPI.keys.get('openai'),
           window.electronAPI.keys.get('anthropic'),
           window.electronAPI.keys.get('gemini'),
           window.electronAPI.keys.get('openrouter'),
+          window.electronAPI.keys.get('groq'),
         ]);
         if (cancelled) return;
 
@@ -63,6 +65,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           anthropic: anthropicKey || '',
           gemini: geminiKey || '',
           openrouter: openrouterKey || '',
+          groq: groqKey || '',
         });
         setKeysLoaded(true);
       } catch (error) {
@@ -194,7 +197,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 onChange={(e) =>
                   setLocalSettings({
                     ...localSettings,
-                    serviceModelMaxTokens: parseInt(e.target.value) || 20000,
+                    // `|| 20000` passes -1 through, because -1 is truthy. HTML
+                    // min/max are not enforced outside a form submit, so this is
+                    // the only clamp on the path to the providers.
+                    serviceModelMaxTokens: Math.min(1_000_000, Math.max(1, parseInt(e.target.value, 10) || 20000)),
                   })
                 }
               />
@@ -260,6 +266,24 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 placeholder="..."
                 value={apiKeys.gemini}
                 onChange={(e) => setApiKeys({ ...apiKeys, gemini: e.target.value })}
+              />
+            </div>
+
+            <div className="border-t pt-4 mt-4">
+              {/* Groq was selectable as a service model and in the cost editor
+                  with no key field anywhere, so startEvaluation refused the run
+                  with "Open Settings -> API Keys and add it" — pointing at a
+                  field that did not exist. */}
+              <Label htmlFor="groq-key">Groq API Key</Label>
+              <div className="text-xs text-muted-foreground mb-2">
+                Required for any run whose candidate or service model is a Groq model
+              </div>
+              <Input
+                id="groq-key"
+                type="password"
+                placeholder="gsk_..."
+                value={apiKeys.groq}
+                onChange={(e) => setApiKeys({ ...apiKeys, groq: e.target.value })}
               />
             </div>
 

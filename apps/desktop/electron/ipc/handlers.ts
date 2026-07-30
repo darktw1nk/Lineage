@@ -1,4 +1,5 @@
 import { IpcMain, app } from 'electron';
+import { validateSettings } from './validateSettings.js';
 import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from '@promptengine/core';
 import { getDatabase, store, OpenRouterAdapter, isEvaluationActive } from '@promptengine/core';
 import { v4 as uuidv4 } from 'uuid';
@@ -737,7 +738,8 @@ async function getSettings(): Promise<AppSettings> {
   return defaultSettings;
 }
 
-async function setSettings(settings: AppSettings): Promise<void> {
+async function setSettings(rawSettings: AppSettings): Promise<void> {
+  const settings = validateSettings(rawSettings);
   try {
     const db = getDatabase();
     db.prepare(`
@@ -838,6 +840,15 @@ async function testApiKey(provider: string): Promise<boolean> {
           headers: { 'Authorization': `Bearer ${key}` },
         });
         return openrouterResponse.ok;
+
+      case 'groq': {
+        // Groq had no branch here at all, so keys:test('groq') returned false
+        // even with a valid key — while Groq stayed selectable in two dropdowns.
+        const groqResponse = await fetch('https://api.groq.com/openai/v1/models', {
+          headers: { 'Authorization': `Bearer ${key}` },
+        });
+        return groqResponse.ok;
+      }
 
       default:
         return false;

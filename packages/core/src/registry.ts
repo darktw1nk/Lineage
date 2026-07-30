@@ -65,7 +65,13 @@ export function resetLeakedCalls(): void {
 function callWithTimeout<T>(
   start: () => Promise<T>, opts: { timeoutMs?: number }, name: string, label: string,
 ): Promise<T> {
-  const ms = opts?.timeoutMs;
+  // setTimeout stores its delay in a 32-bit int: anything >= 2^31 wraps and
+  // Node fires it after 1ms, so a 25-day timeout became an INSTANT one and
+  // every call failed immediately. Clamp rather than reject — an absurd value
+  // means 'effectively never', which is what the ceiling gives.
+  const MAX_TIMER_MS = 2_147_483_647;
+  const raw = opts?.timeoutMs;
+  const ms = Number.isFinite(raw) && (raw as number) > MAX_TIMER_MS ? MAX_TIMER_MS : raw;
   if (!Number.isFinite(ms) || (ms as number) <= 0) {
     return withGlobalSemaphore(start, label);
   }

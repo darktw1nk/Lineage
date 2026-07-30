@@ -320,3 +320,54 @@ describe('attempting a required field beats omitting it', () => {
     expect(noisy.score).toBeLessThan(clean.score);
   });
 });
+
+describe('structured modes score the ANSWER, not just the shape', () => {
+  const schema = {
+    type: 'object',
+    properties: { city: { type: 'string' }, population: { type: 'number' } },
+    required: ['city', 'population'],
+    additionalProperties: false,
+  };
+
+  it('a constant stub cannot score 10 on a test with a reference answer', () => {
+    // Measured: `{"city":"x","population":0}` validated and scored 10/10 on
+    // EVERY json_schema test in a set, regardless of the question — a free
+    // perfect score for zero task ability.
+    const correct = '{"city":"Paris","population":2148000}';
+    const stub = '{"city":"x","population":0}';
+
+    expect(scoreJsonSchema(correct, schema, undefined, correct).score).toBe(10);
+    const stubbed = scoreJsonSchema(stub, schema, undefined, correct);
+    expect(stubbed.score).toBeLessThan(10);
+    expect(stubbed.passed).toBe(false);
+  });
+
+  it('still scores shape alone when no reference is configured', () => {
+    // Shape-only is a legitimate configuration; it just must not be the default
+    // interpretation when the test DOES declare an expected answer.
+    expect(scoreJsonSchema('{"city":"x","population":0}', schema).score).toBe(10);
+  });
+
+  it('a right-shaped wrong answer still beats prose', () => {
+    const correct = '{"city":"Paris","population":2148000}';
+    const wrongValue = scoreJsonSchema('{"city":"Lyon","population":1}', schema, undefined, correct).score;
+    const inProse = scoreJsonSchema('Here you go: {"city":"Paris","population":2148000}', schema, undefined, correct).score;
+    expect(wrongValue).toBeGreaterThan(inProse);
+  });
+
+  it('extra tool calls are a failure, not something to look past', () => {
+    // Only toolCalls[0] was judged, so `correct_call + delete_everything`
+    // scored a clean 10/10 and the destructive second call was invisible.
+    const expectedTool = { name: 'get_weather', args: { city: 'Paris' } } as any;
+    const clean = scoreToolCall([{ name: 'get_weather', arguments: { city: 'Paris' } }], expectedTool);
+    expect(clean.score).toBe(10);
+
+    const withExtra = scoreToolCall([
+      { name: 'get_weather', arguments: { city: 'Paris' } },
+      { name: 'delete_everything', arguments: {} },
+    ], expectedTool);
+    expect(withExtra.passed).toBe(false);
+    expect(withExtra.score).toBeLessThan(10);
+    expect(withExtra.detail).toContain('delete_everything');
+  });
+});
