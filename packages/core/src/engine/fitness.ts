@@ -623,7 +623,12 @@ export async function evaluateTestResultLLM(
     // perfectly readable. Only a score that is genuinely unrecoverable should
     // fall through to the regex path below.
     const raw = typeof parsed === 'number' ? parsed : parsed?.score;
-    const rawScore = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : raw;
+    // Only a PLAIN DECIMAL string is the judge quoting its number. Number()
+    // also accepts "1e3" and "0x10", which clamp to a perfect 10 — the judge
+    // never said 10, and on this scale a coercion artefact failing OPEN is the
+    // direction that rewards a broken judge. Anything else falls through to the
+    // recovery path and is counted as ungraded.
+    const rawScore = typeof raw === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(raw) ? Number(raw) : raw;
     if (typeof rawScore !== 'number' || !Number.isFinite(rawScore)) {
       throw new Error(`judge returned no numeric score (got ${JSON.stringify(parsed?.score ?? parsed)})`);
     }

@@ -221,6 +221,23 @@ export function generateReport(
   lines.push(`| Generations | ${config.targets.maxGenerations ?? 'unlimited'} |`);
   lines.push(`| Selection | ${config.selection.policy}${config.selection.policy === 'topk' ? ` (k=${config.selection.topK})` : ` (p=${config.selection.topP})`}, elite=${config.selection.eliteShare ?? 0} |`);
   lines.push(`| Fitness weights | ${formatWeights(config)} |`);
+  // A weighted dimension that could not be measured is DROPPED from the
+  // denominator — correct, but the report still listed its weight and billed
+  // its calls with no note, so the fitness numbers did not match the stated
+  // formula and nothing said why. The engine warns on stderr; the artefact the
+  // user keeps said nothing.
+  const unmeasured = (['safety', 'stability'] as const).filter(dim =>
+    (config.fitness.weights as any)?.[dim] !== undefined &&
+    result.generations.some(g => g.nodes.some(n =>
+      n.status === 'finished' && n.metrics && (n.metrics as any)[dim] === undefined)),
+  );
+  if (unmeasured.length > 0) {
+    lines.push(
+      `| ⚠️ Unmeasured | ${unmeasured.join(' and ')} carried a weight but could not be measured on ` +
+      'some candidates, so the dimension was dropped from those fitness scores rather than defaulted. ' +
+      'Fitness below is a weighted average of the REMAINING dimensions. |',
+    );
+  }
   lines.push(`| Operators | ${formatOperators(config)} |`);
 
   const tempConfig = config.operators.paramVariation?.temperature;
@@ -597,9 +614,16 @@ export function generateReport(
       // champion and the seed emitted this heading followed by nothing at all.
       const half = result.holdout.champion ?? result.holdout.seed;
       const which = result.holdout.champion ? 'champion' : 'seed';
+      // `score` can be missing on a half that was cut short mid-scoring.
+      // `half!.score.toFixed()` threw a TypeError, and index.ts's try/catch
+      // then swallowed the WHOLE report — the run survived, the artefact the
+      // user keeps did not.
+      const scored = typeof half?.score === 'number'
+        ? `${half.score.toFixed(2)} on ${result.holdout.testIds.length} unseen test(s)`
+        : `no score recorded, on ${result.holdout.testIds.length} unseen test(s)`;
       lines.push(
         `⚠️ **The holdout evaluation is incomplete** — only the ${which} was scored ` +
-        `(${half!.score.toFixed(2)} on ${result.holdout.testIds.length} unseen test(s)). ` +
+        `(${scored}). ` +
         'Without both halves there is no baseline to compare against, so this number ' +
         'says nothing about whether the prompt improved. The run was cut short before ' +
         'the other half could be measured.',

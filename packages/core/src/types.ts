@@ -38,6 +38,14 @@ export interface TestResult {
   outputText?: string;
   llmGradeReasoning?: string; // raw LLM judge response for llm-graded tests
   samples?: number[]; // individual sample scores when samplesPerTest > 1
+  /**
+   * The judge could not be read, so `score` is a placeholder 5.0, not a
+   * measurement. Only the run-level `ungradedTests` count existed before, so
+   * results.json showed a bare `"score": 5` indistinguishable from a judge that
+   * genuinely said 5 — while the report told readers the leaf was the honest
+   * record. Absent on a graded test rather than `false`.
+   */
+  ungraded?: boolean;
 }
 
 export interface CandidateParams {

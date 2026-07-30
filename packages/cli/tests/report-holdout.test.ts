@@ -142,3 +142,13 @@ describe('a flat holdout is stated, not left to read as success', () => {
     expect(md).not.toMatch(/No holdout ran/i);
   });
 });
+
+describe('the report survives a half-scored holdout', () => {
+  it('does not throw when a holdout half has no score', () => {
+    // half.score.toFixed() threw a TypeError, and index.ts's try/catch then
+    // swallowed the entire report. The run survived; the artefact did not.
+    expect(() => generateReport(holdout({ champion: { perTest: [] } }), CONFIG)).not.toThrow();
+    const md = generateReport(holdout({ champion: { perTest: [] } }), CONFIG);
+    expect(md).toMatch(/incomplete/i);
+  });
+});

@@ -104,3 +104,23 @@ describe('an empty judge reply is disclosed, not passed off as a 5', () => {
     expect((r as any)._parseError).toBe(true);
   });
 });
+
+describe('a quoted score is read, a coercion artefact is not', () => {
+  it.each([['"8"', 8], ['" 8 "', 8], ['"7.5"', 7.5], ['8', 8]])(
+    'reads %s as a real verdict', async (literal, expected) => {
+      const r = await grade(`{"score": ${literal}}`, 'Paris');
+      expect(r.score).toBe(expected);
+      expect((r as any)._ungraded).toBeFalsy();
+    },
+  );
+
+  it.each(['"1e3"', '"0x10"', '"Infinity"', 'true', '[]', '""'])(
+    'refuses to grade on %s', async (literal) => {
+      // Number("1e3") is 1000 and Number("0x10") is 16; both clamped to a
+      // perfect 10 the judge never gave.
+      const r = await grade(`{"score": ${literal}}`, 'Paris');
+      expect(r.score).not.toBe(10);
+      expect((r as any)._ungraded).toBe(true);
+    },
+  );
+});

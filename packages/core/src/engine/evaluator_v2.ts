@@ -1408,6 +1408,7 @@ async function runSingleSample(
     let score = 5.0; // Default fallback
     let passed = false;
     let llmGradeReasoning: string | undefined;
+    let ungraded = false;
     
     if (test.mode === 'llm_grade') {
       // Grading is a second billable call per sample — gate it too
@@ -1440,6 +1441,7 @@ async function runSingleSample(
       score = gradingResult.score;
       passed = gradingResult.passed;
       llmGradeReasoning = gradingResult.reasoning;
+      ungraded = !!(gradingResult as any)._ungraded;
 
       // Bill the call BEFORE the circuit breaker can throw. The breaker's own
       // trigger call was made and charged by the provider, but the throw jumped
@@ -1527,6 +1529,11 @@ async function runSingleSample(
       score,
       exact,
       passed,
+      // A fabricated 5.0 must be machine-readable AT THE LEAF. Only the
+      // run-level `ungradedTests` count existed, so results.json showed
+      // `"score": 5` with no way to tell it from a judge that genuinely said
+      // 5 — while report.ts told readers the leaf was the honest record.
+      ...(ungraded ? { ungraded: true } : {}),
       output: effectiveOutput,
       // Put the real cause in the per-test explanation, not only in a console
       // warning the desktop hides by default. "invalid JSON: no parseable JSON
