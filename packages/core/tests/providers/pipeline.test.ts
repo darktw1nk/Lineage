@@ -78,7 +78,10 @@ describe('provider pipeline integration', () => {
     expect(attempts).toBe(3);
   });
 
-  it('cost accumulation across multiple simulated operations', async () => {
+  // Renamed: this asserts its OWN local increments, so it never touched the
+  // engine's accrueCost. What it does genuinely exercise is that concurrent
+  // work under the semaphore all completes, so that is what it now claims.
+  it('every concurrent call under the semaphore completes exactly once', async () => {
     const costs = { promptTokens: 0, completionTokens: 0, usd: 0, calls: 0 };
 
     const simulateCall = async (tokens: number, cost: number) => {
@@ -130,50 +133,17 @@ describe('provider pipeline integration', () => {
     expect(result).toBe('recovered');
   });
 });
-
-describe('stop conditions', () => {
-  it('budget check: total cost exceeds budget', () => {
-    const budget = 5.0;
-    const totalCost = 5.01;
-    expect(totalCost > budget).toBe(true);
-  });
-
-  it('time check: elapsed time exceeds limit', () => {
-    const timeLimitMs = 60000;
-    const startedAt = Date.now() - 61000;
-    const elapsed = Date.now() - startedAt;
-    expect(elapsed > timeLimitMs).toBe(true);
-  });
-
-  it('target fitness check: best fitness meets target', () => {
-    const targetFitness = 8.5;
-    const bestFitness = 8.7;
-    expect(bestFitness >= targetFitness).toBe(true);
-  });
-
-  it('generation limit check: current gen exceeds max', () => {
-    const maxGenerations = 10;
-    const currentGeneration = 10;
-    expect(currentGeneration >= maxGenerations).toBe(true);
-  });
-
-  it('none of the conditions met → evaluation continues', () => {
-    const budget = 10.0;
-    const totalCost = 2.0;
-    const timeLimitMs = 60000;
-    const startedAt = Date.now() - 10000;
-    const targetFitness = 9.0;
-    const bestFitness = 5.0;
-    const maxGenerations = 20;
-    const currentGeneration = 3;
-
-    const elapsed = Date.now() - startedAt;
-    const shouldStop =
-      totalCost > budget ||
-      elapsed > timeLimitMs ||
-      bestFitness >= targetFitness ||
-      currentGeneration >= maxGenerations;
-
-    expect(shouldStop).toBe(false);
-  });
-});
+// REMOVED: describe('stop conditions')
+//
+// Five tests named for budget, time limit, target fitness, generation limit
+// and "none met" that imported nothing from the engine. Each declared local
+// numbers and asserted that JavaScript's `>` operator works, so all five
+// passed with shouldStop() deleted from the codebase — and a coverage report
+// that claims the stop conditions are tested is worse than one that admits
+// they are not. Mutation testing confirmed all four shouldStop branches are
+// unprotected (budgetUSD !== undefined -> truthiness, >= -> >, and the
+// generations/target label swap all survive).
+//
+// Real coverage belongs in an end-to-end harness like
+// tests/engine/budget-enforcement.test.ts, which drives a whole run and
+// asserts stopReason. targetFitness and timeLimitMs still have none.
