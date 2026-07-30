@@ -33,7 +33,7 @@ function listRunsNewestFirst(db: any): RunRow[] {
   return db.prepare(`
     SELECT id, config_id, started_at, run_json, version
     FROM evaluation_runs
-    ORDER BY started_at DESC
+    ORDER BY started_at DESC, id DESC
   `).all() as RunRow[];
 }
 
@@ -83,12 +83,32 @@ export async function archiveRuns(db: any, dir: string): Promise<ArchiveResult> 
  * VACUUM matters: sql.js leaves freed pages in the file, so deleting rows alone
  * does not shrink it and the save cost stays exactly where it was.
  */
-export async function pruneRuns(db: any, keep: number, dbPath: string): Promise<PruneResult> {
+/**
+ * @param onlyIfArchived when given, a run is deleted ONLY if its id is in this
+ * set. archiveRuns swallows per-run write failures into `skipped`, and the
+ * caller pruned unconditionally — so the documented "safe one-liner"
+ * `--archive-runs X --prune-runs 0` irreversibly deleted runs that had NO
+ * archive file, and exited 0. Any per-run write failure qualifies: ENOSPC, one
+ * EACCES, an antivirus lock, a read-only leftover.
+ */
+export async function pruneRuns(
+  db: any, keep: number, dbPath: string, onlyIfArchived?: ReadonlySet<string>,
+): Promise<PruneResult> {
   const fs = await import('fs');
   const bytesBefore = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
 
   const runs = listRunsNewestFirst(db);
-  const doomed = runs.slice(Math.max(0, keep));
+  const olderThanKeep = runs.slice(Math.max(0, keep));
+  const doomed = onlyIfArchived
+    ? olderThanKeep.filter((r: any) => onlyIfArchived.has(r.id))
+    : olderThanKeep;
+  const withheld = olderThanKeep.length - doomed.length;
+  if (withheld > 0) {
+    process.stderr.write(
+      `Keeping ${withheld} run(s) that failed to archive — nothing is deleted without a copy on disk.
+`,
+    );
+  }
   const deleted: string[] = [];
 
   if (doomed.length > 0) {

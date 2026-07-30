@@ -17,12 +17,30 @@ const MAX_JUDGED_TEXT = 12_000;
  * whole.
  */
 /**
- * Invisible characters that could HIDE a delimiter. Deliberately excludes
- * U+200C/U+200D (ZWNJ/ZWJ): those are content, not formatting — stripping them
- * broke emoji families into separate emoji and mangled Indic conjuncts.
- * Applied ONLY to a line that is already delimiter-shaped (see below).
+ * The full default-ignorable set — every character that renders as nothing and
+ * so could HIDE a delimiter from a reader while leaving `>>>` in the bytes.
+ *
+ * Applied ONLY to decide whether a line is delimiter-shaped, and to the
+ * replacement text on a line that already is. Ordinary text keeps every one of
+ * these: a line of nothing but `>>>` and joiners is an attack, never an emoji,
+ * and a line of genuine emoji is not delimiter-shaped once the joiners come
+ * out, so it is returned byte-for-byte. An earlier version excluded ZWJ/ZWNJ
+ * from the class outright to protect emoji families and Indic conjuncts;
+ * scoping the strip to the detection test protects them without leaving 5 of
+ * the 12 hiding characters usable as a way out of the block.
  */
-const HIDING_CHARS = /[­​‎‏‪-‮⁠-⁤⁪-⁯﻿]/g;
+const HIDING_CHARS =
+  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/g;
+
+/**
+ * Every character a language model reads as a LINE BREAK.
+ *
+ * Splitting on /\r?\n/ alone missed CR-only, LS, PS, NEL, VT and FF — six ways
+ * to put `>>>` on a line of its own that the detector never looked at. The
+ * terminator is CAPTURED so it can be put back verbatim: rejoining on '\n' was
+ * silently rewriting every CRLF in judged text to LF.
+ */
+const LINE_SPLIT = /(\r\n|[\r\n\u0085\u000B\u000C\u2028\u2029])/;
 
 /**
  * Prepare model-produced text for interpolation into a JUDGE prompt.
@@ -53,7 +71,10 @@ export function sanitizeForJudge(text: string): string {
     ? `${text.slice(0, MAX_JUDGED_TEXT)}\n…[truncated ${text.length - MAX_JUDGED_TEXT} characters]`
     : text;
 
-  return clipped.split(/\r?\n/).map(line => {
+  // split() with a capturing group interleaves [line, terminator, line, …], so
+  // terminators pass through untouched and only the lines are examined.
+  return clipped.split(LINE_SPLIT).map((line, i) => {
+    if (i % 2 === 1) return line; // a captured line terminator
     const bare = line.replace(HIDING_CHARS, '');
     // A line of NOTHING BUT `>` closes the block (>>>, >>>>, …); a line ending
     // in 3+ `<` opens a forged one, which is the shape of the template's own
@@ -65,7 +86,7 @@ export function sanitizeForJudge(text: string): string {
     // genuinely reads it as something other than a delimiter.
     return bare.replace(/>{3,}/g, m => m.split('').join(' '))
                .replace(/<{3,}/g, m => m.split('').join(' '));
-  }).join('\n');
+  }).join('');
 }
 
 /**

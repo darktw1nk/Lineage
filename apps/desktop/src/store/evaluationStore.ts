@@ -28,7 +28,7 @@ interface EvaluationStore {
   addGenerationToEvaluation: (evalId: UUID, generation: number, nodes: CandidateNode[]) => void;
   updateTotals: (evalId: UUID, totals: any, cacheHits: number) => void;
   setHoldout: (evalId: UUID, holdout: EvaluationRun['holdout']) => void;
-  addPlayoff: (evalId: UUID, playoff: { generation: number; ranking: UUID[] }) => void;
+  addPlayoff: (evalId: UUID, playoff: { generation: number; ranking: UUID[]; decisive?: boolean }) => void;
   updateStatus: (evalId: UUID, status: string, totalPausedMs?: number, pausedAt?: number) => void;
   setStopReason: (evalId: UUID, reason: string) => void;
   setLoading: (evalId: UUID, isLoading: boolean) => void;
@@ -60,6 +60,19 @@ function plausibleGeneration(generation: number, id?: string): boolean {
   if (Number.isInteger(generation) && generation >= 0 && generation <= MAX_GENERATION_INDEX) return true;
   console.warn(`[Store] Ignoring ${id ? String(id).slice(0, 8) : 'event'}: generation ${generation} is not a plausible index.`);
   return false;
+}
+
+/**
+ * Is this a usable node?
+ *
+ * eval:import checks that `generations` is an array of arrays but never looks
+ * INSIDE them, so a hand-edited or older export with null/number entries
+ * imports cleanly and then throws on first render. LeftSidebar is the one panel
+ * App.tsx does not wrap in an ErrorBoundary, so the whole window blanked with
+ * the reason only in the closed-by-default Logs panel.
+ */
+function usableNode(n: unknown): n is CandidateNode {
+  return !!n && typeof n === 'object' && typeof (n as CandidateNode).id === 'string';
 }
 
 export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
@@ -101,8 +114,8 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
         const fromSnap = snapGens[g] ?? [];
         const fromLive = liveGens[g] ?? [];
         const byId = new Map<string, CandidateNode>();
-        for (const n of fromSnap) byId.set(n.id, n);
-        for (const n of fromLive) byId.set(n.id, n); // live wins
+        for (const n of fromSnap) if (usableNode(n)) byId.set(n.id, n);
+        for (const n of fromLive) if (usableNode(n)) byId.set(n.id, n); // live wins
         merged.push([...byId.values()]);
       }
 
@@ -112,6 +125,7 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
   },
 
   updateNodeInEvaluation: (evalId, node) => {
+    if (!usableNode(node)) return;
     set((state) => {
       const evaluation = state.evaluations.get(evalId);
       if (!evaluation) return state;
@@ -147,6 +161,7 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
   },
   
   addNodeToEvaluation: (evalId, node) => {
+    if (!usableNode(node)) return;
     set((state) => {
       const evaluation = state.evaluations.get(evalId);
       if (!evaluation) return state;
@@ -195,8 +210,9 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
         generations.push([]);
       }
       
-      // Set generation nodes
-      generations[generation] = nodes;
+      // Filter the payload: it is assigned verbatim, so one junk element
+      // reaches LeftSidebar.getBestScore and throws.
+      generations[generation] = (nodes ?? []).filter(usableNode);
       
       const newEvaluations = new Map(state.evaluations);
       newEvaluations.set(evalId, { ...evaluation, generations });
@@ -354,7 +370,7 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
           break;
 
         case 'playoff_result':
-          store.addPlayoff(evalId, { generation: data.generation, ranking: data.ranking });
+          store.addPlayoff(evalId, { generation: data.generation, ranking: data.ranking, decisive: data.decisive });
           break;
 
         case 'cost_breakdown':
@@ -427,7 +443,11 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
     const LIVE = new Set(['running', 'pausing', 'paused']);
     for (const [id, evaluation] of state.evaluations) {
       if (id === keepId) continue;
-      if (LIVE.has(String(evaluation.status))) continue;
+      // An UNKNOWN status is not a dead run. run.status is written only at
+      // specific lifecycle points, so a run started earlier and opened
+      // mid-flight carries undefined — and this evicted it, killing its
+      // subscription, the moment another run was opened.
+      if (!evaluation.status || LIVE.has(String(evaluation.status))) continue;
       get().unsubscribe(id as UUID);
     }
   },

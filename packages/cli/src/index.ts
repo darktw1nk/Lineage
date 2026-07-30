@@ -387,8 +387,11 @@ async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath
 
   // Archive BEFORE pruning, always — so `--archive-runs X --prune-runs 5` is a
   // safe one-liner rather than an ordering trap.
+  let archivedIds: Set<string> | undefined;
   if (archiveDir) {
     const result = await archiveRuns(db, archiveDir);
+    // Prune may only remove what actually reached disk.
+    archivedIds = new Set(result.archived.map(a => a.runId));
     emit(`Archived ${result.archived.length} run(s) to ${archiveDir}`);
     for (const skipped of result.skipped) {
       process.stderr.write(`  skipped ${skipped.runId.slice(0, 8)}: ${skipped.reason}\n`);
@@ -396,7 +399,7 @@ async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath
   }
 
   if (pruneKeep !== undefined) {
-    const result = await pruneRuns(db, pruneKeep, lastResolvedDbPath);
+    const result = await pruneRuns(db, pruneKeep, lastResolvedDbPath, archivedIds);
     const mb = (n: number) => `${(n / 1e6).toFixed(1)} MB`;
     if (result.deleted.length === 0) {
       emit(`Nothing to prune — ${result.kept} run(s) on file, keeping ${pruneKeep}.`);

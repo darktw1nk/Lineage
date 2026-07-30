@@ -152,3 +152,35 @@ describe('callTimeoutMs is enforced for plugin adapters too', () => {
     expect(r.output).toBe('x');
   }, 30000);
 });
+
+describe('the timeout must not break the concurrency cap it sits beside', () => {
+  // Promise.race let the TIMEOUT win, which released the semaphore permit while
+  // the plugin's work was still running against the same server. Measured:
+  // parallelLimit 2, 8 calls, peak concurrency 8 — the slower the server, the
+  // faster permits recycle onto it. A timeout cannot cancel work; it can only
+  // stop the engine WAITING. The permit must follow the work, not the race.
+  it('peak concurrency stays at parallelLimit even when every call times out', async () => {
+    initGlobalSemaphore(2);
+    let inFlight = 0, peak = 0;
+    registerProvider({ adapter: {
+      name: 'slowplug',
+      estimateTokens: () => ({ prompt: 1 }),
+      call: async () => {
+        inFlight++; peak = Math.max(peak, inFlight);
+        await new Promise(r => setTimeout(r, 600));
+        inFlight--;
+        return { output: 'x', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: 0 };
+      },
+    } as any });
+    const adapter = getProviderAdapter('slowplug' as any);
+    const calls = Array.from({ length: 8 }, () =>
+      adapter.call({ model: 'm', prompt: 'p', temperature: 0, timeoutMs: 100 } as any)
+        .then(() => 'ok', () => 'timeout'));
+    const results = await Promise.all(calls);
+
+    expect(results.every(r => r === 'timeout')).toBe(true); // callers freed fast
+    // Let the abandoned work drain before asserting the peak.
+    await new Promise(r => setTimeout(r, 1500));
+    expect(peak).toBeLessThanOrEqual(2);
+  }, 30000);
+});

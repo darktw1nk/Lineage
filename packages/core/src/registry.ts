@@ -41,20 +41,53 @@ import { BaseProviderAdapter } from './providers/base.js';
  *
  * This cannot cancel the plugin's own work — nothing can — but it stops the
  * ENGINE waiting on it, which is what the promise is about.
+ *
+ * CRITICAL ordering: the timeout must NOT be raced inside the semaphore's
+ * callback. Doing that let the timeout win, which returned from the callback
+ * and released the permit while the plugin's request was still open against the
+ * same server — measured peak concurrency 8 against a parallelLimit of 2, and
+ * self-amplifying, because the slower the server the faster permits recycle
+ * onto it. It also left `holdsGlobalPermit()` true in the abandoned
+ * continuation, so a router plugin delegating onward would skip the semaphore
+ * outright.
+ *
+ * So the permit follows the WORK and the rejection goes to the CALLER: the
+ * semaphore callback awaits the real promise to settle, while `outer` settles
+ * early on timeout. A plugin that never resolves holds its slot forever — which
+ * is exactly what happened before this timeout existed, so nothing regresses;
+ * what changes is that the engine no longer waits on it.
  */
-function withPluginTimeout<T>(work: Promise<T>, opts: { timeoutMs?: number }, name: string): Promise<T> {
+function callWithTimeout<T>(
+  start: () => Promise<T>, opts: { timeoutMs?: number }, name: string, label: string,
+): Promise<T> {
   const ms = opts?.timeoutMs;
-  if (!Number.isFinite(ms) || (ms as number) <= 0) return work;
-  let timer: ReturnType<typeof setTimeout>;
-  return Promise.race([
-    work,
-    new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`Provider '${name}' did not respond within callTimeoutMs (${ms}ms) — treating it as timed out`)),
-        ms as number,
-      );
-    }),
-  ]).finally(() => clearTimeout(timer));
+  if (!Number.isFinite(ms) || (ms as number) <= 0) {
+    return withGlobalSemaphore(start, label);
+  }
+
+  let resolveOuter!: (value: T) => void;
+  let rejectOuter!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolveOuter = res; rejectOuter = rej; });
+
+  const timer = setTimeout(
+    () => rejectOuter(new Error(
+      `Provider '${name}' did not respond within callTimeoutMs (${ms}ms) — treating it as timed out`,
+    )),
+    ms as number,
+  );
+
+  void withGlobalSemaphore(async () => {
+    try {
+      const value = await start();          // permit held until the work truly settles
+      clearTimeout(timer);
+      resolveOuter(value);
+    } catch (error) {
+      clearTimeout(timer);
+      rejectOuter(error);
+    }
+  }, label).catch(() => { /* already routed to the caller above */ });
+
+  return promise;
 }
 
 function throttleIfNeeded(adapter: ProviderAdapter): ProviderAdapter {
@@ -64,7 +97,7 @@ function throttleIfNeeded(adapter: ProviderAdapter): ProviderAdapter {
     get(target, prop, receiver) {
       if (prop === 'call') {
         return (opts: Parameters<ProviderAdapter['call']>[0]) =>
-          withGlobalSemaphore(() => withPluginTimeout(inner(opts), opts, adapter.name), `${adapter.name}:${opts.model}`);
+          callWithTimeout(() => inner(opts), opts, adapter.name, `${adapter.name}:${opts.model}`);
       }
       return Reflect.get(target, prop, receiver);
     },
