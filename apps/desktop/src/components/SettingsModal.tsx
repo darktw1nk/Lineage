@@ -104,6 +104,21 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   const saveSettings = useMutation({
     mutationFn: async () => {
+      // VALIDATE EVERYTHING FIRST, then write. Keys and settings were committed
+      // before costs:setMany ran, and that throws on the first bad row — so one
+      // mistyped price rejected the whole save AFTER the keys and settings had
+      // already landed, while the user saw only "Failed to save settings". A
+      // dry-run pass makes it all-or-nothing from the user's point of view.
+      for (const c of localCosts) {
+        const bad = [c.promptUSDper1k, c.completionUSDper1k]
+          .some(v => typeof v !== 'number' || !Number.isFinite(v) || v < 0);
+        if (bad) {
+          throw new Error(
+            `${c.provider}/${c.model} has an invalid price. Nothing was saved — fix it and save again.`,
+          );
+        }
+      }
+
       // Save API keys (or delete if empty)
       for (const [provider, key] of Object.entries(apiKeys)) {
         await window.electronAPI.keys.save(provider, key); // Save empty string to effectively clear

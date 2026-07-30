@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
-import { initializeDatabase, closeDatabase, setStore, setSendUpdate, loadPlugins, type StoreInterface } from '@promptengine/core';
+import { initializeDatabase, closeDatabase, runningEvaluationIds, setStore, setSendUpdate, loadPlugins, type StoreInterface } from '@promptengine/core';
 import { registerIPCHandlers } from './ipc/handlers.js';
 import { registerPluginHandlers, setPluginState } from './ipc/plugins.js';
 import { initLogger, getLogBuffer } from './logger.js';
@@ -113,7 +113,29 @@ app.whenReady().then(async () => {
   app.quit();
 });
 
-app.on('before-quit', () => {
+// Confirm before killing a run in progress. Closing the window during an
+// evaluation silently ended it: calls already in flight are paid for and
+// unrecoverable (the spend sidecar only recovers SETTLED spend), and the run
+// reappeared as `interrupted` with nothing explaining why.
+let quitConfirmed = false;
+app.on('before-quit', (event) => {
+  const running = quitConfirmed ? [] : runningEvaluationIds();
+  if (running.length > 0) {
+    event.preventDefault();
+    const keep = dialog.showMessageBoxSync({
+      type: 'warning',
+      buttons: ['Keep running', 'Quit anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'An evaluation is still running',
+      message: `Quitting now will end ${running.length} run(s) in progress.`,
+      detail: 'Calls already in flight are paid for and cannot be recovered. The run can be resumed later from its last checkpoint.',
+    }) === 0;
+    if (keep) return;
+    quitConfirmed = true;
+    app.quit();
+    return;
+  }
   closeDatabase();
 });
 

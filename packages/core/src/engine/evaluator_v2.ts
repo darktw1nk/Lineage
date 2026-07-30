@@ -1830,7 +1830,15 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
     return;
   }
 
+  // Carry forward a half that was already measured. Requiring BOTH halves meant
+  // a resume whose champion score had been checkpointed but whose seed pass had
+  // not re-scored — and re-BILLED — the champion. Measured: 4 new requests, 2 of
+  // them re-evaluating a champion whose holdout score was already on disk.
+  const carried = prior && !prior.skipped ? prior : undefined;
+
   const holdout: NonNullable<EvaluationRun['holdout']> = {
+    ...(carried?.champion ? { champion: carried.champion } : {}),
+    ...(carried?.seed ? { seed: carried.seed } : {}),
     testIds: state.holdoutTests.map(t => t.id),
     samplesPerTest: state.samplesPerTest,
   };
@@ -1886,8 +1894,12 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
 
   state.costContext = 'holdout';
   try {
-    const championResults = await evaluatePromptOnTests(champion.prompt, champion.params, state.holdoutTests, state, runId);
-    holdout.champion = { score: meanScore(championResults), perTest: perTest(championResults) };
+    // Skip the CALL, not just the assignment. Scoring it again and discarding
+    // the result is what re-billed the champion half on resume.
+    if (!holdout.champion) {
+      const championResults = await evaluatePromptOnTests(champion.prompt, champion.params, state.holdoutTests, state, runId);
+      holdout.champion = { score: meanScore(championResults), perTest: perTest(championResults) };
+    }
     // A Stop arriving mid-holdout used to keep paying: finishEvaluation had
     // already latched, so stopEvaluation returned immediately from the latch
     // while the remaining holdout calls ran on. Re-check between the two halves.
@@ -1896,8 +1908,10 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
       holdout.skipped = 'manual';
       return;
     }
-    const seedResults = await evaluatePromptOnTests(state.config.population.seedPrompt, champion.params, state.holdoutTests, state, runId);
-    holdout.seed = { score: meanScore(seedResults), perTest: perTest(seedResults) };
+    if (!holdout.seed) {
+      const seedResults = await evaluatePromptOnTests(state.config.population.seedPrompt, champion.params, state.holdoutTests, state, runId);
+      holdout.seed = { score: meanScore(seedResults), perTest: perTest(seedResults) };
+    }
     console.log(`[Evaluator] Generalization (unseen tests): seed ${holdout.seed.score.toFixed(2)} → champion ${holdout.champion.score.toFixed(2)}`);
   } catch (error) {
     console.error('[Evaluator] Holdout evaluation failed:', error);
@@ -2459,6 +2473,17 @@ export function resumeEvaluation(runId: UUID): void {
 /**
  * Stop evaluation
  */
+/**
+ * Ids of runs still working. The desktop needs this to warn before quitting:
+ * closing the window mid-run silently ended it, and calls already in flight are
+ * paid for and unrecoverable (the spend sidecar only recovers SETTLED spend).
+ */
+export function runningEvaluationIds(): UUID[] {
+  return [...activeEvaluations.entries()]
+    .filter(([, st]) => st.status === 'running')
+    .map(([id]) => id);
+}
+
 export function stopEvaluation(runId: UUID): void {
   const state = activeEvaluations.get(runId);
   if (state) {

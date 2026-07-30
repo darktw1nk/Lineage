@@ -777,6 +777,15 @@ async function setSettings(rawSettings: AppSettings): Promise<void> {
   }
 }
 
+/**
+ * Mask a key for logging. `'***' + key.slice(-4)` logs a key of 4 characters or
+ * fewer in FULL — slice(-4) of a short string is the whole string.
+ */
+function maskKey(key: string | undefined): string {
+  if (!key) return 'EMPTY';
+  return key.length > 8 ? `***${key.slice(-4)}` : '***';
+}
+
 async function saveApiKey(provider: string, key: string): Promise<void> {
   // The store key is built by interpolation, so an arbitrary provider string
   // wrote junk entries like `apiKey.../../etc` and `apiKey.__proto__` into the
@@ -785,7 +794,7 @@ async function saveApiKey(provider: string, key: string): Promise<void> {
     throw new Error(`Invalid provider name: ${JSON.stringify(provider)}`);
   }
   try {
-    console.log(`[Handlers] Saving API key for ${provider} as: apiKey.${provider}, value: ${key ? '***' + key.slice(-4) : 'EMPTY'}`);
+    console.log(`[Handlers] Saving API key for ${provider} as: apiKey.${provider}, value: ${maskKey(key)}`);
     if (key && key.trim()) {
       store.set(`apiKey.${provider}`, key);
     } else {

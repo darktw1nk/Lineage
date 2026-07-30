@@ -3,6 +3,9 @@ import { X, Trash2 } from 'lucide-react';
 import { Button } from './ui/button';
 import type { LogEntry } from '../window';
 
+/** Matches the main-process log buffer cap in electron/logger.ts. */
+const MAX_LOG_LINES = 1000;
+
 interface LogsPanelProps {
   onClose: () => void;
 }
@@ -18,7 +21,13 @@ export function LogsPanel({ onClose }: LogsPanelProps) {
 
     // Subscribe to new logs
     const unsubscribe = window.electronAPI.logs.subscribe((entry: LogEntry) => {
-      setLogs((prev) => [...prev, entry]);
+      // Cap the buffer. This was unbounded while the MAIN-process buffer is
+      // capped at 1000 (electron/logger.ts), so a long run pushed tens of
+      // thousands of entries through an array copy per line — O(n^2) — and
+      // rendered one DOM node for each.
+      setLogs((prev) => (prev.length >= MAX_LOG_LINES
+        ? [...prev.slice(prev.length - MAX_LOG_LINES + 1), entry]
+        : [...prev, entry]));
     });
 
     return unsubscribe;

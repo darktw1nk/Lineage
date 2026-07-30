@@ -18,6 +18,7 @@ export {
   pauseEvaluation,
   resumeEvaluation,
   stopEvaluation,
+  runningEvaluationIds,
 } from './engine/evaluator_v2.js';
 export { initGlobalSemaphore, updateGlobalSemaphoreLimit, withGlobalSemaphore } from './engine/semaphore.js';
 export { getProviderAdapter } from './providers/index.js';

@@ -459,7 +459,13 @@ async function acquireDbLock(dbPath: string): Promise<void> {
       lockPath = lock;
       return;
     } catch (error: any) {
-      if (error?.code !== 'EEXIST') throw error;
+      // A transient Windows sharing violation on the CREATE is not a reason to
+      // kill the process. The retry beside this covers the RECLAIM path only,
+      // while EPERM/EACCES/EBUSY here — delete-pending, Defender, the indexer —
+      // was rethrown on the first attempt. Same failure mode the atomic save
+      // already retries around; treat it as contention and wait it out.
+      const TRANSIENT_CREATE = new Set(['EPERM', 'EACCES', 'EBUSY']);
+      if (error?.code !== 'EEXIST' && !TRANSIENT_CREATE.has(error?.code)) throw error;
     }
 
     const holder = readHolder();

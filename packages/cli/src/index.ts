@@ -317,7 +317,12 @@ function parseArgs(argv: string[]): {
 async function handleSetKey(provider: Provider, key: string): Promise<void> {
   saveApiKey(provider, key);
   const masked = key.length > 4 ? '***' + key.slice(-4) : '****';
-  emit(`Saved ${provider} key (${masked})`);
+  // stderr, not stdout: docs/cli.md promises --init, --set-key,
+  // --archive-runs and --prune-runs "write only to stderr" so an agent can
+  // run them under `npm run --silent` beside a JSON pipeline. Two of the four
+  // were moved; this was the one left behind.
+  process.stderr.write(`Saved ${provider} key (${masked})
+`);
 }
 
 /**
