@@ -94,6 +94,11 @@ const LINE_SPLIT = /(\r\n|[\r\n\u0085\u000B\u000C\u2028\u2029])/;
  * are removed, so `>` ZWSP `>` ZWSP `>` cannot smuggle a closer past the
  * check while real text keeps its zero-width joiners.
  */
+/** Would sanitizeForJudge clip this text? Callers that must FAIL CLOSED need to know. */
+export function wouldTruncateForJudge(text: string): boolean {
+  return text.length > MAX_JUDGED_TEXT;
+}
+
 export function sanitizeForJudge(text: string): string {
   const clipped = text.length > MAX_JUDGED_TEXT
     ? `${text.slice(0, MAX_JUDGED_TEXT)}\n…[truncated ${text.length - MAX_JUDGED_TEXT} characters]`
@@ -107,8 +112,15 @@ export function sanitizeForJudge(text: string): string {
     // A line of NOTHING BUT `>` closes the block (>>>, >>>>, …); a line ending
     // in 3+ `<` opens a forged one, which is the shape of the template's own
     // `LABEL: <<<`. Anything else cannot escape the block.
-    const closes = /^>{3,}$/.test(bare.trim());
-    const opens = /<{3,}$/.test(bare.trimEnd());
+    // Trim BLANK-RENDERING characters too, not just whitespace and hiders. The
+    // class is the full Default_Ignorable set (verified exhaustively), but the
+    // threat model is 'renders as nothing', which is wider: U+2800 BRAILLE
+    // PATTERN BLANK renders blank, is not \s, and is not default-ignorable, so
+    // `>>>` + U+2800 failed the shape test and carried a complete forged block
+    // to the judge for one character.
+    const trimBlank = (t: string) => t.replace(/^[\s\u2800\u3164\uFFA0]+|[\s\u2800\u3164\uFFA0]+$/g, '');
+    const closes = /^>{3,}$/.test(trimBlank(bare));
+    const opens = /<{3,}$/.test(trimBlank(bare));
     if (!closes && !opens) return line; // untouched — the overwhelming majority
     // Neutralise the FENCE IN PLACE, in the original line. Returning `bare`
     // stripped hiding characters from the whole line, and the `opens` shape

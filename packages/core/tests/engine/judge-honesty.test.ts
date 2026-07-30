@@ -129,13 +129,28 @@ describe('the quality judge clamps and thresholds', () => {
     expect(r.reasoning).toMatch(/empty/i);
   });
 
-  it('a regex-recovered score is flagged as a parse error', async () => {
-    // It feeds the 8% grading circuit breaker; unflagged, a service model
-    // producing malformed JSON runs to completion and bills in full.
-    const r: any = await evaluateTestResultLLM({}, 'p', 't', 'o', MODEL,
-      adapterReturning('here you go: {"score": 8, "justification": "good" '));
-    expect(r.score).toBe(8);
-    expect(r._parseError).toBe(true);
+  it('a regex-recovered score is NOT counted as a grading failure', () => {
+    // SUPERSEDED. Flagging the RECOVERY path fed the 8% circuit breaker even
+    // though the verdict had been read correctly — so a candidate whose answer
+    // merely contained a quotation mark (JSON, dialogue, a citation) broke the
+    // judge's JSON, was recovered perfectly, and still aborted the whole run.
+    // Measured at 40% with ungradedTests 0 and every score right, blaming a
+    // service model that was innocent, and taking the holdout down with it via
+    // stopReason 'error'. Only an UNRECOVERABLE reply is a grading failure.
+    return evaluateTestResultLLM({}, 'p', 't', 'o', MODEL,
+      adapterReturning('here you go: {"score": 8, "justification": "good" ')).then((r: any) => {
+      expect(r.score).toBe(8);
+      expect(r._parseError).toBeFalsy();
+      expect(r._recovered).toBe(true);
+    });
+  });
+
+  it('an UNRECOVERABLE reply still counts as a grading failure', () => {
+    return evaluateTestResultLLM({}, 'p', 't', 'o', MODEL,
+      adapterReturning('I think it was pretty good overall.')).then((r: any) => {
+      expect(r._parseError).toBe(true);
+      expect(r._ungraded).toBe(true);
+    });
   });
 });
 

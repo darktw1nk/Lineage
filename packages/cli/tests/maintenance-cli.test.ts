@@ -32,7 +32,13 @@ function runCli(args: string[]): { code: number; out: string } {
   // documented contract), and execFileSync only surfaces stderr when the
   // process FAILS — so a success case read as empty and the assertion passed
   // for the wrong reason.
-  const r = spawnSync('npx', ['tsx', 'packages/cli/src/index.ts', ...args], {
+    // --tsconfig is REQUIRED. Without it `@promptengine/core` resolves through the
+  // package exports map to packages/core/dist, which is gitignored — so this
+  // silently tested a STALE BUILD (it scored a wrong answer 6, a value removed
+  // two commits earlier) and failed outright on a fresh clone with
+  // ERR_MODULE_NOT_FOUND. The repo's own `cli` script passes it.
+  const r = spawnSync('npx', ['tsx', '--tsconfig', 'packages/cli/tsconfig.json',
+    'packages/cli/src/index.ts', ...args], {
     encoding: 'utf-8', shell: true,
   });
   return { code: r.status ?? 1, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };

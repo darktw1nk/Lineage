@@ -1307,7 +1307,17 @@ export async function evaluatePromptOnTests(
       latencyMs: samples.reduce((a, s) => a + s.latencyMs, 0) / samples.length,
       outputText: samples[0].output,
       llmGradeReasoning: samples[0].reasoning,
-      ...(state.samplesPerTest > 1 ? { samples: samples.map(s => s.score) } : {}),
+      // Only GRADED samples. An ungraded sample's score is the placeholder 5.0,
+      // and three identical placeholders read as zero spread — a perfect 10/10
+      // stability derived from numbers no judge produced. Measured end to end:
+      // two candidates the honest judge scored identically ([1,10,1]) diverged
+      // to stability 5.757 vs 10.000, and the one that poisoned its own grading
+      // became the champion the user takes away. Quality already scores an
+      // ungraded test 0; stability has to refuse it too, or the free value just
+      // moves to the dimension that still accepts it.
+      ...(state.samplesPerTest > 1
+        ? { samples: samples.filter(s => !(s as any).ungraded).map(s => s.score) }
+        : {}),
       // Carry the flag up from the samples. runSingleSample set it on its own
       // internal return and this literal rebuilt the TestResult from scratch,
       // so `ungraded` was written in exactly one place and read nowhere:

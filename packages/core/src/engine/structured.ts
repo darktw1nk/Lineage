@@ -308,7 +308,12 @@ export function scoreJsonSchema(
             passed: false,
             // Capped below a conforming extraction, so the ordering
             // clean (10) > conforming-in-prose (5) > broken-in-prose (<=4) holds.
-            score: Math.min(4, Math.max(1, Math.round(1 + 4 * fraction))),
+            // Capped BELOW the conforming-but-wrong rung (4) and the
+            // wrong-in-prose rung (3). Math.min(5, ...) let a schema-VIOLATING
+            // answer reach 5 — above a conforming one with wrong values — at any
+            // schema with 6+ required keys, which is ordinary. The gradient then
+            // pointed away from conformance, which is the whole contract.
+            score: Math.min(2, Math.max(1, Math.round(1 + 4 * fraction))),
             detail: `JSON found inside prose, and it violates the schema (${errors.length}): ` +
               errors.slice(0, 3).map(e => `${e.instancePath || '/'} ${e.message}`).join('; '),
           };
