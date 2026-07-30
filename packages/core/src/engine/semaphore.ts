@@ -72,6 +72,10 @@ class Semaphore {
     }
   }
   
+  getLimit(): number {
+    return this.limit;
+  }
+
   getAvailable(): number {
     return this.permits;
   }
@@ -114,6 +118,11 @@ export function updateGlobalSemaphoreLimit(limit: number): void {
 const permitHeld = new AsyncLocalStorage<boolean>();
 
 /** True when the caller is already inside a permit on this async chain. */
+/** The configured concurrency cap, for callers that must bound their own overshoot. */
+export function globalParallelLimit(): number {
+  return globalSemaphore.getLimit();
+}
+
 export function holdsGlobalPermit(): boolean {
   return permitHeld.getStore() === true;
 }

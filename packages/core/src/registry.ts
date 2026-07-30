@@ -11,7 +11,7 @@
 import type { OperatorPlugin, ProviderPlugin, ProviderAdapter, ModelCostEntry } from './types.js';
 import type { SqlJsWrapper } from './database/init.js';
 import { mutateNode, crossoverNodes, metaPromptNode, varyParameters, varyModel } from './engine/operators_v2.js';
-import { withGlobalSemaphore } from './engine/semaphore.js';
+import { withGlobalSemaphore, globalParallelLimit } from './engine/semaphore.js';
 import { BaseProviderAdapter } from './providers/base.js';
 
 /**
@@ -42,21 +42,26 @@ import { BaseProviderAdapter } from './providers/base.js';
  * This cannot cancel the plugin's own work — nothing can — but it stops the
  * ENGINE waiting on it, which is what the promise is about.
  *
- * CRITICAL ordering: the timeout must NOT be raced inside the semaphore's
- * callback. Doing that let the timeout win, which returned from the callback
- * and released the permit while the plugin's request was still open against the
- * same server — measured peak concurrency 8 against a parallelLimit of 2, and
- * self-amplifying, because the slower the server the faster permits recycle
- * onto it. It also left `holdsGlobalPermit()` true in the abandoned
- * continuation, so a router plugin delegating onward would skip the semaphore
- * outright.
- *
- * So the permit follows the WORK and the rejection goes to the CALLER: the
- * semaphore callback awaits the real promise to settle, while `outer` settles
- * early on timeout. A plugin that never resolves holds its slot forever — which
- * is exactly what happened before this timeout existed, so nothing regresses;
- * what changes is that the engine no longer waits on it.
+ * A timeout cannot cancel work. Two pure options are both wrong: holding the
+ * permit keeps the cap exact but lets a dead provider wedge the run forever;
+ * releasing it keeps the run alive but breaks the cap. So the permit is
+ * released, the leak is COUNTED, and dispatch stops once leaks reach
+ * parallelLimit — concurrency is bounded at 2x and the run always terminates.
  */
+/**
+ * Calls that timed out and whose work is still running, so their parallel slot
+ * is unaccounted for. Decremented if the call ever does settle.
+ */
+let leakedCalls = 0;
+/** How far concurrency may exceed parallelLimit before the run is stopped. */
+function leakBudget(): number {
+  return Math.max(1, globalParallelLimit());
+}
+/** Test hook: forget leaked calls between runs in the same process. */
+export function resetLeakedCalls(): void {
+  leakedCalls = 0;
+}
+
 function callWithTimeout<T>(
   start: () => Promise<T>, opts: { timeoutMs?: number }, name: string, label: string,
 ): Promise<T> {
@@ -68,7 +73,6 @@ function callWithTimeout<T>(
   let resolveOuter!: (value: T) => void;
   let rejectOuter!: (reason: unknown) => void;
   const promise = new Promise<T>((res, rej) => { resolveOuter = res; rejectOuter = rej; });
-  let abandoned = false;
 
   void withGlobalSemaphore(async () => {
     // Arm the timer HERE, not before the acquire. `callTimeoutMs` is documented
@@ -78,21 +82,60 @@ function callWithTimeout<T>(
     // and callTimeoutMs 1500ms: 44% of callers failed although no single call
     // took over 100ms — and the queue only gets deeper as a provider slows, so
     // the failures cluster exactly when the run can least afford them.
-    if (abandoned) return; // caller is gone; never spend money on it
+    //
+    // On timeout the permit is RELEASED (this callback returns) even though the
+    // work is still running. Holding it instead — which is what the previous
+    // version did — kept the concurrency cap exact but meant a provider that
+    // never returns wedged the run permanently: measured at parallelLimit 4
+    // with 10 callers, 4 errored and 6 were still pending at 1500ms, with no
+    // error, no log, and no recovery, because shouldStop is never consulted
+    // while awaiting a node's Promise.all, so neither timeLimitMs nor Stop
+    // could end it.
+    //
+    // A timeout cannot cancel work, so both pure options are wrong: hold the
+    // permit and risk the wedge, or release it and break the cap. Release, but
+    // COUNT the leak — `leakedCalls` bounds how far the cap can be exceeded and
+    // ends the run once the provider is clearly dead.
+    // Refuse to START work once too many calls have leaked. This must happen
+    // AFTER acquiring, not at dispatch: callers enqueue all at once, so a check
+    // at entry is passed by every one of them before the first timeout fires.
+    // Each leak is a slot's worth of concurrency we can no longer account for,
+    // so stopping here bounds the overshoot at 2x parallelLimit and ends the run
+    // with a diagnostic instead of letting it grow without limit.
+    if (leakedCalls >= leakBudget()) {
+      rejectOuter(new Error(
+        `Provider '${name}' has ${leakedCalls} call(s) that never returned after callTimeoutMs. ` +
+        `Refusing to start more — the provider is not responding and every further call would leak ` +
+        `another parallel slot. Check the provider, or raise callTimeoutMs if it is merely slow.`,
+      ));
+      return;
+    }
+
+    let timedOut = false;
+    // Releasing this resolves the semaphore callback and hands the permit on.
+    let releasePermit!: () => void;
+    const permitHeldUntil = new Promise<void>(r => { releasePermit = r; });
+
     const timer = setTimeout(() => {
-      abandoned = true;
+      timedOut = true;
+      leakedCalls++;
+      console.warn(
+        `[Registry] Provider '${name}' did not respond within ${ms}ms. Releasing its parallel slot so the ` +
+        `run continues, but the call is still open — concurrency may exceed parallelLimit by ${leakedCalls} ` +
+        `until it settles.`,
+      );
       rejectOuter(new Error(
         `Provider '${name}' did not respond within callTimeoutMs (${ms}ms) — treating it as timed out`,
       ));
+      releasePermit();
     }, ms as number);
-    try {
-      const value = await start();          // permit held until the work truly settles
-      resolveOuter(value);
-    } catch (error) {
-      rejectOuter(error);
-    } finally {
-      clearTimeout(timer);
-    }
+
+    start().then(
+      value => { if (timedOut) leakedCalls--; else resolveOuter(value); },
+      error => { if (timedOut) leakedCalls--; else rejectOuter(error); },
+    ).finally(() => { clearTimeout(timer); releasePermit(); });
+
+    await permitHeldUntil;
   }, label).catch(() => { /* already routed to the caller above */ });
 
   return promise;

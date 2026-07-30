@@ -5,7 +5,7 @@ vi.mock('../../src/store.js', () => ({
   setStore: vi.fn(),
 }));
 
-import { registerProvider, resetRegistry } from '../../src/registry.js';
+import { registerProvider, resetRegistry, resetLeakedCalls } from '../../src/registry.js';
 import { getProviderAdapter } from '../../src/providers/index.js';
 import { initGlobalSemaphore, withGlobalSemaphore } from '../../src/engine/semaphore.js';
 import { BaseProviderAdapter } from '../../src/providers/base.js';
@@ -46,7 +46,9 @@ async function drainSemaphore(): Promise<void> {
   }
 }
 
-beforeEach(() => { resetRegistry(); inFlight = 0; peak = 0; });
+// leakedCalls is a module singleton: a test that leaves leaks behind makes
+// every later test refuse to start work.
+beforeEach(() => { resetRegistry(); resetLeakedCalls(); inFlight = 0; peak = 0; });
 
 describe('plugin providers obey parallelLimit', () => {
   it('is bounded by the global semaphore', async () => {
@@ -187,7 +189,7 @@ describe('the timeout must not break the concurrency cap it sits beside', () => 
   // stop the engine WAITING. The permit must follow the work, not the race.
   it('peak concurrency stays at parallelLimit even when every call times out', async () => {
     initGlobalSemaphore(2);
-    let inFlight = 0, peak = 0, done = 0;
+    let inFlight = 0, peak = 0, done = 0, issued = 0;
     registerProvider({ adapter: {
       name: 'slowplug',
       estimateTokens: () => ({ prompt: 1 }),
@@ -208,13 +210,18 @@ describe('the timeout must not break the concurrency cap it sits beside', () => 
     // Drain on the real signal, not a sleep. Abandoned work still holds its
     // permit, so a fixed wait that guesses short leaves permits checked out and
     // starves every later test in this file — which is what a 1500ms guess did.
-    while (done < 8) await new Promise(r => setTimeout(r, 50));
+    // Wait for the work that was actually STARTED. Calls beyond the leak
+    // budget are refused before reaching the plugin, so `issued` < 8.
+    while (done < issued) await new Promise(r => setTimeout(r, 50));
     // done++ runs inside the plugin, BEFORE withGlobalSemaphore's finally has
     // released the permit. The semaphore is a singleton and setPermits computes
     // permits = limit - inUse, so a permit still checked out here leaves the
     // NEXT test's initGlobalSemaphore with zero free permits and starves it.
     await drainSemaphore();
-    expect(peak).toBeLessThanOrEqual(2);
+    // Bounded at 2x, not exact: a timed-out call releases its permit so the
+    // run cannot wedge, and its still-running work is counted as a leak.
+    // Dispatch stops once leaks reach parallelLimit, so peak <= limit + limit.
+    expect(peak).toBeLessThanOrEqual(4);
   }, 30000);
 });
 
@@ -269,5 +276,38 @@ describe('callTimeoutMs measures the CALL, not the queue wait', () => {
     await new Promise(r => setTimeout(r, 1600)); // let the queue drain
     // Whatever timed out must NOT have been sent to the provider.
     expect(issued).toBe(3 - gaveUp);
+  }, 30000);
+});
+
+describe('a hung provider must not wedge the run forever', () => {
+  // Pass 9 moved the timer inside the semaphore callback to stop queue wait
+  // being counted as call time. That left a caller which is still QUEUED with
+  // no timer at all: measured at parallelLimit 4 with 10 callers against a
+  // provider that never settles, 4 got an error and 6 were STILL PENDING at
+  // 1500ms. Exactly `parallelLimit` hangs wedge the run permanently — and
+  // nothing detects it, because shouldStop is never consulted while awaiting a
+  // node's Promise.all, so neither timeLimitMs nor Stop can end the run.
+  //
+  // A timeout cannot cancel work, so holding the permit (correct cap, risk
+  // wedge) and releasing it (liveness, cap violated) are both wrong on their
+  // own. The permit is released so the run stays alive, the leak is COUNTED,
+  // and once leaks reach parallelLimit the run is failed with a diagnostic —
+  // bounding concurrency at 2x rather than letting it grow without limit.
+  it('frees every caller, including the ones still queued', async () => {
+    initGlobalSemaphore(2);
+    registerProvider({ adapter: {
+      name: 'wedger',
+      estimateTokens: () => ({ prompt: 1 }),
+      call: () => new Promise(() => { /* never settles */ }),
+    } as any });
+    const adapter = getProviderAdapter('wedger' as any);
+
+    const settled = await Promise.all(Array.from({ length: 6 }, () =>
+      adapter.call({ model: 'm', prompt: 'p', temperature: 0, timeoutMs: 150 } as any)
+        .then(() => 'ok', () => 'error')));
+
+    // Before the fix: 2 errors and 4 promises that never settle at all.
+    expect(settled).toHaveLength(6);
+    expect(settled.every(s => s === 'error')).toBe(true);
   }, 30000);
 });
