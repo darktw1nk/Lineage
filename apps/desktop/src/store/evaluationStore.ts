@@ -80,7 +80,13 @@ function usableNode(n: unknown): n is CandidateNode {
  * Events that arrived before the store had an entry for their run. Replayed by
  * hydrate(), in order, so a subscribe-then-await race cannot lose them.
  */
-const MAX_BUFFERED_UPDATES = 2000;
+/**
+ * Node payloads reach 250 KB with large outputs, so this cap IS a memory
+ * budget: 2000 meant ~500 MB per un-hydrated run, quadrupling the retention
+ * the same change cited as the hazard. 500 keeps it ~125 MB, and the terminal
+ * events survive regardless because the buffer now drops the OLDEST.
+ */
+const MAX_BUFFERED_UPDATES = 500;
 const pendingUpdates = new Map<UUID, any[]>();
 /** Set by subscribe() so hydrate can replay through the same handler. */
 const updateHandlers = new Map<UUID, (event: any, data: any) => void>();
