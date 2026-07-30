@@ -385,6 +385,13 @@ function handleInit(targetPath: string): void {
 
 async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath?: string): Promise<void> {
   lastResolvedDbPath = resolveDbPath(dbPath);
+  // Deleted by accident when the shared-DB guard was moved down past the
+  // archive step, which made getDatabase() below throw "Database not
+  // initialized" on EVERY --archive-runs and --prune-runs invocation. Nothing
+  // calls handleMaintenance in the suite — the tests drive archiveRuns and
+  // pruneRuns directly with an already-open handle — so the fix was tested and
+  // the function containing it was not.
+  await initCliDatabase(dbPath);
 
   const { getDatabase, closeDatabase } = await import('@promptengine/core');
   const db = getDatabase();

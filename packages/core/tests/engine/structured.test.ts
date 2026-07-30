@@ -383,22 +383,28 @@ describe('an unsatisfiable expected value does not flatten the gradient', () => 
     additionalProperties: false,
   };
 
-  it('ignores a reference no conforming document could ever equal', () => {
+  it('fails CLOSED on a reference no conforming document could ever equal', () => {
     // Reference names only `city`; the schema requires `population` too. Nothing
     // can both validate and deep-equal it, so EVERY conforming candidate —
     // perfect or garbage — scored exactly 6 with passed permanently false, and
     // the test carried zero signal.
     const partialRef = '{"city":"Paris"}';
+    // Both papered-over options were wrong: comparing against it capped every
+    // conforming answer at a failing 4, and IGNORING it handed every answer —
+    // including a constant stub — a passing 10, which feeds pass-rate reporting
+    // and targetFitness. It is a config error; say so.
     const perfect = scoreJsonSchema('{"city":"Paris","population":2148000}', schema, undefined, partialRef);
-    expect(perfect.score).toBe(10);
-    expect(perfect.passed).toBe(true);
+    expect(perfect.score).toBe(0);
+    expect(perfect.passed).toBe(false);
+    expect(perfect.detail).toMatch(/CONFIG ERROR/);
   });
 
-  it('ignores a non-object reference on a json_schema test', () => {
+  it('fails closed on a non-object reference too', () => {
     // `expected` is documented as exact_match-only, so it is routinely present
     // and meaningless on other modes.
     const r = scoreJsonSchema('{"city":"Paris","population":1}', schema, undefined, '42');
-    expect(r.score).toBe(10);
+    expect(r.score).toBe(0);
+    expect(r.detail).toMatch(/CONFIG ERROR/);
   });
 
   it('still enforces a reference that IS satisfiable', () => {
@@ -414,5 +420,44 @@ describe('an unsatisfiable expected value does not flatten the gradient', () => 
     const wrongClean = scoreJsonSchema('{"city":"Lyon","population":1}', schema, undefined, ref).score;
     const rightProse = scoreJsonSchema(`Here: ${ref}`, schema, undefined, ref).score;
     expect(rightProse).toBeGreaterThan(wrongClean);
+  });
+});
+
+describe('the json_schema ladder is ordered at EVERY rung', () => {
+  // Enumerated, not spot-checked. Moving the clean wrong-value rung to 4
+  // without touching the prose rung made wrapping a WRONG answer in prose pay
+  // +1 (5 vs 4) — rewarding the contract break the mode exists to punish — and
+  // it put a schema-VIOLATING answer above a conforming one. Both were missed
+  // because every existing prose assertion used the CORRECT value.
+  const schema = {
+    type: 'object',
+    properties: { city: { type: 'string' }, population: { type: 'number' } },
+    required: ['city', 'population'],
+    additionalProperties: false,
+  };
+  const ref = '{"city":"Paris","population":2148000}';
+  const score = (out: string) => scoreJsonSchema(out, schema, undefined, ref).score;
+
+  it('correct beats wrong, and clean beats prose, in every combination', () => {
+    const cleanCorrect = score(ref);
+    const proseCorrect = score(`Here you go: ${ref}`);
+    const cleanWrong = score('{"city":"Lyon","population":1}');
+    const proseWrong = score('Here you go: {"city":"Lyon","population":1}');
+    const violates = score('{"city":"Paris"}');
+    const garbage = score('no json here at all');
+
+    // Correctness dominates format.
+    expect(cleanCorrect).toBeGreaterThan(proseCorrect);
+    expect(proseCorrect).toBeGreaterThan(cleanWrong);
+    expect(cleanWrong).toBeGreaterThan(proseWrong);
+    // A conforming answer always beats one that violates the schema.
+    expect(proseWrong).toBeGreaterThanOrEqual(violates);
+    expect(violates).toBeGreaterThan(garbage);
+  });
+
+  it('a constant stub never outranks a real answer, however either is wrapped', () => {
+    const stub = '{"city":"x","population":0}';
+    expect(score(`Here you go: ${stub}`)).toBeLessThan(score(ref));
+    expect(score(`Here you go: ${stub}`)).toBeLessThanOrEqual(score(stub));
   });
 });

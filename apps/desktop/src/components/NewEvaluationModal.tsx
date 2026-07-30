@@ -1105,7 +1105,7 @@ function JsonField({ label, value, onValid, placeholder, validate }: {
 
 // Debounced live cost estimate for the modal footer
 function useCostEstimate(config: Partial<EvaluationConfig>) {
-  const [estimate, setEstimate] = useState<import('@promptengine/core').CostEstimate | null>(null);
+  const [estimate, setEstimate] = useState<import('@promptengine/core').CostEstimate | { error: string } | null>(null);
   useEffect(() => {
     if (!config.enabledModels?.length || !config.testSet?.length) { setEstimate(null); return; }
     let cancelled = false; // a slow older IPC response must not overwrite a newer one

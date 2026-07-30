@@ -1,4 +1,4 @@
-import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from './types';
+import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings, CostEstimate } from './types';
 
 export interface LogEntry {
   timestamp: number;

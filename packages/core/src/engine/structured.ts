@@ -202,6 +202,7 @@ export function scoreJsonSchema(
 
   // When a reference is given, VALUES must match too. Shape alone is not the
   // task; it is the format the task must be delivered in.
+  let unsatisfiableReference = false;
   const expectedValue = (() => {
     if (expected === undefined || expected === null || expected === '') return undefined;
     let parsed: unknown;
@@ -214,15 +215,28 @@ export function scoreJsonSchema(
     // desktop's mode switch is a merge, so it can also be left behind invisibly.
     // An unsatisfiable reference is ignored, loudly.
     if (!validate(parsed)) {
-      console.warn(
-        '[Structured] This json_schema test has an `expected` value that does not conform to its own ' +
-        'schema, so no answer could ever match it. Ignoring the reference and scoring shape only — ' +
-        'remove `expected`, or make it a valid instance of the schema.',
-      );
+      unsatisfiableReference = true;
       return undefined;
     }
     return parsed;
   })();
+
+  // A reference that cannot satisfy its own schema is a CONFIG error, and it
+  // must not be papered over in either direction. Comparing against it capped
+  // every conforming answer at a failing 4; ignoring it handed every answer,
+  // including a constant stub, a passing 10 — the exact free score the
+  // `expected` parameter was added to close, now with passed:true feeding
+  // pass-rate reporting and targetFitness. Fail closed and name the fix.
+  if (unsatisfiableReference) {
+    return {
+      passed: false,
+      score: 0,
+      detail:
+        'CONFIG ERROR: this json_schema test has an `expected` value that is not a valid instance of ' +
+        'its own schema, so no answer could ever match it. Remove `expected`, or make it conform.',
+    };
+  }
+
 
   // 1. The whole response. This is the only candidate that can earn a perfect
   //    score — a model that wraps its JSON in prose has failed the
@@ -279,7 +293,14 @@ export function scoreJsonSchema(
       continue;
     }
     const result = validate(candidate)
-      ? { passed: false, score: 5, detail: 'valid JSON found inside prose — the response itself was not JSON' }
+      ? (expectedValue !== undefined && !deepEqual(candidate, expectedValue)
+          // The prose rung never consulted the reference, so moving the clean
+          // wrong-value rung to 4 put it BELOW prose — wrapping a wrong answer
+          // in prose paid +1, rewarding exactly the contract break this mode
+          // exists to punish. Correctness dominates format at every rung:
+          //   clean+correct 10 > prose+correct 5 > clean+wrong 4 > prose+wrong 3
+          ? { passed: false, score: 3, detail: 'valid JSON inside prose, and it does not match the expected value' }
+          : { passed: false, score: 5, detail: 'valid JSON found inside prose — the response itself was not JSON' })
       : (() => {
           const errors = validate.errors ?? [];
           const fraction = satisfiedFraction(candidate, schema as any, errors);

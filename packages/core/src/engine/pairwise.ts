@@ -63,7 +63,15 @@ function getPairwiseTemplate(): string {
  * candidate. Attribution has to require the exact shape the scavenger would
  * mistake for a ruling — a JSON object whose `winner` is A, B or tie.
  */
-const VERDICT_TOKEN = /[{,]\s*"winner"\s*:\s*"(?:a|b|tie)"/i;
+function looksLikeVerdict(output: string): boolean {
+  // Must cover EVERYTHING parseVerdict honours, or the shapes most likely to
+  // fool the scavenger become the ones attribution refuses to punish. The
+  // narrowed literal missed both prose forms parseVerdict reads, and any
+  // \uXXXX escape, which JSON.parse resolves - so `Winner: B`, `output B is
+  // better` and an escaped winner value all VOIDED the unit instead of costing
+  // the forger. Reuse parseVerdict itself: by construction it cannot drift.
+  return parseVerdict(output) !== 'unreadable';
+}
 
 function parseVerdict(raw: string): 'A' | 'B' | 'tie' | 'unreadable' {
   let text = raw.trim();
@@ -214,8 +222,8 @@ export async function runPairwisePlayoff(opts: PlayoffOptions): Promise<PlayoffR
       return;
     }
     if (v1 === 'unreadable' || v2 === 'unreadable') {
-      const aPoisoned = VERDICT_TOKEN.test(outA ?? '');
-      const bPoisoned = VERDICT_TOKEN.test(outB ?? '');
+      const aPoisoned = looksLikeVerdict(outA ?? '');
+      const bPoisoned = looksLikeVerdict(outB ?? '');
       if (aPoisoned && !bPoisoned) { points[b.id] += 1; return; }
       if (bPoisoned && !aPoisoned) { points[a.id] += 1; return; }
       // Neither side implicated: genuine judge trouble. Award nothing rather

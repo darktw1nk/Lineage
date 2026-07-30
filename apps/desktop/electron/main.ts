@@ -125,8 +125,7 @@ app.on('before-quit', (event) => {
   // be observed, paused or stopped and every further quit re-raises a
   // parent-less modal. Before the prompt existed, closing the window simply
   // ended the process.
-  const hasWindow = BrowserWindow.getAllWindows().length > 0;
-  const running = quitConfirmed || !hasWindow ? [] : runningEvaluationIds();
+  const running = quitConfirmed ? [] : runningEvaluationIds();
   if (running.length > 0) {
     event.preventDefault();
     const keep = dialog.showMessageBoxSync({
