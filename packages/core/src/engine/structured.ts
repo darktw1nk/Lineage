@@ -168,18 +168,33 @@ function satisfiedFraction(parsed: unknown, schema: any, errors: ReadonlyArray<a
   return (ok / required.length) * (1 - penalty);
 }
 
-let configErrorWarned = false;
-function warnConfigErrorOnce(): void {
-  if (configErrorWarned) return;
-  configErrorWarned = true;
+/**
+ * Config errors already reported, KEYED BY TEST.
+ *
+ * A single unkeyed boolean meant that of N distinct broken json_schema tests
+ * only the first ever warned, and the message named none of them — while
+ * `cacheKey` (the test id) was in scope the whole time. warnOnce in fitness.ts,
+ * which this copied, keys by dimension for exactly that reason.
+ */
+const configErrorsWarned = new Set<string>();
+function warnConfigErrorOnce(testKey: string | undefined): void {
+  const key = testKey ?? '(unnamed test)';
+  if (configErrorsWarned.has(key)) return;
+  configErrorsWarned.add(key);
   console.warn(
-    '[Structured] CONFIG ERROR: a json_schema test has an `expected` value that is not a valid ' +
-    'instance of its own schema, so no answer can match it. Every candidate scores 0 on that test ' +
-    'until you remove `expected` or make it conform.',
+    `[Structured] CONFIG ERROR in test ${key}: its \`expected\` value is not a valid instance of its ` +
+    'own schema, so no answer can match it. Every candidate scores 0 on that test until you remove ' +
+    '`expected` or make it conform.',
   );
 }
-/** Test hook: a second run in the same process must warn again. */
-export function resetStructuredWarnings(): void { configErrorWarned = false; }
+/**
+ * Clear for a new run. resetFitnessWarnings is called from evaluator_v2 at the
+ * start of every run; this had ZERO callers and was not exported from the
+ * package index, so in the Electron main process — which runs many evaluations
+ * per process — the warning fired once ever and was silent for every run after.
+ * Half-applied: 1600 duplicate warnings traded for one warning and then silence.
+ */
+export function resetStructuredWarnings(): void { configErrorsWarned.clear(); }
 
 export function scoreJsonSchema(
   output: string,
@@ -250,7 +265,7 @@ export function scoreJsonSchema(
     // error — and the CLI routes console.warn straight into the progress
     // display. fitness.ts already solved this exact problem with warnOnce; the
     // same class was reintroduced here.
-    warnConfigErrorOnce();
+    warnConfigErrorOnce(cacheKey);
     return {
       passed: false,
       score: 0,

@@ -33,6 +33,7 @@ import { rngFor } from './rng.js';
 import { COST_LABELS } from './estimate.js';
 import { selectChampion } from './champion.js';
 import { calculateFitness, resetFitnessWarnings } from './fitness.js';
+import { resetStructuredWarnings } from './structured.js';
 import { store } from '../store.js';
 import { recordSpend, readSpend, clearSpend } from './spendledger.js';
 import { getDatabase } from '../database/init.js';
@@ -359,6 +360,7 @@ async function startEvaluationInner(
   // Warnings are once-per-run, not once-per-process: a second run in the same
   // CLI/Electron process must still be told its cost dimension is disabled.
   resetFitnessWarnings();
+  resetStructuredWarnings();
 
   // A seed promises reproducibility, and docs/cli.md's paired-run method
   // depends on it — but latency is measured wall clock and relative-mode norms
@@ -2019,25 +2021,7 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   state.run.status = 'finished';
   state.run.finishedAt = Date.now();
 
-  // Recount from the LEAVES, including the HOLDOUT, and BEFORE persistRun.
-  //
-  // The first version walked only `generations`, but holdout rows live in
-  // `run.holdout.{seed,champion}.perTest` and are graded through the same path
-  // that sets the flag — so a run whose ONLY ungraded rows were in the holdout
-  // reported 0 and the report's warning banner disappeared entirely, having
-  // fired before the recount existed. It also ran AFTER persistRun, so the
-  // corrected number never reached the database the resume and desktop read.
-  // Three numbers in one artefact, and the one the user sees was the wrong one.
-  const holdoutLeaves = [state.run.holdout?.seed, state.run.holdout?.champion]
-    .flatMap(half => (half?.perTest ?? []) as any[])
-    .filter(row => row?.ungraded).length;
-  const ungradedLeaves = state.run.generations
-    .flat()
-    .reduce((n, node) => n + (node.tests ?? []).filter(t => (t as any).ungraded).length, 0)
-    + holdoutLeaves;
-  if (ungradedLeaves !== (state.run.ungradedTests ?? 0)) {
-    state.run.ungradedTests = ungradedLeaves;
-  }
+  state.run.ungradedTests = reconcileUngradedCount(state.run);
   persistRun(state);
 
   // The checkpoint is now authoritative and the run cannot be resumed, so the
@@ -2214,6 +2198,44 @@ function releaseCall(state: EvaluationState, reserved: number): void {
  * condition that merely became true later.
  */
 const STICKY_STOP_REASONS = new Set(['error', 'manual']);
+/**
+ * The run's ungraded-test count, reconciled from every source.
+ *
+ * Exported so a test can drive the REAL function: the first test written for
+ * this pasted a copy of it into the test file and asserted against the copy,
+ * so reverting the whole fix left the suite green.
+ */
+export function reconcileUngradedCount(run: EvaluationRun): number {
+  // Counts generations AND both holdout halves.
+  //
+  // The first version walked only `generations`, but holdout rows live in
+  // `run.holdout.{seed,champion}.perTest` and are graded through the same path
+  // that sets the flag — so a run whose ONLY ungraded rows were in the holdout
+  // reported 0 and the report's warning banner disappeared entirely, having
+  // fired before the recount existed. It also ran AFTER persistRun, so the
+  // corrected number never reached the database the resume and desktop read.
+  // Three numbers in one artefact, and the one the user sees was the wrong one.
+  const holdoutLeaves = [run.holdout?.seed, run.holdout?.champion]
+    .flatMap(half => (half?.perTest ?? []) as any[])
+    .filter(row => row?.ungraded).length;
+  const ungradedLeaves = run.generations
+    .flat()
+    .reduce((n, node) => n + (node.tests ?? []).filter(t => (t as any).ungraded).length, 0)
+    + holdoutLeaves;
+  // MAX, never assign. The recount is a floor, not an authority: a node that
+  // FAILED mid-evaluation has no `tests` array at all (processNode assigns it
+  // only on success), yet its sibling tests may already have incremented the
+  // per-call counter — so a leaf sweep finds zero rows and CLOBBERED a count
+  // earned by a real grading failure. Moving it above persistRun then wrote the
+  // clobbered value into the durable record, which the pre-change ordering had
+  // kept honest. The change made FOR the database made the database worse.
+  //
+  // Worst case that produced: a run aborted BY the grading circuit breaker —
+  // aborted precisely because >8% of judge replies were unparseable — ends with
+  // its in-flight nodes failed and no tests, and reported ungradedTests 0.
+  return Math.max(run.ungradedTests ?? 0, ungradedLeaves);
+}
+
 export function setStopReason(state: EvaluationState, reason: NonNullable<EvaluationRun['stopReason']>): void {
   const current = state.run.stopReason;
   if (current && STICKY_STOP_REASONS.has(current) && !STICKY_STOP_REASONS.has(reason)) {

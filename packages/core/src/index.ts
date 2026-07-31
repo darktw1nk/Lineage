@@ -37,7 +37,7 @@ export { loadPlugins } from './pluginLoader.js';
 export { partitionTestSet } from './engine/holdout.js';
 export { mulberry32, rngFor } from './engine/rng.js';
 export { isEvaluationActive } from './engine/evaluator_v2.js';
-export { scoreJsonSchema, scoreToolCall } from './engine/structured.js';
+export { scoreJsonSchema, scoreToolCall, resetStructuredWarnings } from './engine/structured.js';
 export { estimateRunCost, COST_LABELS } from './engine/estimate.js';
 export { clearSpend, readSpend } from './engine/spendledger.js';
 // Plugin operators that make paid calls need this to report spend incurred
