@@ -12,7 +12,7 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 
 ![Evolution run](docs/assets/evolution-run.gif)
 
-*A real 48-second run: 24 candidates, 4 generations, 4 models competing, $0.026 total. The hand-written seed scored 6.67; the champion 7.33, reached by meta-prompting that read the judge's complaints and added few-shot examples. Two candidates on one OpenRouter model failed outright (red) and the run carried on. Note the footer: `Holdout 7.00 → 7.00`. The training score improved and the held-out score did not — so this run bought a better prompt on the tests it could see and no proven generalization. The tool says so on its own front page rather than quoting you the training delta.*
+*A real run: 24 candidates, 4 generations, 3 models competing, 2m43s, $0.20 total. The task: turn support tickets into a strict one-line record. The hand-written seed — "Summarize the customer ticket." — scored **2.25**: it writes prose, and prose is the wrong answer. By generation 2, meta-prompting had read the graded failures and written the output contract itself (`order=<order_number> | issue=<core_issue> | request=<specific_request>`) — **6.25**. And the number that counts, bottom right: on two tickets evolution never saw, **3.00 → 8.00**. The format it discovered generalized; that's the claim the holdout is there to license.*
 
 ## Why this beats prompt engineering by hand
 
@@ -20,7 +20,7 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 
 **It optimizes trade-offs, not just quality.** Fitness is a weighted blend of five dimensions — quality, safety, cost, latency, stability — so the questions in the header aren't marketing: they're just weight configurations. The population converges toward *your* trade-off, not toward generic eloquence.
 
-**It searches model choice, not just wording.** With several models in the gene pool, the model-variation operator keeps re-dealing prompts to different models, and the per-model scores fall out of the same run — in the demo above, four models competed and the champion ended up on `gemini-2.5-flash` (best 7.33) over `gemini-2.5-flash-lite` (7.00) and `openai/gpt-4o-mini` (6.00), at $0.0014 per candidate. Sometimes that finds a cheap model that matches an expensive one; either way you get the comparison as evidence instead of a hunch.
+**It searches model choice, not just wording.** With several models in the gene pool, the model-variation operator keeps re-dealing prompts to different models, and the per-model comparison falls out of the same run — in the demo above the champion landed on `gemini-2.5-flash-lite`, the cheapest model in the pool, because by then the prompt was carrying the work. Evolution routinely finds that a tuned prompt on a cheap model beats a mediocre prompt on an expensive one, and you get that as measured evidence instead of a hunch.
 
 **It learns from its own failures.** The meta-prompting operator reads the judge's actual feedback on failing tests ("added a preamble", "wrong date format") and performs surgical fixes — not blind rewrites. It's the closest thing to a prompt engineer in the loop, except it reads every test result, every time.
 
@@ -138,11 +138,11 @@ In the desktop app, models load from the catalog with live pricing:
 
 ![New evaluation](docs/assets/new-evaluation.png)
 
-Watch generations appear with full lineage — the champion in gold, failed candidates in red, the footer carrying spend, cache hits and the holdout number as they change:
+Watch generations appear with full lineage — the champion in gold, the footer carrying spend, cache hits and the holdout number as they change:
 
 ![Evolution graph](docs/assets/evolution-graph.png)
 
-Click any node for its evolved prompt, the changelog of exactly what created it (here: meta-prompting adding few-shot examples after reading the judge), and per-test scores with the graded output and the judge's reasoning:
+Click any node for its evolved prompt, the changelog of exactly what created it (here: the `[META]` edit that invented the output contract), and per-test scores with the graded output:
 
 ![Node details](docs/assets/node-details.png)
 
