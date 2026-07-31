@@ -594,6 +594,28 @@ export async function createNextGeneration(
 
         const validated = validateOperatorResult(result, operatorName);
 
+        // A result whose prompt AND params match the parent is a paid no-op
+        // (open-bugs 2026-07-31 #1): adopted as-is, its changelog claims a
+        // change that never happened and the node re-measures a prompt already
+        // measured. Record it as a carry instead — honest changelog, no
+        // operator-effectiveness credit, and params inherited exactly so the
+        // evaluation cache serves it for free. Operators that return an honest
+        // CARRY/ERROR line themselves keep their own wording. This chokepoint
+        // covers plugin operators, which never pass mutateNode's gate.
+        const promptUnchanged = validated.prompt.trim() === parent.prompt.trim();
+        const paramsUnchanged = Object.entries(validated.params).every(
+          ([k, v]) => JSON.stringify(v) === JSON.stringify((parent.params as any)[k]),
+        );
+        const alreadyHonest = ['CARRY', 'ERROR'].includes(String(validated.changeLog[0]?.label));
+        if (promptUnchanged && paramsUnchanged && !alreadyHonest) {
+          console.warn(
+            `[Generation] Operator '${operatorName}' returned the parent unchanged for child ${i} — recording a carry-forward, not a change`,
+          );
+          return {
+            ...carry('CARRY', `Operator '${operatorName}' returned the parent prompt unchanged — carried forward`, validated.cost),
+          };
+        }
+
         console.log(`[Generation] Child ${i}: ${operatorName.toUpperCase()} from parent ${parent.id.slice(0, 8)}`);
 
         return {

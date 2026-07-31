@@ -8,7 +8,8 @@
 import type { EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
-import { stripPromptDelimiters, extractJsonArray, fillTemplate, sanitizeForJudge } from '../utils/text.js';
+import { stripPromptDelimiters, extractJsonArray, fillTemplate, sanitizeForJudge, appliedPromptProblem } from '../utils/text.js';
+import type { AppliedPromptProblem } from '../utils/text.js';
 import { withPartialCost } from './operator-cost.js';
 
 /**
@@ -260,9 +261,14 @@ export async function mutateNode(
     }
   }
   
-  // Step 2: Apply edits (no retry needed here, simpler operation)
+  // Step 2: Apply edits — VALIDATED and retried, not adopted blind. A weak or
+  // overloaded service model routinely returns something other than a prompt
+  // here: the edit list itself as JSON (which once became a champion prompt),
+  // the instruction echoed instead of performed, the template's <<< >>>
+  // scaffolding, or the parent byte-for-byte — a paid no-op the engine then
+  // re-measured under a changelog claiming two applied mutations.
   const applyPromptTemplate = getApplyPromptTemplate();
-  const applyPrompt = fillTemplate(applyPromptTemplate, {
+  const applyPromptBase = fillTemplate(applyPromptTemplate, {
     // Sanitized: the operator prompt fences the parent in <<< >>> exactly like
     // the judge prompt does, and the parent is model-authored. Unsanitized, a
     // candidate could close the fence and instruct the model REWRITING it —
@@ -270,37 +276,76 @@ export async function mutateNode(
     basePrompt: sanitizeForJudge(basePrompt),
     edits: JSON.stringify(edits),
   });
-  
-  const applyResult = await serviceAdapter.call({
-    model: config.serviceModel.model,
-    prompt: applyPrompt,
-    temperature: 0.3,
-    maxTokens,
-    timeoutMs: config.callTimeoutMs,
-  });
-  
-  totalPromptTokens += applyResult.promptTokens;
-  totalCompletionTokens += applyResult.completionTokens;
-  totalUsd += applyResult.usd;
-  totalCalls++;
-  
-  if (!applyResult.output || applyResult.output.trim() === '') {
-    throw new Error('Empty response from service model (apply step)');
-  }
-  
-  const newPrompt = stripPromptDelimiters(applyResult.output);
-  
-  // Build changelog
-  const changeLog: ChangeLogLine[] = edits!.map(e => ({
-    label: 'MUTATION' as const,
-    text: e.edit || 'Unknown edit',
-  }));
-  
-  console.log(`[Mutation] Success! Total cost: $${totalUsd.toFixed(6)}, ${totalCalls} calls`);
 
+  // The model saw the SANITIZED parent, so a verbatim echo equals that form,
+  // not necessarily the raw one — compare against both.
+  const applyCheck = {
+    parents: [basePrompt, sanitizeForJudge(basePrompt)],
+    instructions: edits!.map(e => String((e as any).edit ?? '')),
+  };
+
+  let lastProblem: AppliedPromptProblem | null = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const applyPrompt = attempt === 0
+      ? applyPromptBase
+      : `${applyPromptBase}\n\nIMPORTANT: Your previous reply was rejected because it ` +
+        `${lastProblem?.reason ?? 'was unusable'}. Reply with the complete rewritten prompt TEXT only — ` +
+        'not the edit instructions, not JSON, no <<< >>> delimiters.';
+
+    const applyResult = await serviceAdapter.call({
+      model: config.serviceModel.model,
+      prompt: applyPrompt,
+      temperature: 0.3,
+      maxTokens,
+      timeoutMs: config.callTimeoutMs,
+    });
+
+    totalPromptTokens += applyResult.promptTokens;
+    totalCompletionTokens += applyResult.completionTokens;
+    totalUsd += applyResult.usd;
+    totalCalls++;
+
+    const newPrompt = stripPromptDelimiters(applyResult.output ?? '');
+    lastProblem = appliedPromptProblem(newPrompt, applyCheck);
+
+    if (!lastProblem) {
+      const changeLog: ChangeLogLine[] = edits!.map(e => ({
+        label: 'MUTATION' as const,
+        text: e.edit || 'Unknown edit',
+      }));
+
+      console.log(`[Mutation] Success! Total cost: $${totalUsd.toFixed(6)}, ${totalCalls} calls`);
+
+      return {
+        prompt: newPrompt,
+        changeLog,
+        cost: {
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
+          usd: totalUsd,
+          calls: totalCalls,
+        },
+      };
+    }
+
+    console.warn(
+      `[Mutation] Apply attempt ${attempt + 1}/${maxRetries} rejected — the applied prompt ${lastProblem.reason}`,
+    );
+  }
+
+  // Exhausted. The parent is a valid prompt — carry it under an HONEST
+  // changelog instead of fabricated MUTATION lines, and instead of throwing,
+  // which would destroy a generation-0 slot in the fill path.
+  console.warn(
+    `[Mutation] All ${maxRetries} apply attempt(s) rejected (${lastProblem!.reason}) — carrying the parent unchanged. ` +
+    `Total cost: $${totalUsd.toFixed(6)}`,
+  );
   return {
-    prompt: newPrompt,
-    changeLog,
+    prompt: basePrompt,
+    changeLog: [{
+      label: 'CARRY' as const,
+      text: `Mutation rejected after ${maxRetries} attempt(s): the applied prompt ${lastProblem!.reason} — carried the parent unchanged`,
+    }],
     cost: {
       promptTokens: totalPromptTokens,
       completionTokens: totalCompletionTokens,

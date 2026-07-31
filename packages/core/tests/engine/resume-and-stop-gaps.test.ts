@@ -232,6 +232,43 @@ describe('a run that could not be graded says so, in the database', () => {
     fs.rmSync(db, { force: true });
   }, 120000);
 
+  it('reconciles the persisted count to TEST-RESULT units before the final write', async () => {
+    // Open-bugs 2026-07-31 #3: the reconcile call in finishEvaluation
+    // (`state.run.ungradedTests = reconcileUngradedCount(...)` before
+    // persistRun) was proven deletable with the whole suite green — every
+    // existing scenario used samplesPerTest 1, where the live per-SAMPLE
+    // counter happens to equal the per-TEST-ROW sweep. At samplesPerTest 3 an
+    // unreadable judge drives the live counter to 3 while exactly one row is
+    // ungraded; only the reconcile wiring makes the durable record say 1.
+    registerProvider({ adapter: {
+      name: 'priced',
+      estimateTokens: () => ({ prompt: 10 }),
+      call: async (opts: any) => {
+        const isJudge = /Rubric|score/i.test(opts.prompt);
+        return {
+          output: isJudge ? 'nice answer, I liked it' : 'ANSWER',
+          promptTokens: 10, completionTokens: 10, latencyMs: 1, usd: USD,
+        };
+      },
+    } as any });
+
+    const db = tmp();
+    const final = await runOnce(makeConfig({
+      population: { initialSize: 1, generationSize: 1, seedPrompt: 'SEED', fill: 'auto' },
+      testSet: [{ id: 't1', name: 'train', mode: 'llm_grade', prompt: 'A' }],
+      operators: { mutationShare: 0, crossoverShare: 0 },
+      samplesPerTest: 3,
+    }), db, 'ung-3');
+
+    const leaves = final.generations.flat()
+      .reduce((n: number, node: any) => n + (node.tests ?? []).filter((t: any) => t.ungraded).length, 0);
+    expect(leaves).toBe(1);
+    // The row count, not the 3 the sample counter reached mid-run.
+    expect(final.ungradedTests).toBe(1);
+
+    fs.rmSync(db, { force: true });
+  }, 120000);
+
   it('keeps the count when the node FAILS before producing any tests', async () => {
     // THE case the tally exists for, and the one the previous test cannot see:
     // processNode assigns `node.tests` only on success, so a node that throws

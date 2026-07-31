@@ -10,7 +10,8 @@ import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
 import { withPartialCost } from './operator-cost.js';
 import { sanitizeForJudge } from '../utils/text.js';
-import { stripPromptDelimiters, extractJsonArray, fillTemplate } from '../utils/text.js';
+import { stripPromptDelimiters, extractJsonArray, fillTemplate, appliedPromptProblem } from '../utils/text.js';
+import type { AppliedPromptProblem } from '../utils/text.js';
 
 const DEFAULT_METAPROMPT_WITH_FAILURES = `SYSTEM: You are a prompt surgeon. You analyze concrete test failures to suggest targeted fixes. You can ADD, REMOVE, or REWRITE any part of the prompt — including removing instructions that conflict with what the tests require.
 USER: Parent Prompt: <<<
@@ -227,42 +228,85 @@ export async function metaPromptNode(
     throw new Error(`Failed to parse meta-prompt edits: ${error instanceof Error ? error.message : String(error)}`);
   }
   
-  // Step 2: Apply edits
-  const applyPrompt = fillTemplate(templates.apply, {
+  // Step 2: Apply edits — VALIDATED and retried before adoption (open-bugs
+  // 2026-07-31 #1/#2): the service model can echo the edits JSON or the
+  // instruction instead of performing it, or return the parent byte-for-byte.
+  const maxRetries = Math.max(1, config.retries ?? 3);
+  const applyPromptBase = fillTemplate(templates.apply, {
     parentPrompt: sanitizeForJudge(parent.prompt),
     edits: JSON.stringify(edits),
   });
-  
-  const applyResult = await serviceAdapter.call({
-    model: config.serviceModel.model,
-    prompt: applyPrompt,
-    temperature: 0.3,
-    maxTokens,
-    timeoutMs: config.callTimeoutMs,
-  });
-  
-  totalPromptTokens += applyResult.promptTokens;
-  totalCompletionTokens += applyResult.completionTokens;
-  totalUsd += applyResult.usd;
-  totalCalls++;
-  
-  if (!applyResult.output || applyResult.output.trim() === '') {
-    throw new Error('Empty response from meta-prompt apply');
-  }
-  
-  return {
-    prompt: stripPromptDelimiters(applyResult.output),
-    changeLog: edits.map(e => ({
-      label: 'META' as const,
-      text: e.edit || 'Unknown meta-edit',
-    })),
-    cost: {
-      promptTokens: totalPromptTokens,
-      completionTokens: totalCompletionTokens,
-      usd: totalUsd,
-      calls: totalCalls,
-    },
+  // The model saw the SANITIZED parent, so an echo equals that form too.
+  const applyCheck = {
+    parents: [parent.prompt, sanitizeForJudge(parent.prompt)],
+    instructions: edits.map(e => String((e as any)?.edit ?? '')),
   };
+
+  let lastProblem: AppliedPromptProblem | null = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const applyPrompt = attempt === 0
+      ? applyPromptBase
+      : `${applyPromptBase}\n\nIMPORTANT: Your previous reply was rejected because it ` +
+        `${lastProblem?.reason ?? 'was unusable'}. Reply with the complete rewritten prompt TEXT only — ` +
+        'not the edit instructions, not JSON, no <<< >>> delimiters.';
+
+    const applyResult = await serviceAdapter.call({
+      model: config.serviceModel.model,
+      prompt: applyPrompt,
+      temperature: 0.3,
+      maxTokens,
+      timeoutMs: config.callTimeoutMs,
+    });
+
+    totalPromptTokens += applyResult.promptTokens;
+    totalCompletionTokens += applyResult.completionTokens;
+    totalUsd += applyResult.usd;
+    totalCalls++;
+
+    const newPrompt = stripPromptDelimiters(applyResult.output ?? '');
+    lastProblem = appliedPromptProblem(newPrompt, applyCheck);
+
+    if (!lastProblem) {
+      return {
+        prompt: newPrompt,
+        changeLog: edits.map(e => ({
+          label: 'META' as const,
+          text: e.edit || 'Unknown meta-edit',
+        })),
+        cost: {
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
+          usd: totalUsd,
+          calls: totalCalls,
+        },
+      };
+    }
+
+    console.warn(
+      `[MetaPrompt] Apply attempt ${attempt + 1}/${maxRetries} rejected — the applied prompt ${lastProblem.reason}`,
+    );
+  }
+
+  // A result identical to the parent is not an error — carry the parent under
+  // an honest CARRY line rather than META lines claiming applied edits.
+  if (lastProblem!.code === 'noop') {
+    console.warn(`[MetaPrompt] All ${maxRetries} apply attempt(s) returned the parent unchanged — carrying it`);
+    return {
+      prompt: parent.prompt,
+      changeLog: [{
+        label: 'CARRY' as const,
+        text: `Meta-prompt rejected after ${maxRetries} attempt(s): the applied prompt ${lastProblem!.reason} — carried the parent unchanged`,
+      }],
+      cost: {
+        promptTokens: totalPromptTokens,
+        completionTokens: totalCompletionTokens,
+        usd: totalUsd,
+        calls: totalCalls,
+      },
+    };
+  }
+
+  throw new Error(`Meta-prompt apply rejected after ${maxRetries} attempt(s): the applied prompt ${lastProblem!.reason}`);
 
   } catch (error) {
     // Meta-prompting is enabled by default and makes TWO billed calls; the

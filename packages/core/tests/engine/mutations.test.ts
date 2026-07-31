@@ -9,7 +9,7 @@ vi.mock('../../src/providers/index.js', () => ({
 
 import { getProviderAdapter } from '../../src/providers/index.js';
 
-function makeConfig(): EvaluationConfig {
+function makeConfig(over: Partial<EvaluationConfig> = {}): EvaluationConfig {
   return {
     id: 'config-1',
     name: 'test',
@@ -24,6 +24,7 @@ function makeConfig(): EvaluationConfig {
     parallelLimit: 5,
     serviceModelMaxTokens: 20000,
     retries: 3,
+    ...over,
   };
 }
 
@@ -178,5 +179,83 @@ describe('mutateNode', () => {
     mockAdapter([emptyResponse]);
 
     await expect(mutateNode('Original', makeConfig())).rejects.toThrow();
+  });
+});
+
+/**
+ * Open-bugs 2026-07-31 #1/#2: the apply step's output was adopted with no
+ * validation at all. A no-op came back with a changelog claiming two applied
+ * mutations; an instruction echo and the proposal JSON itself were evaluated
+ * as candidate prompts (one became a champion).
+ */
+describe('mutateNode validates the APPLIED prompt', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const usage = { promptTokens: 100, completionTokens: 50, usd: 0.001, latencyMs: 100 };
+  const proposal = {
+    ...usage,
+    output: JSON.stringify([
+      { label: 'MUTATION', edit: '[Rewrite] Rewrite the role/identity statement to better align with the actual task requirements' },
+    ]),
+  };
+
+  it('retries the apply step when the model echoes the proposal JSON, then adopts the rewrite', async () => {
+    const calls = mockAdapter([
+      proposal,
+      { ...usage, output: '[{"label":"MUTATION","edit":"append the token ALPHA"}]' },
+      { ...usage, output: 'You are a precise task assistant. Answer directly.' },
+    ]);
+
+    const result = await mutateNode('Answer the question.', makeConfig());
+    expect(result.prompt).toBe('You are a precise task assistant. Answer directly.');
+    expect(result.changeLog[0].label).toBe('MUTATION');
+    // The rejected attempt was billed and must be accounted.
+    expect(result.cost.calls).toBe(3);
+    // The retry told the model WHY the previous reply was unusable.
+    const retryPrompt = calls.mock.calls[2][0].prompt as string;
+    expect(retryPrompt).toMatch(/rejected/i);
+  });
+
+  it('carries the parent with an honest changelog when the model keeps echoing the instruction', async () => {
+    const echo = {
+      ...usage,
+      output: 'Rewrite the role/identity statement to better align with the actual task requirements: You…',
+    };
+    mockAdapter([proposal, echo, echo]);
+
+    const result = await mutateNode('Answer the question.', makeConfig({ retries: 2 }));
+    expect(result.prompt).toBe('Answer the question.');
+    // NOT a fabricated list of applied mutations — the observed changelog lie.
+    expect(result.changeLog).toHaveLength(1);
+    expect(result.changeLog[0].label).toBe('CARRY');
+    expect(result.changeLog[0].text).toMatch(/instruction/i);
+    expect(result.cost.calls).toBe(3);
+  });
+
+  it('carries the parent when the applied prompt comes back identical (paid no-op)', async () => {
+    const noop = { ...usage, output: 'Answer the question.' };
+    mockAdapter([proposal, noop, noop]);
+
+    const result = await mutateNode('Answer the question.', makeConfig({ retries: 2 }));
+    expect(result.prompt).toBe('Answer the question.');
+    expect(result.changeLog).toHaveLength(1);
+    expect(result.changeLog[0].label).toBe('CARRY');
+    expect(result.changeLog[0].text).toMatch(/identical/i);
+    // Both apply attempts plus the proposal were billed.
+    expect(result.cost.calls).toBe(3);
+  });
+
+  it('adopts a rewrite that passes on the second apply attempt after a no-op', async () => {
+    mockAdapter([
+      proposal,
+      { ...usage, output: 'Answer the question.' },
+      { ...usage, output: 'You are the task-focused assistant. Answer the question directly.' },
+    ]);
+
+    const result = await mutateNode('Answer the question.', makeConfig());
+    expect(result.prompt).toBe('You are the task-focused assistant. Answer the question directly.');
+    expect(result.changeLog[0].label).toBe('MUTATION');
   });
 });

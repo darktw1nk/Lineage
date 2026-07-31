@@ -194,3 +194,42 @@ describe('metaPromptNode', () => {
     ).rejects.toThrow();
   });
 });
+
+/** Open-bugs 2026-07-31 #1/#2: the applied output was adopted with no validation. */
+describe('metaPromptNode validates the applied prompt', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const usage = { promptTokens: 100, completionTokens: 50, usd: 0.001, latencyMs: 100 };
+  const proposal = {
+    ...usage,
+    output: JSON.stringify([{ label: 'META', edit: 'Add explicit output format rules to the prompt' }]),
+  };
+  const PARENT = 'Summarize the meeting notes into action items.';
+
+  it('retries the apply step when the edits JSON is echoed back, then adopts the rewrite', async () => {
+    mockAdapter([
+      proposal,
+      { ...usage, output: '[{"label":"META","edit":"Add explicit output format rules to the prompt"}]' },
+      { ...usage, output: 'Summarize the meeting notes into action items. Output one bullet per item.' },
+    ]);
+
+    const result = await metaPromptNode(makeNode('p', PARENT), makeConfig(), []);
+    expect(result.prompt).toBe('Summarize the meeting notes into action items. Output one bullet per item.');
+    expect(result.changeLog[0].label).toBe('META');
+    expect(result.cost.calls).toBe(3);
+  });
+
+  it('carries the parent under a CARRY line when the apply keeps returning it unchanged', async () => {
+    const noop = { ...usage, output: PARENT };
+    mockAdapter([proposal, noop, noop, noop]);
+
+    const result = await metaPromptNode(makeNode('p', PARENT), makeConfig(), []);
+    expect(result.prompt).toBe(PARENT);
+    expect(result.changeLog).toHaveLength(1);
+    expect(result.changeLog[0].label).toBe('CARRY');
+    expect(result.changeLog[0].text).toMatch(/identical/i);
+    expect(result.cost.calls).toBe(4);
+  });
+});

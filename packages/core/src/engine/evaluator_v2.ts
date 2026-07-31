@@ -673,7 +673,23 @@ async function mutatePopulationInBackground(
       node.prompt = result.prompt;
       node.changeLog = result.changeLog;
       node.status = 'awaiting';
-      
+
+      // A fill that carried the seed forward duplicates node 0's measurement —
+      // but seeded runs derive a DIFFERENT provider seed per gen-0 sibling, so
+      // the identical prompt missed the cache and was re-billed in full
+      // (open-bugs 2026-07-31 #1: 25% of the observed generation). Align the
+      // params with node 0 so the cache / in-flight dedup serves it instead.
+      const seedNode = shellNodes[0];
+      if (
+        node.prompt === seedNode.prompt &&
+        JSON.stringify(node.params.model) === JSON.stringify(seedNode.params.model) &&
+        node.params.temperature === seedNode.params.temperature
+      ) {
+        if (seedNode.params.seed === undefined) delete node.params.seed;
+        else node.params.seed = seedNode.params.seed;
+      }
+
+
       // Track costs
       accrueCost(state, COST_LABELS.fill, state.config.serviceModel, {
         usd: result.cost.usd, promptTokens: result.cost.promptTokens,

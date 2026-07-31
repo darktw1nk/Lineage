@@ -115,6 +115,58 @@ describe('a malformed operator result is refused, never used', () => {
   });
 });
 
+describe('a no-op operator result is recorded as a carry, not as a change', () => {
+  // Open-bugs 2026-07-31 #1, observed in a real run: a mutation returned the
+  // parent byte-for-byte and the node was adopted with a changelog claiming
+  // two applied mutations, then re-measured at full cost. This chokepoint
+  // covers PLUGIN operators too, which never pass through mutateNode's gate.
+  it('replaces a fabricated changelog with CARRY when prompt and params are unchanged', async () => {
+    registerProbe({
+      prompt: 'prompt-p1',
+      changeLog: [{ label: 'MUTATION', text: 'Claimed a rewrite that never happened' }],
+      cost: GOOD_COST,
+    });
+    const { newNodes } = await run([makeParent('p1')], makeConfig());
+    for (const n of newNodes) {
+      expect(n.prompt).toBe('prompt-p1');
+      expect(n.changeLog[0].label).toBe('CARRY');
+      expect(n.changeLog.some(l => l.label === 'MUTATION')).toBe(false);
+      // A no-op must not be credited to the operator's effectiveness.
+      expect((n as any)._operatorType).toBeNull();
+      // Params are inherited exactly, so the evaluation cache can serve it.
+      expect(n.params.temperature).toBe(0.7);
+    }
+  });
+
+  it('still credits an operator that changes only params (param/model variation)', async () => {
+    registerProbe({
+      prompt: 'prompt-p1',
+      params: { temperature: 1.2 },
+      changeLog: [{ label: 'PARAM', text: 'temperature 0.7 → 1.2' }],
+      cost: GOOD_COST,
+    });
+    const { newNodes } = await run([makeParent('p1')], makeConfig());
+    for (const n of newNodes) {
+      expect(n.changeLog[0].label).toBe('PARAM');
+      expect((n as any)._operatorType).toBe('probe');
+      expect(n.params.temperature).toBe(1.2);
+    }
+  });
+
+  it('leaves an operator\'s own honest CARRY result alone', async () => {
+    registerProbe({
+      prompt: 'prompt-p1',
+      changeLog: [{ label: 'CARRY', text: 'Mutation rejected after 3 attempt(s) — carried the parent unchanged' }],
+      cost: GOOD_COST,
+    });
+    const { newNodes } = await run([makeParent('p1')], makeConfig());
+    for (const n of newNodes) {
+      expect(n.changeLog).toHaveLength(1);
+      expect(n.changeLog[0].text).toMatch(/rejected after 3/);
+    }
+  });
+});
+
 describe('operators cannot reach into live state', () => {
   it('mutating the parent it was handed does not damage the scored parent', async () => {
     // A plugin that wrote to `parent` rewrote the already-evaluated node in

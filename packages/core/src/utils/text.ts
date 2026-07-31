@@ -205,6 +205,120 @@ export function stripPromptDelimiters(text: string): string {
   return result;
 }
 
+/** What an operator's applied prompt was rejected for, or null when usable. */
+export interface AppliedPromptProblem {
+  code: 'empty' | 'noop' | 'json' | 'echo' | 'scaffolding';
+  reason: string;
+}
+
+export interface AppliedPromptCheck {
+  /** The prompt(s) the operator started from. A result equal to one is a paid no-op. */
+  parents?: string[];
+  /** Edit instructions sent to the apply step. A result reproducing one is an echo. */
+  instructions?: string[];
+}
+
+/** Case- and whitespace-insensitive form for containment comparisons. */
+function normalizeForEcho(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** Parse `text` as JSON after unwrapping a ```fence```, or return undefined. */
+function parseJsonValue(text: string): unknown {
+  let candidate = text.trim();
+  const fenced = candidate.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/);
+  if (fenced) candidate = fenced[1].trim();
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The shape of the mutation/meta proposal: a list of {label?, edit} objects. */
+function isEditListShape(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0 &&
+    value.every(e => e && typeof e === 'object' &&
+      (typeof (e as any).edit === 'string' || typeof (e as any).label === 'string'));
+}
+
+/**
+ * Decide whether an operator's APPLIED text is actually a prompt.
+ *
+ * Observed failures this gate exists for (2026-07-31 open-bugs #1/#2):
+ *  - the apply step returned the parent byte-for-byte, and the engine adopted
+ *    it with a changelog claiming two applied mutations, then paid to
+ *    re-measure a prompt it had already measured;
+ *  - the service model echoed the mutation INSTRUCTION ("Rewrite the
+ *    role/identity statement to…") and that echo was evaluated as a candidate;
+ *  - the proposal JSON (`[{"label":"ADD","edit":…}]`) became the champion
+ *    prompt of a run that reported success.
+ *
+ * Deliberately narrow, because the obvious blanket rules reject REAL prompts:
+ * a structured-extraction seed prompt may itself be JSON, and prompts written
+ * in the engine's own <<<SYSTEM>>>…<<<END>>> style legitimately contain
+ * fences. So: JSON is rejected only when it is the operator's own edit-list
+ * shape or when no parent was JSON; fences are rejected only when no parent
+ * had any; instruction echoes must lead the text or constitute most of it.
+ */
+export function appliedPromptProblem(
+  candidate: string,
+  check: AppliedPromptCheck = {},
+): AppliedPromptProblem | null {
+  const trimmed = candidate.trim();
+  const parents = (check.parents ?? []).filter((p): p is string => typeof p === 'string');
+
+  if (trimmed === '') {
+    return { code: 'empty', reason: 'is empty' };
+  }
+
+  // Scaffolding the operator template introduced. The apply template fences the
+  // parent in <<< >>>; a reply that still contains those markers reproduced the
+  // template rather than filling it — unless the parent prompt already uses
+  // fence markers as part of its own style.
+  const hasFence = (t: string) => t.includes('<<<') || t.includes('>>>');
+  if (hasFence(trimmed) && !parents.some(hasFence)) {
+    return { code: 'scaffolding', reason: 'contains the <<< >>> operator scaffolding' };
+  }
+
+  const parsed = parseJsonValue(trimmed);
+  if (parsed !== undefined && parsed !== null && typeof parsed === 'object') {
+    if (isEditListShape(parsed)) {
+      return { code: 'json', reason: 'is the operator edit list echoed back as JSON' };
+    }
+    const parentIsJson = parents.some(p => {
+      const pj = parseJsonValue(p);
+      return pj !== undefined && pj !== null && typeof pj === 'object';
+    });
+    if (!parentIsJson) {
+      return { code: 'json', reason: 'is JSON, not a prompt' };
+    }
+  }
+
+  const norm = normalizeForEcho(trimmed);
+  for (const instruction of check.instructions ?? []) {
+    if (typeof instruction !== 'string') continue;
+    // Drop the "[Category] " prefix the strategy catalog adds — the echo we
+    // observed reproduced the instruction body without it.
+    const body = normalizeForEcho(instruction.replace(/^\s*\[[^\]]{1,40}\]\s*/, ''));
+    if (body.length < 20) continue; // too short to be evidence either way
+    const startsWithIt = norm.startsWith(body) ||
+      // tolerate a short preamble ("Sure! …") before the echoed instruction
+      (norm.includes(body) && norm.indexOf(body) <= 30 && norm.length <= body.length * 1.5);
+    if (startsWithIt) {
+      return { code: 'echo', reason: 'reproduces the edit instruction instead of applying it' };
+    }
+  }
+
+  for (const parent of parents) {
+    if (trimmed === parent.trim()) {
+      return { code: 'noop', reason: 'is identical to the parent prompt' };
+    }
+  }
+
+  return null;
+}
+
 /**
  * Extract a JSON array from a service-model response. Models (especially
  * small/cheap ones) often wrap the array in markdown fences or surround it

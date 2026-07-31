@@ -132,3 +132,60 @@ describe('crossoverNodes', () => {
     ).rejects.toThrow();
   });
 });
+
+/** Open-bugs 2026-07-31 #1/#2: the merged output was adopted with no validation. */
+describe('crossoverNodes validates the merged prompt', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const usage = { promptTokens: 100, completionTokens: 50, usd: 0.001, latencyMs: 100 };
+
+  function mockSequence(outputs: string[]) {
+    let i = 0;
+    const callFn = vi.fn().mockImplementation(async () => {
+      if (i >= outputs.length) throw new Error('No more mock responses');
+      return { ...usage, output: outputs[i++] };
+    });
+    (getProviderAdapter as any).mockReturnValue({ call: callFn, name: 'openai' });
+    return callFn;
+  }
+
+  const A = makeNode('aaaa-1111', 'Answer questions about geography, tersely.');
+  const B = makeNode('bbbb-2222', 'You are a precise assistant. Cite sources.');
+
+  it('retries when the model echoes the template scaffolding, then adopts the merge', async () => {
+    const callFn = mockSequence([
+      'A: <<<\nAnswer questions about geography, tersely.\n>>>\nB: <<<…>>>',
+      'You are a precise geography assistant. Answer tersely and cite sources.',
+    ]);
+
+    const result = await crossoverNodes(A, B, makeConfig());
+    expect(result.prompt).toBe('You are a precise geography assistant. Answer tersely and cite sources.');
+    expect(result.changeLog[0].label).toBe('CROSSOVER');
+    expect(callFn).toHaveBeenCalledTimes(2);
+    expect(result.cost.calls).toBe(2);
+  });
+
+  it('carries parent A with an honest CARRY line when the merge equals a parent', async () => {
+    mockSequence([A.prompt, A.prompt, A.prompt]);
+
+    const result = await crossoverNodes(A, B, makeConfig());
+    expect(result.prompt).toBe(A.prompt);
+    expect(result.changeLog).toHaveLength(1);
+    expect(result.changeLog[0].label).toBe('CARRY');
+    expect(result.changeLog[0].text).toMatch(/identical/i);
+    // Every rejected attempt was billed and must be accounted.
+    expect(result.cost.calls).toBe(3);
+  });
+
+  it('throws (with the spend attached) when the model keeps returning JSON', async () => {
+    mockSequence([
+      '{"merged":"prompt"}',
+      '{"merged":"prompt"}',
+      '{"merged":"prompt"}',
+    ]);
+
+    await expect(crossoverNodes(A, B, makeConfig())).rejects.toThrow(/JSON/i);
+  });
+});

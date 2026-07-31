@@ -76,4 +76,20 @@ describe('the ungraded count reconciles every source', () => {
     r.generations[0][0].tests[0].ungraded = true;
     expect(reconcileUngradedCount(r)).toBe(1);
   });
+
+  it('a failed node absent from every source counts 0, not NaN', () => {
+    // Open-bugs 2026-07-31 #5: this is the COMMON path — every failed or
+    // skipped node whose failure was never tallied takes the final `?? 0`.
+    // Dropping it makes `total += undefined` = NaN, which JSON.stringify then
+    // persists as `null`. Both assertions fail on NaN (NaN !== anything).
+    const crashed = run({ generations: [[{ id: 'n1', status: 'failed' }]] });
+    expect(reconcileUngradedCount(crashed)).toBe(0);
+
+    // And an untallied failed node must not poison counts other nodes earned.
+    const mixed = run({ generations: [[
+      { id: 'n1', status: 'failed' },
+      { id: 'n2', tests: [{ testId: 't1', score: 5, ungraded: true }] },
+    ]] });
+    expect(reconcileUngradedCount(mixed)).toBe(1);
+  });
 });

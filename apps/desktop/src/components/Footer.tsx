@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Pause, Play, Square, Loader2, Settings2 } from 'lucide-react';
 import type { UUID } from '../types';
 import { useEvaluation } from '../hooks/useEvaluation';
+import { holdoutTile } from '../utils/holdoutTile';
 
 interface FooterProps {
   evaluationId: UUID | null;
@@ -184,14 +185,22 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
           <div className="text-sm font-medium">{evaluation.cacheHits}</div>
         </div>
 
-        {evaluation.holdout?.seed && evaluation.holdout?.champion && (
-          <div>
-            <div className="text-xs text-muted-foreground">Holdout</div>
-            <div className="text-sm font-medium">
-              {evaluation.holdout.seed.score.toFixed(2)} → {evaluation.holdout.champion.score.toFixed(2)}
+        {(() => {
+          // Rendered for EVERY state of a configured holdout, not only the
+          // both-halves-scored one: a skipped/incomplete holdout used to render
+          // nothing, making "no tile" ambiguous with "not configured" — and
+          // ungraded placeholder rows displayed as if they were measurements.
+          const tile = holdoutTile(evaluation.holdout, evaluation.holdoutSkippedReason);
+          if (!tile) return null;
+          return (
+            <div title={tile.title}>
+              <div className={`text-xs ${tile.warn ? 'text-amber-500' : 'text-muted-foreground'}`}>Holdout</div>
+              <div className={`text-sm font-medium ${tile.warn ? 'text-amber-500' : ''}`}>
+                {tile.value}{tile.warn ? ' ⚠️' : ''}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {!!evaluation.ungradedTests && (
           // The desktop had no reader for this at all, so fabricated 5.0s were

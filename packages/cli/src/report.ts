@@ -729,12 +729,25 @@ export function generateReport(
     const wins: string[] = [];
     const losses: string[] = [];
     const unchanged: string[] = [];
+    const notGraded: string[] = [];
 
     for (let t = 0; t < seedNode.tests.length; t++) {
       const seedTest = seedNode.tests[t];
       const bestTest = bestNode.tests.find(x => x.testId === seedTest.testId);
       if (!bestTest) continue;
       const testName = findTestDef(config, seedTest.testId)?.name ?? `Test ${t + 1}`;
+      // The SAME rule as the Improvement table above: an ungraded leaf is a
+      // placeholder 5.0, not a measurement. Reading raw `.score` here made one
+      // document print `| TRAIN | 0.0 ⚠️ | 0.0 | 0.0 |` in the table and
+      // "**TRAIN** (-5): … clear answer" in Regressions, three lines apart —
+      // a fabricated verdict quoted off a judge that was never read.
+      const seedUngraded = !!(seedTest as any).ungraded;
+      const bestUngraded = !!(bestTest as any).ungraded;
+      if (seedUngraded || bestUngraded) {
+        const side = seedUngraded && bestUngraded ? 'neither side' : seedUngraded ? 'the seed' : 'the best prompt';
+        notGraded.push(`- **${testName}**: ${side} could not be graded, so there is no verdict for this pair.`);
+        continue;
+      }
       const seedScore = seedTest.score ?? 0;
       const bestScore = bestTest.score ?? 0;
       const delta = bestScore - seedScore;
@@ -769,6 +782,13 @@ export function generateReport(
       lines.push('### Unchanged');
       lines.push('');
       lines.push(...unchanged);
+      lines.push('');
+    }
+
+    if (notGraded.length > 0) {
+      lines.push('### Not graded');
+      lines.push('');
+      lines.push(...notGraded);
       lines.push('');
     }
   }
