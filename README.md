@@ -70,7 +70,7 @@ Weights are normalized automatically — only the ratios matter. Set a weight to
 
 ## Tests are the spec
 
-Two grading modes, mixable in one test set:
+Four grading modes, mixable in one test set:
 
 ```json
 "testSet": [
@@ -114,7 +114,7 @@ Two grading modes, mixable in one test set:
 | `parallelLimit` | Global concurrency across all API calls |
 | **Plugins** | Drop a JS file in the plugins folder to add operators or providers — even the five built-in operators run through the same registry ([docs/plugins.md](docs/plugins.md)) |
 
-Everything is tracked: token counts, per-node cost, cache hits (identical prompt+params are never evaluated twice), and a full cost ledger. And everything is **estimated before you spend**: the desktop modal shows a live `≈ $low – $high · ~N calls` band as you configure, and `--estimate` prints the same preflight breakdown from the CLI without running anything.
+Everything is tracked: token counts, per-node cost, cache hits (identical prompt+params are never evaluated twice), and a per-purpose cost breakdown the report reconciles against the preflight estimate ("Where the money went"). And everything is **estimated before you spend**: the desktop modal shows a live `≈ $low – $high · ~N calls` band as you configure, and `--estimate` prints the same preflight breakdown from the CLI without running anything.
 
 ## Two ways to run it
 
@@ -157,7 +157,7 @@ docs/cli.md       Full CLI + config reference
 docs/plugins.md   Plugin author guide
 ```
 
-Architecture details in [CLAUDE.md](CLAUDE.md). Tests: `npm test` (347 across all packages, including an end-to-end evolution driven entirely by plugins).
+Architecture details in [CLAUDE.md](CLAUDE.md). Tests: `npm test` (1,269 across all packages — including end-to-end evolutions driven entirely by plugins, and twenty adversarial bug-hunt passes' worth of regression pins; the hunt logs live in [docs/analysis/](docs/analysis/)).
 
 ## License
 
