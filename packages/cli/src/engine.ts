@@ -19,7 +19,7 @@ import type {
 
 type HoldoutResult = NonNullable<EvaluationRun['holdout']>;
 import { createCliStore } from './store.js';
-import { setStore, selectChampion } from '@promptengine/core';
+import { setStore, selectChampion, readSpend, getDatabase } from '@promptengine/core';
 import * as display from './display.js';
 
 // ---------------------------------------------------------------------------
@@ -236,6 +236,22 @@ export interface RunEvolutionOptions {
  * Run a full evolution from the CLI.
  * Persists config + run to DB, collects all data, returns rich result.
  */
+/**
+ * The larger of the checkpoint total and the durable spend sidecar.
+ *
+ * The checkpoint is written periodically; the sidecar records every settled
+ * call. After a crash the sidecar is the correct, larger figure, and the engine
+ * already adopts it — only the banner still quoted the checkpoint.
+ */
+function resumeSpend(run: any): number {
+  const checkpoint = run?.totals?.usd ?? 0;
+  try {
+    return Math.max(checkpoint, readSpend(getDatabase().dbPath, run.id)?.totals?.usd ?? 0);
+  } catch {
+    return checkpoint;
+  }
+}
+
 export async function runEvolution(
   config: EvaluationConfig,
   options?: RunEvolutionOptions,
@@ -434,7 +450,13 @@ export async function runEvolution(
     const finishedCount = run.generations.flat().filter((n) => n.status === 'finished').length;
     const from = run.generations.length > 0 ? `generation ${run.generations.length - 1}` : 'the start';
     process.stderr.write(
-      `Resuming run ${run.id.slice(0, 8)} from ${from} (${finishedCount} finished nodes, $${run.totals.usd.toFixed(4)} already spent)\n\n`,
+      // Prefer the SPEND LEDGER over the checkpoint. The checkpoint is written
+      // periodically; the sidecar records every settled call, so after a crash
+      // it is the larger and correct figure — the engine already adopts it, and
+      // the banner quoting the checkpoint understated real spend to the user
+      // ($0.0010 against a true $0.0011452).
+      `Resuming run ${run.id.slice(0, 8)} from ${from} (${finishedCount} finished nodes, ` +
+      `$${resumeSpend(run).toFixed(4)} already spent)\n\n`,
     );
     // Completed playoffs are checkpointed on the run and never re-judged
     // (dedupe guard) — seed the collector so results.json keeps them.

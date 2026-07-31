@@ -73,10 +73,10 @@ function looksLikeVerdict(output: string): boolean {
   // \uXXXX escape, which JSON.parse resolves - so `Winner: B`, `output B is
   // better` and an escaped winner value all VOIDED the unit instead of costing
   // the forger. Reuse parseVerdict itself: by construction it cannot drift.
-  return parseVerdict(output) !== 'unreadable';
+  return parseVerdict(output, [], true) !== 'unreadable';
 }
 
-function parseVerdict(raw: string, echoed: readonly string[] = []): 'A' | 'B' | 'tie' | 'unreadable' {
+function parseVerdict(raw: string, echoed: readonly string[] = [], quiet = false): 'A' | 'B' | 'tie' | 'unreadable' {
   let text = raw.trim();
   if (text.startsWith('```')) {
     text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
@@ -145,7 +145,9 @@ function parseVerdict(raw: string, echoed: readonly string[] = []): 'A' | 'B' | 
   // one character: make the reply unparseable, collect 0.5/0.5, and the margin
   // drops under MIN_DECISIVE_MARGIN so the entire playoff is discarded — and
   // the inflated fitness it exists to check stands unopposed.
-  console.warn('[Playoff] Unreadable verdict:', raw.slice(0, 120));
+  // Attribution calls this on CANDIDATE text, twice per unreadable unit, which
+  // filled the log an operator greps for judge trouble with candidate output.
+  if (!quiet) console.warn('[Playoff] Unreadable verdict:', raw.slice(0, 120));
   return 'unreadable';
 }
 

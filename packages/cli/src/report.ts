@@ -553,16 +553,24 @@ export function generateReport(
       const bestTest = bestNode.tests.find(x => x.testId === seedTest.testId);
       if (!bestTest) continue;
       const testName = findTestDef(config, seedTest.testId)?.name ?? `Test ${t + 1}`;
-      const seedScore = seedTest.score ?? 0;
-      const bestScore = bestTest.score ?? 0;
+      // An ungraded test is a PLACEHOLDER 5.0 at the leaf, but
+      // calculateQualityScore scores it 0 — so this table averaged the 5.0s and
+      // the same document printed `Quality: 0.7` in one section and
+      // `Average 2.3` in another, of the SAME three scores, with nothing
+      // reconciling them. Use the rule fitness uses, and mark the row.
+      const seedUngraded = !!(seedTest as any).ungraded;
+      const bestUngraded = !!(bestTest as any).ungraded;
+      const ungradedMark = (u: boolean) => (u ? ' ⚠️' : '');
+      const seedScore = seedUngraded ? 0 : (seedTest.score ?? 0);
+      const bestScore = bestUngraded ? 0 : (bestTest.score ?? 0);
       const delta = bestScore - seedScore;
       const deltaStr = delta > 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1);
       seedTotal += seedScore;
       bestTotal += bestScore;
       count++;
       lines.push(
-        `| ${count} | ${escapeMarkdown(testName)} | ${seedScore.toFixed(1)}${spreadOf(seedTest)} ` +
-        `| ${bestScore.toFixed(1)}${spreadOf(bestTest)} | ${deltaStr} |`,
+        `| ${count} | ${escapeMarkdown(testName)} | ${seedScore.toFixed(1)}${ungradedMark(seedUngraded)}${spreadOf(seedTest)} ` +
+        `| ${bestScore.toFixed(1)}${ungradedMark(bestUngraded)}${spreadOf(bestTest)} | ${deltaStr} |`,
       );
     }
 

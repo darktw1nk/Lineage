@@ -39,7 +39,7 @@ export { mulberry32, rngFor } from './engine/rng.js';
 export { isEvaluationActive } from './engine/evaluator_v2.js';
 export { scoreJsonSchema, scoreToolCall } from './engine/structured.js';
 export { estimateRunCost, COST_LABELS } from './engine/estimate.js';
-export { clearSpend } from './engine/spendledger.js';
+export { clearSpend, readSpend } from './engine/spendledger.js';
 // Plugin operators that make paid calls need this to report spend incurred
 // before a throw — see docs/plugins.md.
 export { withPartialCost, partialCostOf, ZERO_OPERATOR_COST } from './engine/operator-cost.js';

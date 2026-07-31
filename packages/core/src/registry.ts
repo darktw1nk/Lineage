@@ -148,6 +148,10 @@ function callWithTimeout<T>(
 }
 
 function throttleIfNeeded(adapter: ProviderAdapter): ProviderAdapter {
+  // Kept as an optimisation, no longer as a correctness guard: withGlobalSemaphore
+  // became re-entrant via AsyncLocalStorage, so double-wrapping a subclass no
+  // longer self-deadlocks — it would just add a redundant Proxy layer. Verified
+  // by the deadlock tests in plugin-throttle.test.ts, which stay green without it.
   if (adapter instanceof BaseProviderAdapter) return adapter;
   const inner = adapter.call.bind(adapter);
   return new Proxy(adapter, {

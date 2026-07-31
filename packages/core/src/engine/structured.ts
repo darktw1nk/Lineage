@@ -228,6 +228,15 @@ export function scoreJsonSchema(
   // `expected` parameter was added to close, now with passed:true feeding
   // pass-rate reporting and targetFitness. Fail closed and name the fix.
   if (unsatisfiableReference) {
+    // Say it on stderr too. The reason lived ONLY in results.json's leaf, so
+    // the report printed a bare `Score: 0/10` beside a visibly perfect answer
+    // with no explanation anywhere a user looks, and a config error is always
+    // zero-delta, which is exactly the row the report drops the reason from.
+    console.warn(
+      '[Structured] CONFIG ERROR: a json_schema test has an `expected` value that is not a valid ' +
+      'instance of its own schema, so no answer can match it. Every candidate scores 0 on that test ' +
+      'until you remove `expected` or make it conform.',
+    );
     return {
       passed: false,
       score: 0,
