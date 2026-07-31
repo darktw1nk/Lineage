@@ -189,3 +189,89 @@ describe('a budget stop does not fund the end-of-run phases', () => {
     fs.rmSync(db, { force: true });
   }, 120000);
 });
+
+/**
+ * END TO END, not against a hand-built map.
+ *
+ * The unit tests for reconcileUngradedCount passed a Map production could not
+ * construct: `nodeId` was added to runSingleSample but never to its only
+ * caller, so the guard was always false and the Map was always empty. The
+ * arithmetic was pinned and the wiring was dead — the same failure as testing a
+ * pasted copy, one level further out.
+ */
+describe('a run that could not be graded says so, in the database', () => {
+  it('persists a non-zero count when the judge is unreadable', async () => {
+    // The case the whole saga is about: judge replies unparseable, so the
+    // scores are placeholders. The DB row is what --resume and the desktop read.
+    registerProvider({ adapter: {
+      name: 'priced',
+      estimateTokens: () => ({ prompt: 10 }),
+      call: async (opts: any) => {
+        const isJudge = /Rubric|score/i.test(opts.prompt);
+        if (isJudge) judgeCalls++; else candidateCalls++;
+        return {
+          output: isJudge ? 'I think that was pretty good, honestly.' : 'ANSWER',
+          promptTokens: 10, completionTokens: 10, latencyMs: 1, usd: USD,
+        };
+      },
+    } as any });
+
+    const db = tmp();
+    const final = await runOnce(makeConfig({
+      population: { initialSize: 1, generationSize: 1, seedPrompt: 'SEED', fill: 'auto' },
+      testSet: [{ id: 't1', name: 'train', mode: 'llm_grade', prompt: 'A' }],
+      operators: { mutationShare: 0, crossoverShare: 0 },
+    }), db, 'ung-1');
+
+    expect(final.ungradedTests).toBeGreaterThan(0);
+    // And in the SAME units as the rows: one test, one ungraded row, count 1.
+    const leaves = final.generations.flat()
+      .reduce((n: number, node: any) => n + (node.tests ?? []).filter((t: any) => t.ungraded).length, 0);
+    expect(final.ungradedTests).toBe(leaves);
+
+    fs.rmSync(db, { force: true });
+  }, 120000);
+
+  it('keeps the count when the node FAILS before producing any tests', async () => {
+    // THE case the tally exists for, and the one the previous test cannot see:
+    // processNode assigns `node.tests` only on success, so a node that throws
+    // mid-evaluation leaves nothing for the leaf sweep — while a sibling test
+    // has already recorded a real grading failure. Without the nodeId plumbing
+    // the count is silently 0, which is exactly what shipped.
+    let n = 0;
+    registerProvider({ adapter: {
+      name: 'priced',
+      estimateTokens: () => ({ prompt: 10 }),
+      call: async (opts: any) => {
+        const isJudge = /Rubric|score/i.test(opts.prompt);
+        if (isJudge) {
+          judgeCalls++;
+          return { output: 'prose, not a verdict', promptTokens: 1, completionTokens: 1, latencyMs: 1, usd: USD };
+        }
+        candidateCalls++;
+        // First candidate call answers; the second throws, failing the node
+        // AFTER the first test has already been graded (and ungraded).
+        if (++n > 1) throw new Error('provider exploded');
+        return { output: 'ANSWER', promptTokens: 10, completionTokens: 10, latencyMs: 1, usd: USD };
+      },
+    } as any });
+
+    const db = tmp();
+    const final = await runOnce(makeConfig({
+      population: { initialSize: 1, generationSize: 1, seedPrompt: 'SEED', fill: 'auto' },
+      testSet: [
+        { id: 't1', name: 'a', mode: 'llm_grade', prompt: 'A' },
+        { id: 't2', name: 'b', mode: 'llm_grade', prompt: 'B' },
+      ],
+      operators: { mutationShare: 0, crossoverShare: 0 },
+    }), db, 'ung-2');
+
+    const node: any = final.generations.flat()[0];
+    expect(node.status).toBe('failed');
+    expect(node.tests).toBeUndefined();
+    // The grading failure that DID happen must survive into the durable record.
+    expect(final.ungradedTests).toBeGreaterThan(0);
+
+    fs.rmSync(db, { force: true });
+  }, 120000);
+});

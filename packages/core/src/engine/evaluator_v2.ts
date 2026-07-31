@@ -720,6 +720,12 @@ async function mutatePopulationInBackground(
 
       // Mark as failed
       node.status = 'failed';
+    // Persist the tally ON THE NODE. A process-local Map cannot cross a restart,
+    // so a node that failed BEFORE a crash contributed 0 on resume — the same
+    // undercount from two rounds earlier, reintroduced for the case that matters
+    // most. The node goes into the checkpoint; the Map does not.
+    const failedTally = state.ungradedByNode.get(node.id);
+    if (failedTally) (node as any).ungradedTests = failedTally;
       node.error = `Mutation failed: ${error instanceof Error ? error.message : String(error)}`;
       
       // Send error update
@@ -1265,7 +1271,7 @@ async function runTests(
     return (await inFlight).map(r => ({ ...r }));
   }
 
-  inFlight = evaluatePromptOnTests(node.prompt, node.params, state.fitnessTests, state, runId);
+  inFlight = evaluatePromptOnTests(node.prompt, node.params, state.fitnessTests, state, runId, node.id);
   state.inFlightEvaluations.set(cacheKey, inFlight);
   let results: TestResult[];
   try {
@@ -1293,6 +1299,8 @@ export async function evaluatePromptOnTests(
   tests: TestCase[],
   state: EvaluationState,
   runId: UUID,
+  /** Node these tests belong to, so a grading failure can be tallied against it. */
+  nodeId?: UUID,
 ): Promise<TestResult[]> {
   const adapter = getProviderAdapter(params.model.provider);
   const maxTokens = (state.config as any).serviceModelMaxTokens || 20000;
@@ -1300,7 +1308,7 @@ export async function evaluatePromptOnTests(
   return Promise.all(tests.map(async (test) => {
     const samples = await Promise.all(
       Array.from({ length: state.samplesPerTest }, (_v, i) =>
-        runSingleSample(test, candidatePrompt, params, i, state, runId, adapter, maxTokens)),
+        runSingleSample(test, candidatePrompt, params, i, state, runId, adapter, maxTokens, nodeId)),
     );
 
     const mean = samples.reduce((a, s) => a + s.score, 0) / samples.length;
@@ -2242,7 +2250,7 @@ export function reconcileUngradedCount(
   let total = holdoutLeaves;
   for (const node of run.generations.flat()) {
     const leaves = (node.tests ?? []).filter(t => (t as any).ungraded).length;
-    total += node.tests ? leaves : (ungradedByNode.get(node.id) ?? 0);
+    total += node.tests ? leaves : ((node as any).ungradedTests ?? ungradedByNode.get(node.id) ?? 0);
   }
   return total;
 }
