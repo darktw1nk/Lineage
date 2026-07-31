@@ -168,6 +168,19 @@ function satisfiedFraction(parsed: unknown, schema: any, errors: ReadonlyArray<a
   return (ok / required.length) * (1 - penalty);
 }
 
+let configErrorWarned = false;
+function warnConfigErrorOnce(): void {
+  if (configErrorWarned) return;
+  configErrorWarned = true;
+  console.warn(
+    '[Structured] CONFIG ERROR: a json_schema test has an `expected` value that is not a valid ' +
+    'instance of its own schema, so no answer can match it. Every candidate scores 0 on that test ' +
+    'until you remove `expected` or make it conform.',
+  );
+}
+/** Test hook: a second run in the same process must warn again. */
+export function resetStructuredWarnings(): void { configErrorWarned = false; }
+
 export function scoreJsonSchema(
   output: string,
   schema: object | undefined,
@@ -232,11 +245,12 @@ export function scoreJsonSchema(
     // the report printed a bare `Score: 0/10` beside a visibly perfect answer
     // with no explanation anywhere a user looks, and a config error is always
     // zero-delta, which is exactly the row the report drops the reason from.
-    console.warn(
-      '[Structured] CONFIG ERROR: a json_schema test has an `expected` value that is not a valid ' +
-      'instance of its own schema, so no answer can match it. Every candidate scores 0 on that test ' +
-      'until you remove `expected` or make it conform.',
-    );
+    // ONCE per process, not once per scoring call. scoreJsonSchema runs per
+    // sample x test x node — measured 1600 identical warnings for one config
+    // error — and the CLI routes console.warn straight into the progress
+    // display. fitness.ts already solved this exact problem with warnOnce; the
+    // same class was reintroduced here.
+    warnConfigErrorOnce();
     return {
       passed: false,
       score: 0,

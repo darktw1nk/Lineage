@@ -55,6 +55,13 @@ const CONFIG_KEY_MAP: Record<Provider, string> = {
  * electron-store (via conf) uses: {appData}/{appName}/config.json
  */
 export function getElectronStorePath(): string {
+  // Honour the test override HERE too. readElectronStore gated on
+  // fs.existsSync(getElectronStorePath()) — the REAL %APPDATA% file — and then
+  // read getStore().store, which the override had redirected to a scratch dir.
+  // The two pointed at different files, so a redirected store read {} unless
+  // the author's real store happened to exist: every test using the override
+  // passed on this machine and failed on a fresh clone or CI.
+  if (storeDirOverride) return path.join(storeDirOverride, 'config.json');
   const appName = 'evolution2';
   const platform = process.platform;
 

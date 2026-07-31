@@ -395,7 +395,7 @@ export function generateReport(
     if (seedNode.tests && seedNode.tests.length > 0) {
       lines.push('### Seed Test Results');
       lines.push('');
-      for (let t = 0; t < seedNode.tests.length; t++) {
+    for (let t = 0; t < seedNode.tests.length; t++) {
         const test = seedNode.tests[t];
         const testDef = findTestDef(config, test.testId);
         const testName = testDef?.name ?? `Test ${t + 1}`;
@@ -496,8 +496,13 @@ export function generateReport(
   if (ungraded && ungraded > 0) {
     lines.push(
       `> ⚠️ **${ungraded} test result(s) could not be graded** — the judge's reply was unparseable and each ` +
-      'was scored 5.0. Those 5.0s are placeholders, not measurements, and they are included in the ' +
-      'averages below. Treat any delta of similar size as noise.',
+      // The old wording said the 5.0 placeholders "are included in the averages
+      // below". They are not: fitness and the Improvement table both score an
+      // ungraded row 0 now, so the banner described behaviour that had been
+      // removed — the report contradicting itself on the point it exists to
+      // disclose.
+      'was unreadable. Those rows are marked ⚠️ and count as **0**, not as a measurement, so any ' +
+      'delta involving them is an artefact of which side failed to grade rather than a result.',
     );
     lines.push('');
   }
@@ -548,6 +553,7 @@ export function generateReport(
     let seedTotal = 0;
     let bestTotal = 0;
     let count = 0;
+    let ungradedRows = 0;
 
     // Iterate the tests that were actually RUN, matching seed to best by id.
     // Iterating config.testSet instead invented a 0.0/0.0 row for every
@@ -562,6 +568,7 @@ export function generateReport(
       // the same document printed `Quality: 0.7` in one section and
       // `Average 2.3` in another, of the SAME three scores, with nothing
       // reconciling them. Use the rule fitness uses, and mark the row.
+      if ((seedTest as any).ungraded || (bestTest as any).ungraded) ungradedRows++;
       const seedUngraded = !!(seedTest as any).ungraded;
       const bestUngraded = !!(bestTest as any).ungraded;
       const ungradedMark = (u: boolean) => (u ? ' ⚠️' : '');
@@ -583,6 +590,19 @@ export function generateReport(
     const avgDelta = bestAvg - seedAvg;
     const avgDeltaStr = avgDelta > 0 ? `+${avgDelta.toFixed(1)}` : avgDelta.toFixed(1);
     lines.push(`| | **Average** | **${seedAvg.toFixed(1)}** | **${bestAvg.toFixed(1)}** | **${avgDeltaStr}** |`);
+    // Scoring an ungraded row 0 made the FABRICATED delta BIGGER, not smaller:
+    // the same fixture went from 3.5 -> 7.0 (+3.5) to 1.0 -> 7.0 (+6.0), a 71%
+    // larger claim off identical data. The holdout table handles exactly this
+    // by calling the comparison untrustworthy and suppressing its callouts;
+    // this table got the score rule and none of the suppression.
+    if (ungradedRows > 0) {
+      lines.push('');
+      lines.push(
+        `> ⚠️ **This delta is not trustworthy.** ${ungradedRows} row(s) above could not be graded ` +
+        'and count as 0, so the difference may be entirely an artefact of which side failed to grade. ' +
+        'The ± spreads on those rows come from the raw samples and do not describe the 0.',
+      );
+    }
     lines.push('');
     if (anySamples) {
       lines.push('*± is half the observed spread across samples of the same test. A delta smaller than the spread is not a result.*');

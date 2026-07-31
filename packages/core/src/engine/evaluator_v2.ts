@@ -2019,6 +2019,25 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   state.run.status = 'finished';
   state.run.finishedAt = Date.now();
 
+  // Recount from the LEAVES, including the HOLDOUT, and BEFORE persistRun.
+  //
+  // The first version walked only `generations`, but holdout rows live in
+  // `run.holdout.{seed,champion}.perTest` and are graded through the same path
+  // that sets the flag — so a run whose ONLY ungraded rows were in the holdout
+  // reported 0 and the report's warning banner disappeared entirely, having
+  // fired before the recount existed. It also ran AFTER persistRun, so the
+  // corrected number never reached the database the resume and desktop read.
+  // Three numbers in one artefact, and the one the user sees was the wrong one.
+  const holdoutLeaves = [state.run.holdout?.seed, state.run.holdout?.champion]
+    .flatMap(half => (half?.perTest ?? []) as any[])
+    .filter(row => row?.ungraded).length;
+  const ungradedLeaves = state.run.generations
+    .flat()
+    .reduce((n, node) => n + (node.tests ?? []).filter(t => (t as any).ungraded).length, 0)
+    + holdoutLeaves;
+  if (ungradedLeaves !== (state.run.ungradedTests ?? 0)) {
+    state.run.ungradedTests = ungradedLeaves;
+  }
   persistRun(state);
 
   // The checkpoint is now authoritative and the run cannot be resumed, so the
@@ -2027,17 +2046,6 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   // checkpoint — the resume path takes the larger of the two either way.
   try { clearSpend(getDatabase().dbPath, state.run.id); } catch { /* best effort */ }
 
-  // Recount from the LEAF before reporting. The counter increments per grading
-  // CALL, but a cache hit copies a test result — flag and all — without making
-  // one, so a run reported 5 while 6 rows in the same file carried
-  // `ungraded: true`. Two numbers in one artefact disagreeing is the thing this
-  // counter exists to prevent.
-  const ungradedLeaves = state.run.generations
-    .flat()
-    .reduce((n, node) => n + (node.tests ?? []).filter(t => (t as any).ungraded).length, 0);
-  if (ungradedLeaves !== (state.run.ungradedTests ?? 0)) {
-    state.run.ungradedTests = ungradedLeaves;
-  }
   sendUpdate(runId, { type: 'cost_breakdown', breakdown: state.run.costBreakdown, estimate: state.run.estimate, ungradedTests: state.run.ungradedTests });
 
   // Send final updates
