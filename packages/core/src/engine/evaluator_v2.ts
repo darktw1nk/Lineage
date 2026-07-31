@@ -1981,6 +1981,10 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   // money spent. 'budget' and 'time' likewise mean the user set a ceiling that
   // has been reached; spending past it to compute a nicety is not what either
   // option asks for.
+  // 'budget' here is REDUNDANT and kept for intent: reserveCall is a
+  // settled-spend gate, so this reason already implies totals >= budgetUSD, and
+  // the playoff and holdout each have their own budget gate that would fire.
+  // Verified by mutation — removing it changes no observable behaviour.
   const SKIP_EXTRA_SPEND = new Set(['manual', 'error', 'budget', 'time']);
   if (state.run.stopReason && SKIP_EXTRA_SPEND.has(state.run.stopReason)) {
     console.log(
@@ -2023,6 +2027,17 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   // checkpoint — the resume path takes the larger of the two either way.
   try { clearSpend(getDatabase().dbPath, state.run.id); } catch { /* best effort */ }
 
+  // Recount from the LEAF before reporting. The counter increments per grading
+  // CALL, but a cache hit copies a test result — flag and all — without making
+  // one, so a run reported 5 while 6 rows in the same file carried
+  // `ungraded: true`. Two numbers in one artefact disagreeing is the thing this
+  // counter exists to prevent.
+  const ungradedLeaves = state.run.generations
+    .flat()
+    .reduce((n, node) => n + (node.tests ?? []).filter(t => (t as any).ungraded).length, 0);
+  if (ungradedLeaves !== (state.run.ungradedTests ?? 0)) {
+    state.run.ungradedTests = ungradedLeaves;
+  }
   sendUpdate(runId, { type: 'cost_breakdown', breakdown: state.run.costBreakdown, estimate: state.run.estimate, ungradedTests: state.run.ungradedTests });
 
   // Send final updates

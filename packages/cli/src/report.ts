@@ -259,7 +259,11 @@ export function generateReport(
   lines.push(`| Custom grading prompt | ${cliConfig?.systemPrompts?.llmGradingPrompt ? 'Yes' : 'No'} |`);
   // On a resumed run the wall-clock span from the ORIGINAL start includes the
   // downtime, so an overnight gap read as "8h 40m" for ten minutes of work.
-  const resumed = result.activeDurationMs !== undefined && result.durationMs - result.activeDurationMs > 60_000;
+  // Disclose whenever the two differ by more than a rounding step, not only
+  // past a minute. A resumed run doing 597ms of work across a 20s gap printed
+  // a bare `Duration | 20s`, which reads as the cost of the work.
+  const resumed = result.activeDurationMs !== undefined &&
+    result.durationMs - result.activeDurationMs > 1_000;
   lines.push(
     resumed
       ? `| Duration | ${formatDuration(result.activeDurationMs)} working (${formatDuration(result.durationMs)} wall clock, resumed) |`

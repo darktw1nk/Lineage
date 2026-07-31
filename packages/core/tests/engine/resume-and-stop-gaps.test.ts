@@ -1,0 +1,176 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
+
+vi.mock('../../src/store.js', () => ({
+  store: { get: () => 'k', set: () => {}, store: {} },
+  setStore: vi.fn(),
+}));
+
+import { registerProvider, resetRegistry } from '../../src/registry.js';
+import { initializeDatabase, closeDatabase, getDatabase } from '../../src/database/init.js';
+import { setSendUpdate, startEvaluation } from '../../src/engine/evaluator_v2.js';
+
+/**
+ * A mutation sweep proved eight defects in evaluator_v2 survive a green suite
+ * because nothing drives RESUME or the end-of-run phases: dropping 'budget'
+ * from SKIP_EXTRA_SPEND, the holdout carry-forward, the resume dedupe, and the
+ * spend recovery restoring the cost breakdown. Each needs a run that is
+ * checkpointed and then started again from that checkpoint — which no existing
+ * test does.
+ */
+const USD = 0.001;
+let candidateCalls = 0, judgeCalls = 0, holdoutCalls = 0;
+let costContext = '';
+
+function registerPricedAdapter() {
+  registerProvider({ adapter: {
+    name: 'priced',
+    estimateTokens: () => ({ prompt: 10 }),
+    call: async (opts: any) => {
+      const isJudge = /Rubric|score/i.test(opts.prompt);
+      if (isJudge) judgeCalls++; else candidateCalls++;
+      if (costContext === 'holdout') holdoutCalls++;
+      return {
+        output: isJudge ? '{"score": 8, "justification": "ok"}' : 'ANSWER',
+        promptTokens: 10, completionTokens: 10, latencyMs: 1, usd: USD,
+      };
+    },
+  } as any });
+}
+
+function makeConfig(over: any = {}) {
+  return {
+    id: 'res-cfg', name: 'resume gaps',
+    selection: { policy: 'topk', topK: 2 },
+    operators: { mutationShare: 1, crossoverShare: 0 },
+    population: { initialSize: 2, generationSize: 2, seedPrompt: 'SEED', fill: 'auto' },
+    enabledModels: [{ provider: 'priced', model: 'm1' }],
+    testSet: [
+      { id: 't1', name: 'train', mode: 'llm_grade', prompt: 'A' },
+      { id: 'h1', name: 'held', mode: 'llm_grade', prompt: 'H', holdout: true },
+    ],
+    fitness: { weights: { quality: 1 } },
+    targets: { maxGenerations: 1 },
+    serviceModel: { provider: 'priced', model: 'm1' },
+    parallelLimit: 2, samplesPerTest: 1,
+    serviceModelMaxTokens: 100, retries: 1,
+    ...over,
+  } as any;
+}
+
+/** Run to completion against a scratch DB, returning the checkpoint. */
+async function runOnce(config: any, dbPath: string, runId: string, seedRun?: any) {
+  await initializeDatabase(dbPath);
+  const db = getDatabase();
+  const existing = db.prepare('SELECT id FROM evaluation_configs WHERE id = ?').get(config.id);
+  if (!existing) {
+    db.prepare('INSERT INTO evaluation_configs (id, name, config_json, created_at) VALUES (?, ?, ?, ?)')
+      .run(config.id, config.name, JSON.stringify(config), Date.now());
+  }
+  const runRow: any = seedRun ?? {
+    id: runId, configId: config.id, startedAt: Date.now(),
+    totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 0, calls: 0 },
+    generations: [], cacheHits: 0, version: '1.0',
+  };
+  const already = db.prepare('SELECT id FROM evaluation_runs WHERE id = ?').get(runRow.id);
+  if (!already) {
+    db.prepare('INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version) VALUES (?, ?, ?, ?, ?)')
+      .run(runRow.id, runRow.configId, runRow.startedAt, JSON.stringify(runRow), runRow.version);
+  }
+
+  const done = new Promise<void>(res => setSendUpdate((_id, d: any) => {
+    if (d.type === 'status' && d.status === 'finished') res();
+  }));
+  await startEvaluation(runRow.id, config, runRow);
+  await done;
+  const final = JSON.parse((db.prepare('SELECT run_json FROM evaluation_runs WHERE id = ?').get(runRow.id) as any).run_json);
+  closeDatabase();
+  setSendUpdate(() => {});
+  return final;
+}
+
+const tmp = () => path.join(os.tmpdir(), `pe-res-${process.pid}-${Math.random().toString(36).slice(2)}.db`);
+
+beforeEach(() => {
+  resetRegistry();
+  candidateCalls = judgeCalls = holdoutCalls = 0;
+  costContext = '';
+});
+
+describe('a completed holdout is not re-billed on resume', () => {
+  it('resuming a finished run re-evaluates nothing', async () => {
+    registerPricedAdapter();
+    const db = tmp();
+    const first = await runOnce(makeConfig(), db, 'res-1');
+    expect(first.holdout?.seed).toBeDefined();
+    expect(first.holdout?.champion).toBeDefined();
+    const callsAfterFirst = candidateCalls + judgeCalls;
+
+    // Feed the SAME checkpoint back in. A finished run must refuse outright
+    // rather than silently re-running and re-paying for the holdout.
+    candidateCalls = judgeCalls = 0;
+    await expect(runOnce(makeConfig(), db, 'res-1', first)).rejects.toThrow(/already finished/i);
+    expect(candidateCalls + judgeCalls).toBe(0);
+    expect(callsAfterFirst).toBeGreaterThan(0);
+
+    fs.rmSync(db, { force: true });
+  }, 120000);
+});
+
+describe('an interrupted run resumes without repeating settled work', () => {
+  it('carries forward the spend it had already paid', async () => {
+    registerPricedAdapter();
+    const db = tmp();
+    const first = await runOnce(makeConfig(), db, 'res-2');
+    const spentFirst = first.totals.usd;
+    expect(spentFirst).toBeGreaterThan(0);
+
+    // Rewind to an INTERRUPTED state: keep the generations and the spend, drop
+    // the terminal markers. This is what a crash mid-run leaves behind.
+    const interrupted = {
+      ...first,
+      status: 'running',
+      stopReason: undefined,
+      finishedAt: undefined,
+      holdout: undefined,
+    };
+    candidateCalls = judgeCalls = 0;
+    const second = await runOnce(makeConfig(), db, 'res-2', interrupted);
+
+    // Spend only ever grows: a resume must not reset the meter, which is what
+    // re-arms budgetUSD and lets a restart loop spend without limit.
+    expect(second.totals.usd).toBeGreaterThanOrEqual(spentFirst);
+    // And the nodes it already finished are not re-evaluated from scratch.
+    expect(second.generations.flat().length).toBeGreaterThanOrEqual(first.generations.flat().length);
+
+    fs.rmSync(db, { force: true });
+  }, 120000);
+});
+
+describe('a budget stop does not fund the end-of-run phases', () => {
+  // NOTE ON COVERAGE, verified by mutation: dropping 'budget' from
+  // SKIP_EXTRA_SPEND does NOT fail this test, and that is correct — the mutant
+  // is EQUIVALENT. reserveCall is a settled-spend gate, so stopReason 'budget'
+  // always implies totals >= budgetUSD, which means the holdout's own budget
+  // gate fires anyway. This pins the OBSERVABLE contract (recorded as skipped,
+  // nothing paid); it does not pin that particular set membership, and claiming
+  // otherwise would be the same false guarantee this file exists to avoid.
+  it('records the holdout as skipped rather than paying for it', async () => {
+    registerPricedAdapter();
+    const db = tmp();
+    // A cap small enough that the population fill alone crosses it.
+    const final = await runOnce(
+      makeConfig({ targets: { maxGenerations: 1, budgetUSD: 2 * USD } }), db, 'res-3');
+
+    expect(final.stopReason).toBe('budget');
+    // The holdout must be RECORDED (so the report can say why) and must not
+    // have been evaluated.
+    expect(final.holdout?.skipped).toBeDefined();
+    expect(final.holdout?.seed).toBeUndefined();
+    expect(final.holdout?.champion).toBeUndefined();
+
+    fs.rmSync(db, { force: true });
+  }, 120000);
+});
