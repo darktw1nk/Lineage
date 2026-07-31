@@ -1,5 +1,5 @@
 /**
- * Example PromptEngine provider plugin: local Ollama server via its
+ * Example Lineage provider plugin: local Ollama server via its
  * OpenAI-compatible endpoint (http://localhost:11434). No API key needed.
  * Requires: `ollama serve` running and the model pulled (e.g. `ollama pull llama3.2`).
  */

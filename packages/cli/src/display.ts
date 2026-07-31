@@ -4,7 +4,7 @@
  * Prints progress to stderr (so stdout can be piped for JSON output).
  */
 
-import type { CandidateNode } from '@promptengine/core';
+import type { CandidateNode } from '@lineage/core';
 
 export interface DisplayState {
   currentGeneration: number;

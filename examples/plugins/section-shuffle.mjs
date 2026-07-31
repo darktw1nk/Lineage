@@ -1,5 +1,5 @@
 /**
- * Example PromptEngine operator plugin (LLM-free, deterministic).
+ * Example Lineage operator plugin (LLM-free, deterministic).
  * Rotates double-newline-separated prompt sections: the first section moves
  * to the end. Useful as a template for your own operators.
  */

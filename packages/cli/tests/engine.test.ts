@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { EvaluationConfig, CandidateNode, UUID } from '@promptengine/core';
+import type { EvaluationConfig, CandidateNode, UUID } from '@lineage/core';
 import { selectChampion as realSelectChampion } from '../../core/src/engine/champion.js';
 
 // ---------------------------------------------------------------------------
@@ -14,7 +14,7 @@ const mockDbPrepare = vi.fn();
 const mockDbRun = vi.fn();
 const mockDbFlush = vi.fn();
 
-vi.mock('@promptengine/core', () => ({
+vi.mock('@lineage/core', () => ({
   setSendUpdate: (fn: (runId: UUID, data: any) => void) => {
     capturedSendUpdate = fn;
   },

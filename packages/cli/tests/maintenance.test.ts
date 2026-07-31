@@ -8,7 +8,7 @@ vi.mock('../src/store.js', () => ({
 }));
 
 import { archiveRuns, pruneRuns } from '../src/maintenance.js';
-import { initializeDatabase, closeDatabase, getDatabase } from '@promptengine/core';
+import { initializeDatabase, closeDatabase, getDatabase } from '@lineage/core';
 
 let dir: string;
 let dbPath: string;

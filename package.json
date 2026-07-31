@@ -1,7 +1,7 @@
 {
-  "name": "promptengine-monorepo",
+  "name": "lineage-monorepo",
   "version": "1.0.0",
-  "description": "PromptEngine.AI - Genetic Algorithm for LLM Prompt Optimization",
+  "description": "Lineage - Genetic Algorithm for LLM Prompt Optimization",
   "private": true,
   "type": "module",
   "workspaces": ["packages/*", "apps/*"],

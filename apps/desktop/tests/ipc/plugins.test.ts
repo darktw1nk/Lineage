@@ -3,8 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { storeBacking } = vi.hoisted(() => ({ storeBacking: {} as Record<string, any> }));
 
 vi.mock('electron', () => ({ shell: { openPath: vi.fn(async () => '') } }));
-vi.mock('@promptengine/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@promptengine/core')>()),
+vi.mock('@lineage/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@lineage/core')>()),
   store: {
     get: (k: string, d?: any) => storeBacking[k] ?? d ?? null,
     set: (k: string, v: any) => { storeBacking[k] = v; },

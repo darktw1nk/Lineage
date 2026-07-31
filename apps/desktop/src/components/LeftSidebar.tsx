@@ -246,7 +246,7 @@ export function LeftSidebar({
 
         // Validate it's a config (basic check)
         if (!parsed.selection || !parsed.operators || !parsed.population) {
-          toast.error('Not a PromptEngine config or exported run');
+          toast.error('Not a Lineage config or exported run');
           return;
         }
 
@@ -280,7 +280,7 @@ export function LeftSidebar({
       
       {/* Logo */}
       <div className="p-4">
-        <h1 className="text-xl font-bold">PromptEngine.AI</h1>
+        <h1 className="text-xl font-bold">Lineage</h1>
       </div>
 
       {/* New Evaluation Buttons */}

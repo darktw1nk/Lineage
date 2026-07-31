@@ -8,7 +8,7 @@ vi.mock('../src/store.js', () => ({
   resolveApiKey: () => null, saveApiKey: () => {}, installStoreShim: () => {},
 }));
 
-import { initializeDatabase, closeDatabase, getDatabase } from '@promptengine/core';
+import { initializeDatabase, closeDatabase, getDatabase } from '@lineage/core';
 
 /**
  * Gaps mutation testing found in the maintenance WIRING (hunt 13).
@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 function runCli(args: string[], env: Record<string, string> = {}): { code: number; out: string } {
-  // --tsconfig is REQUIRED, or @promptengine/core resolves to the gitignored
+  // --tsconfig is REQUIRED, or @lineage/core resolves to the gitignored
   // dist build and this tests a stale copy (see maintenance-cli.test.ts).
   const r = spawnSync('npx', ['tsx', '--tsconfig', 'packages/cli/tsconfig.json',
     'packages/cli/src/index.ts', ...args], {

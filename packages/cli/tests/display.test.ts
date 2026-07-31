@@ -7,7 +7,7 @@ import {
   onTotals,
   onGenerationCreated,
 } from '../src/display.js';
-import type { CandidateNode } from '@promptengine/core';
+import type { CandidateNode } from '@lineage/core';
 
 function makeNode(overrides: Partial<CandidateNode> = {}): CandidateNode {
   return {

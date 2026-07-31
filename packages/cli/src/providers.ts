@@ -1,8 +1,8 @@
 /**
  * Provider capability lookups the CLI's preflights need.
  */
-import { getProviderAdapter } from '@promptengine/core';
-import type { Provider } from '@promptengine/core';
+import { getProviderAdapter } from '@lineage/core';
+import type { Provider } from '@lineage/core';
 
 /**
  * Does this provider need an API key before a run may start?

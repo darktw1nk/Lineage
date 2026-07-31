@@ -22,7 +22,7 @@ describe('resolveDbPath always returns an absolute path', () => {
       delete process.env.APPDATA;
       const p = resolveDbPath();
       expect(path.isAbsolute(p)).toBe(true);
-      expect(p).not.toBe(path.join('.promptengine', 'evolution.db'));
+      expect(p).not.toBe(path.join('.lineage', 'evolution.db'));
     } finally {
       if (home !== undefined) process.env.HOME = home;
       if (profile !== undefined) process.env.USERPROFILE = profile;
@@ -53,7 +53,7 @@ describe('the shared desktop database is recognised', () => {
       expect(isSharedDesktopDb(shared)).toBe(true);
     } else {
       // No Electron userData on this machine: the CLI fell back to
-      // ~/.promptengine, which is NOT the desktop file and must not be guarded.
+      // ~/.lineage, which is NOT the desktop file and must not be guarded.
       expect(isSharedDesktopDb(shared)).toBe(false);
     }
   });

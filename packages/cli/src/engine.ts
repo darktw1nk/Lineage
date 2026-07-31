@@ -15,11 +15,11 @@ import type {
   EvaluationRun,
   UUID,
   CandidateNode,
-} from '@promptengine/core';
+} from '@lineage/core';
 
 type HoldoutResult = NonNullable<EvaluationRun['holdout']>;
 import { createCliStore } from './store.js';
-import { setStore, selectChampion, readSpend, getDatabase } from '@promptengine/core';
+import { setStore, selectChampion, readSpend, getDatabase } from '@lineage/core';
 import * as display from './display.js';
 
 // ---------------------------------------------------------------------------
@@ -264,7 +264,7 @@ export async function runEvolution(
 
   // Set up the sendUpdate hook before importing the evaluator
   const { setSendUpdate, startEvaluation } = await import(
-    '@promptengine/core'
+    '@lineage/core'
   );
 
   const runId: UUID = options?.existingRun?.id ?? uuidv4();
@@ -388,7 +388,7 @@ export async function runEvolution(
 
   if (!options?.existingRun) {
     // Persist config + run to DB (matching electron/ipc/handlers.ts behavior)
-    const { getDatabase } = await import('@promptengine/core');
+    const { getDatabase } = await import('@lineage/core');
     const db = getDatabase();
 
     // Retry loop for config INSERT — handles rare UUID collision (matches handlers.ts)
@@ -422,7 +422,7 @@ export async function runEvolution(
     if (config.targets.budgetUSD)
       process.stderr.write(`Budget: $${config.targets.budgetUSD}\n`);
     try {
-      const { estimateRunCost, getModelCost } = await import('@promptengine/core');
+      const { estimateRunCost, getModelCost } = await import('@lineage/core');
       const est = await estimateRunCost(config, getModelCost);
       const scope = est.perGeneration ? ' per generation' : '';
       process.stderr.write(`Estimated cost${scope}: $${est.low.toFixed(4)} – $${est.high.toFixed(4)} (~${est.calls} calls)\n`);

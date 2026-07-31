@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateReport } from '../src/report.js';
-import type { EvaluationConfig } from '@promptengine/core';
+import type { EvaluationConfig } from '@lineage/core';
 
 /**
  * Mutation testing found these three report branches survived the whole suite:

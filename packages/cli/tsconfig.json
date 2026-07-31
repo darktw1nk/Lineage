@@ -4,7 +4,7 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "baseUrl": ".",
-    "paths": { "@promptengine/core": ["../core/src/index.ts"] }
+    "paths": { "@lineage/core": ["../core/src/index.ts"] }
   },
   "include": ["src"]
 }

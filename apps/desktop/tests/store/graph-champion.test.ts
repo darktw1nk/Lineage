@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { selectChampion } from '@promptengine/core';
+import { selectChampion } from '@lineage/core';
 
 /**
  * The graph's 🥇 crown must be the champion the tool actually reports.

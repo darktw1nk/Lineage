@@ -1,4 +1,4 @@
-# @promptengine/core
+# @lineage/core
 
 Genetic-algorithm engine for LLM prompt optimization. Evaluates candidate
 prompts against a test set across multiple LLM providers (OpenAI, Anthropic,
@@ -7,8 +7,8 @@ operators, and scores fitness on quality, safety, cost, latency, and stability.
 
 This is the embeddable engine. Most users want:
 
-- `@promptengine/cli` — command-line runner (`npx promptengine`)
-- PromptEngine.AI desktop app — visual evolution graph
+- `@lineage/cli` — command-line runner (`npx lineage`)
+- Lineage desktop app — visual evolution graph
 
 ## Programmatic use
 
@@ -20,7 +20,7 @@ import {
   setSendUpdate,
   initializeDatabase,
   startEvaluation,
-} from '@promptengine/core';
+} from '@lineage/core';
 ```
 
 See the repository for full documentation.

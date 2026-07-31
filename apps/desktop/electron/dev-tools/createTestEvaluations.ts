@@ -3,9 +3,9 @@
  * Run with: npm run dev, then call from browser console: window.electronAPI.dev.createTestEvals(10)
  */
 
-import { getDatabase } from '@promptengine/core';
+import { getDatabase } from '@lineage/core';
 import { v4 as uuidv4 } from 'uuid';
-import type { EvaluationRun, EvaluationConfig, CandidateNode } from '@promptengine/core';
+import type { EvaluationRun, EvaluationConfig, CandidateNode } from '@lineage/core';
 
 export function createTestEvaluations(count: number = 5): string[] {
   const db = getDatabase();

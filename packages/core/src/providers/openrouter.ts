@@ -105,8 +105,8 @@ export class OpenRouterAdapter extends BaseProviderAdapter {
           headers: {
             'Authorization': `Bearer ${opts.apiKey}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com/promptengine-ai',
-            'X-Title': 'PromptEngine',
+            'HTTP-Referer': 'https://github.com/lineage-ai',
+            'X-Title': 'Lineage',
           },
           body: JSON.stringify(body),
         }, timeoutMs);

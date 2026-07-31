@@ -121,9 +121,9 @@ Everything is tracked: token counts, per-node cost, cache hits (identical prompt
 | | For | Interface |
 |---|---|---|
 | **Desktop app** | Humans | Live React Flow lineage graph — watch selection happen |
-| **`promptengine` CLI** | AI agents, CI, scripts | JSON in → JSON out, exit codes, budget caps |
+| **`lineage` CLI** | AI agents, CI, scripts | JSON in → JSON out, exit codes, budget caps |
 
-Both drive the same engine (`@promptengine/core`).
+Both drive the same engine (`@lineage/core`).
 
 ```bash
 npm install
@@ -149,8 +149,8 @@ Watch generations appear with full lineage, then click any node: its evolved pro
 **Providers**: OpenAI, Anthropic, Google Gemini, Groq directly — any model via OpenRouter (one key, synced catalog with pricing) — or bring your own via a provider plugin (the shipped [Ollama example](examples/plugins/ollama/index.mjs) runs evolution on free local models).
 
 ```
-packages/core     @promptengine/core — engine, operators, providers, sql.js persistence
-packages/cli      @promptengine/cli  — the promptengine command
+packages/core     @lineage/core — engine, operators, providers, sql.js persistence
+packages/cli      @lineage/cli  — the lineage command
 apps/desktop      Electron app (React + React Flow)
 examples/plugins  drop-in operator/provider examples (section-shuffle, Ollama)
 docs/cli.md       Full CLI + config reference

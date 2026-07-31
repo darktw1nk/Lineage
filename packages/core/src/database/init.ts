@@ -919,8 +919,8 @@ function runMigrations(db: SqlJsWrapper): void {
   // close — silently discarding whatever the newer schema added.
   if (version > LATEST_SCHEMA_VERSION) {
     throw new Error(
-      `This database was created by a newer version of PromptEngine (schema v${version}; this build understands v${LATEST_SCHEMA_VERSION}). ` +
-      `Opening it with this build could discard data. Update PromptEngine, or point --db at a different file.`
+      `This database was created by a newer version of Lineage (schema v${version}; this build understands v${LATEST_SCHEMA_VERSION}). ` +
+      `Opening it with this build could discard data. Update Lineage, or point --db at a different file.`
     );
   }
 }

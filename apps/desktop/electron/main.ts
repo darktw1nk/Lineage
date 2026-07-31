@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
-import { initializeDatabase, closeDatabase, runningEvaluationIds, setStore, setSendUpdate, loadPlugins, type StoreInterface } from '@promptengine/core';
+import { initializeDatabase, closeDatabase, runningEvaluationIds, setStore, setSendUpdate, loadPlugins, type StoreInterface } from '@lineage/core';
 import { registerIPCHandlers } from './ipc/handlers.js';
 import { registerPluginHandlers, setPluginState } from './ipc/plugins.js';
 import { initLogger } from './logger.js';
@@ -119,10 +119,10 @@ app.whenReady().then(async () => {
   // lock — the commonest cause, and the one a second launch produces — sent
   // the user to delete plugins that were not the problem.
   const advice = /in use by process|could not be read/i.test(message)
-    ? 'Another PromptEngine process has the database open. Close it and try again, ' +
+    ? 'Another Lineage process has the database open. Close it and try again, ' +
       'or start this one with a different --db path.'
     : `If you recently added a plugin, remove it from the plugins folder and restart:\n${path.join(app.getPath('userData'), 'plugins')}`;
-  dialog.showErrorBox('PromptEngine.AI failed to start', `${message}\n\n${advice}`);
+  dialog.showErrorBox('Lineage failed to start', `${message}\n\n${advice}`);
   app.quit();
 });
 

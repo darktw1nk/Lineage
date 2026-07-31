@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadCliPlugins } from '../src/plugins.js';
-import { getOperator, resetRegistry } from '@promptengine/core';
+import { getOperator, resetRegistry } from '@lineage/core';
 
 const CORE_FIXTURES = path.join(
   path.dirname(fileURLToPath(import.meta.url)),

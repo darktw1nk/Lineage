@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * PromptEngine.AI — CLI / Script Mode
+ * Lineage — CLI / Script Mode
  *
  * Usage:
- *   promptengine --config <path>           Run evolution from config file
- *   promptengine --sync-models              Sync models from OpenRouter
- *   promptengine --list-models              List available models
- *   promptengine --set-key <provider> <key> Save API key
- *   promptengine --help                     Show help
+ *   lineage --config <path>           Run evolution from config file
+ *   lineage --sync-models              Sync models from OpenRouter
+ *   lineage --list-models              List available models
+ *   lineage --set-key <provider> <key> Save API key
+ *   lineage --help                     Show help
  */
 
 import { format } from 'node:util';
@@ -22,7 +22,7 @@ import { providerRequiresApiKey } from './providers.js';
 
 /** The database this process locked, so the exit handler can release it. */
 let lastResolvedDbPath: string | null = null;
-import type { Provider, EvaluationConfig } from '@promptengine/core';
+import type { Provider, EvaluationConfig } from '@lineage/core';
 import type { CliConfig } from './config.js';
 
 // The engine logs via console.log/info/warn. Route ALL of it to stderr so
@@ -60,13 +60,13 @@ async function cleanup(signal: string): Promise<void> {
 
   if (activeRunId) {
     try {
-      const { stopEvaluation } = await import('@promptengine/core');
+      const { stopEvaluation } = await import('@lineage/core');
       stopEvaluation(activeRunId);
     } catch { /* best-effort */ }
   }
 
   try {
-    const { closeDatabase } = await import('@promptengine/core');
+    const { closeDatabase } = await import('@lineage/core');
     closeDatabase();
   } catch { /* best-effort */ }
 
@@ -100,10 +100,10 @@ function printHelp(): void {
   // Write directly: console.log is rerouted to stderr for engine logs, but
   // --help output belongs on stdout.
   process.stdout.write(`
-PromptEngine.AI — CLI / Script Mode
+Lineage — CLI / Script Mode
 
 USAGE:
-  promptengine [OPTIONS]
+  lineage [OPTIONS]
 
 OPTIONS:
   --init [path]                Write a starter config (default: evolution.json) and exit
@@ -142,20 +142,20 @@ SYSTEM PROMPTS:
 
 EXAMPLES:
   # Start from scratch
-  promptengine --init
-  promptengine --estimate --config evolution.json
+  lineage --init
+  lineage --estimate --config evolution.json
 
   # Run an evolution
-  promptengine --config evolution.json
+  lineage --config evolution.json
 
   # Save an API key (shared with desktop app)
-  promptengine --set-key openrouter sk-or-v1-xxx
+  lineage --set-key openrouter sk-or-v1-xxx
 
   # Sync OpenRouter models
-  promptengine --sync-models
+  lineage --sync-models
 
   # Pipe JSON output
-  promptengine --config evolution.json 2>/dev/null > results.json
+  lineage --config evolution.json 2>/dev/null > results.json
 `);
 }
 
@@ -374,13 +374,13 @@ function handleInit(targetPath: string): void {
   console.error(`Wrote ${resolved}`);
   console.error('');
   console.error('Next:');
-  console.error('  1. Set a key:      promptengine --set-key openai <key>');
+  console.error('  1. Set a key:      lineage --set-key openai <key>');
   // Quote the path: a config called "my config.json" produced next-step
   // commands that break in any shell. And --report takes a VALUE — printing it
   // bare made the new user's last instruction exit 1.
   const q = /[\s()'"]/.test(targetPath) ? `"${targetPath}"` : targetPath;
-  console.error(`  2. Price the run:  promptengine --estimate --config ${q}`);
-  console.error(`  3. Run it:         promptengine --config ${q} --report report.md`);
+  console.error(`  2. Price the run:  lineage --estimate --config ${q}`);
+  console.error(`  3. Run it:         lineage --config ${q} --report report.md`);
 }
 
 async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath?: string): Promise<void> {
@@ -393,7 +393,7 @@ async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath
   // the function containing it was not.
   await initCliDatabase(dbPath);
 
-  const { getDatabase, closeDatabase } = await import('@promptengine/core');
+  const { getDatabase, closeDatabase } = await import('@lineage/core');
   const db = getDatabase();
   const { archiveRuns, pruneRuns } = await import('./maintenance.js');
 
@@ -467,11 +467,11 @@ async function handleSyncModels(dbPath?: string, configKeys?: Record<string, str
 
   console.log('Fetching models from OpenRouter...');
 
-  const { OpenRouterAdapter } = await import('@promptengine/core');
+  const { OpenRouterAdapter } = await import('@lineage/core');
   const models = await OpenRouterAdapter.fetchModels(apiKey);
 
   // Upsert into database
-  const { getDatabase } = await import('@promptengine/core');
+  const { getDatabase } = await import('@lineage/core');
   const db = getDatabase();
 
   const upsert = db.prepare(`
@@ -488,7 +488,7 @@ async function handleSyncModels(dbPath?: string, configKeys?: Record<string, str
 
   emit(`Synced ${models.length} models from OpenRouter`);
 
-  const { closeDatabase } = await import('@promptengine/core');
+  const { closeDatabase } = await import('@lineage/core');
   closeDatabase();
 }
 
@@ -496,7 +496,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
   lastResolvedDbPath = null; // read-only opens take no lock
   await initCliDatabase(dbPath, { readOnly: true });
 
-  const { getDatabase } = await import('@promptengine/core');
+  const { getDatabase } = await import('@lineage/core');
   const db = getDatabase();
 
   const rows = db.prepare(`
@@ -512,7 +512,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
 
   if (rows.length === 0) {
     emit('No models found. Run --sync-models to fetch from OpenRouter.');
-    const { closeDatabase } = await import('@promptengine/core');
+    const { closeDatabase } = await import('@lineage/core');
     closeDatabase();
     return;
   }
@@ -530,7 +530,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
   emit();
   emit(`Total: ${rows.length} models`);
 
-  const { closeDatabase } = await import('@promptengine/core');
+  const { closeDatabase } = await import('@lineage/core');
   closeDatabase();
 }
 
@@ -647,7 +647,7 @@ async function emitOutputs(
     }
   }
 
-  const { closeDatabase } = await import('@promptengine/core');
+  const { closeDatabase } = await import('@lineage/core');
   closeDatabase();
 
   // Agents rely on exit codes: no usable best prompt means the run failed.
@@ -701,7 +701,7 @@ async function handleEstimate(configPath: string, dbPath?: string, seedOverride?
     // Keep the preview faithful: the seed influences the holdout partition
     evalConfig.seed = seedOverride;
   }
-  const { estimateRunCost, getModelCost, closeDatabase } = await import('@promptengine/core');
+  const { estimateRunCost, getModelCost, closeDatabase } = await import('@lineage/core');
   const est = await estimateRunCost(evalConfig, getModelCost);
 
   // Human breakdown to stderr, machine JSON to stdout (CLI contract)
@@ -731,7 +731,7 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
 
   lastResolvedDbPath = resolveDbPath(dbPath);
   await initCliDatabase(dbPath);
-  const { getDatabase } = await import('@promptengine/core');
+  const { getDatabase } = await import('@lineage/core');
   const db = getDatabase();
   const row = db.prepare('SELECT run_json, config_id FROM evaluation_runs WHERE id = ?').get(runId) as { run_json: string; config_id: string } | undefined;
   if (!row) {
@@ -774,7 +774,7 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
   // not fail — it grinds through every remaining node with "Unknown provider",
   // marks itself finished, exits 0, and can never be resumed again. Refuse
   // before spending anything.
-  const { listProviders } = await import('@promptengine/core');
+  const { listProviders } = await import('@lineage/core');
   const available = new Set(listProviders());
   const missing = [...requiredProviders].filter(p => !available.has(p));
   if (missing.length > 0) {
@@ -924,7 +924,7 @@ async function main(): Promise<void> {
 main().catch((err) => {
   console.error('Fatal error:', err.message || err);
   // Best-effort cleanup on fatal error
-  import('@promptengine/core')
+  import('@lineage/core')
     .then(({ closeDatabase }) => closeDatabase())
     .catch(() => {})
     .finally(() => process.exit(1));

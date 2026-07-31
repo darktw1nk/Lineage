@@ -1,4 +1,4 @@
-# Contributing to PromptEngine.AI
+# Contributing to Lineage
 
 Thanks for your interest! This document covers what you need to work on the codebase.
 
@@ -17,8 +17,8 @@ Node.js ≥ 20 required. No native modules — the database is sql.js (WebAssemb
 ## Where things live
 
 ```
-packages/core     @promptengine/core — GA engine, operators, providers, persistence
-packages/cli      @promptengine/cli  — the promptengine command
+packages/core     @lineage/core — GA engine, operators, providers, persistence
+packages/cli      @lineage/cli  — the lineage command
 apps/desktop      Electron app (React 18 + React Flow + Zustand + Tailwind/shadcn)
 docs/             install guide, CLI reference
 .claude/skills/   agent skill for driving the CLI
@@ -42,14 +42,14 @@ npx vitest run packages/core/tests/engine/fitness.test.ts   # single file
 - **Migrations are append-only.** Never edit an applied migration in `packages/core/src/database/init.ts` — add the next `version === N` block, collapse `schema_version` via the existing `setVersion` helper, and add a migration test (see `packages/core/tests/database/init-path.test.ts` for the pattern, including the legacy multi-row case).
 - **Never log secrets.** API keys and store contents must not reach console output — log presence/absence, not values.
 - **Model catalog changes** (`insertDefaultModelCosts`) require a schema-version bump + migration and verified pricing (OpenRouter's public API is a good source); for Gemini, confirm the model actually serves `generateContent` — being listed is not enough.
-- **ESM everywhere**; relative imports keep the `.js` extension. Consumers import from `@promptengine/core`'s index only — deep imports are not part of the contract.
+- **ESM everywhere**; relative imports keep the `.js` extension. Consumers import from `@lineage/core`'s index only — deep imports are not part of the contract.
 - Commit messages: plain, imperative, no attribution trailers.
 
 ## Testing patterns already in the repo
 
 - Provider adapters: `vi.stubGlobal('fetch', mockFetch)` — see `packages/core/tests/providers/adapters.test.ts`
 - Engine operators: mock the provider factory — `vi.mock('../../src/providers/index.js')`
-- CLI: mock the whole engine — `vi.mock('@promptengine/core')` — see `packages/cli/tests/engine.test.ts`
+- CLI: mock the whole engine — `vi.mock('@lineage/core')` — see `packages/cli/tests/engine.test.ts`
 - IPC handlers: real sql.js db + mocked Electron — see `apps/desktop/tests/ipc/handlers.test.ts`
 - Renderer store: plain Zustand state assertions — see `apps/desktop/tests/store/evaluationStore.test.ts`
 

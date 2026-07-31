@@ -28,8 +28,8 @@ const { storeBacking, storeDelete, startEvalSpy } = vi.hoisted(() => {
   };
 });
 
-vi.mock('@promptengine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@promptengine/core')>();
+vi.mock('@lineage/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lineage/core')>();
   return {
     ...actual,
     store: {
@@ -47,7 +47,7 @@ vi.mock('@promptengine/core', async (importOriginal) => {
 });
 
 import { registerIPCHandlers } from '../../electron/ipc/handlers';
-import { initializeDatabase, closeDatabase } from '@promptengine/core';
+import { initializeDatabase, closeDatabase } from '@lineage/core';
 
 // Mock IpcMain that records handlers for direct invocation
 const channels = new Map<string, (...args: any[]) => Promise<any>>();
@@ -124,7 +124,7 @@ describe('evaluation CRUD round-trip', () => {
     expect(list.find((r: any) => r.id === run.id).interrupted).toBe(true);
 
     // Finished runs are NOT interrupted
-    const { getDatabase } = await import('@promptengine/core');
+    const { getDatabase } = await import('@lineage/core');
     const db = getDatabase();
     const row = db.prepare('SELECT run_json FROM evaluation_runs WHERE id = ?').get(run.id) as any;
     const finishedRun = { ...JSON.parse(row.run_json), status: 'finished' };

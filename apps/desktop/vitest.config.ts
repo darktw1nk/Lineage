@@ -5,7 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@promptengine/core': path.resolve(__dirname, '../../packages/core/src/index.ts'),
+      '@lineage/core': path.resolve(__dirname, '../../packages/core/src/index.ts'),
     },
   },
   test: {

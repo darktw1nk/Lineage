@@ -1,9 +1,9 @@
 ---
 name: evolving-prompts
-description: Use when asked to improve, optimize, or evolve an LLM prompt with measurable quality — or to run the PromptEngine evolution CLI, author an evolution config, or interpret evolution results/fitness.
+description: Use when asked to improve, optimize, or evolve an LLM prompt with measurable quality — or to run the Lineage evolution CLI, author an evolution config, or interpret evolution results/fitness.
 ---
 
-# Evolving Prompts (PromptEngine CLI)
+# Evolving Prompts (Lineage CLI)
 
 ## Overview
 

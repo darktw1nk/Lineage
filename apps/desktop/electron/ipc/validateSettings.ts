@@ -1,4 +1,4 @@
-import type { AppSettings } from '@promptengine/core';
+import type { AppSettings } from '@lineage/core';
 
 /**
  * Reject settings that cannot be honoured, instead of storing them.

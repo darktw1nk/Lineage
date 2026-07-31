@@ -86,7 +86,7 @@ describe('refusing a schema written by a NEWER build', () => {
     closeDatabase();
 
     const error = await expectRejection(dbPath);
-    expect(error.message).toMatch(/newer version of PromptEngine \(schema v6/);
+    expect(error.message).toMatch(/newer version of Lineage \(schema v6/);
     expect(error.message).toMatch(/this build understands v5/);
     expect(() => getDatabase()).toThrow(/not initialized/);
     expect(fs.existsSync(`${dbPath}.lock`)).toBe(false);

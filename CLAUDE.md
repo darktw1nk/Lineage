@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**PromptEngine.AI** — evolves LLM prompts using genetic algorithms. Users configure a test set with fitness metrics (quality, safety, cost, latency, stability); candidate prompts are evaluated in parallel across multiple LLM providers (OpenAI, Anthropic, Google Gemini, OpenRouter, Groq). Two front doors share one engine: a CLI for scripts/CI/AI agents and an Electron desktop app that visualizes evolution as a generation lineage graph.
+**Lineage** — evolves LLM prompts using genetic algorithms. Users configure a test set with fitness metrics (quality, safety, cost, latency, stability); candidate prompts are evaluated in parallel across multiple LLM providers (OpenAI, Anthropic, Google Gemini, OpenRouter, Groq). Two front doors share one engine: a CLI for scripts/CI/AI agents and an Electron desktop app that visualizes evolution as a generation lineage graph.
 
 **Stack**: Electron 28 + React 18 + TypeScript 5 + Vite 5 + Zustand + TanStack React Query + Tailwind CSS + React Flow + shadcn/ui
 **Engine**: Node.js with SQLite (sql.js — WebAssembly, no native modules); host-injected key/value store (electron-store in the desktop app)
@@ -12,14 +12,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Workspace Layout (npm workspaces)
 
 ```
-packages/core     @promptengine/core — engine, providers, database, types (publishable)
-packages/cli      @promptengine/cli  — command-line runner, bin: "promptengine" (publishable)
+packages/core     @lineage/core — engine, providers, database, types (publishable)
+packages/cli      @lineage/cli  — command-line runner, bin: "lineage" (publishable)
 apps/desktop      evolution2         — private Electron app (React renderer + IPC shell)
 ```
 
-- `@promptengine/core` has zero Electron dependencies. Hosts inject platform services before use: `setStore(...)`, `setSendUpdate(...)`, `initializeDatabase(dbPath)` (path is required).
-- Consumers import ONLY from the core index (`@promptengine/core`); deep imports are not part of the contract.
-- In dev, `@promptengine/core` resolves to core *source* via tsconfig `paths` / vite aliases; published consumers get `dist/` via the package `exports` map. The desktop main-process bundle inlines core source (only `sql.js` stays external).
+- `@lineage/core` has zero Electron dependencies. Hosts inject platform services before use: `setStore(...)`, `setSendUpdate(...)`, `initializeDatabase(dbPath)` (path is required).
+- Consumers import ONLY from the core index (`@lineage/core`); deep imports are not part of the contract.
+- In dev, `@lineage/core` resolves to core *source* via tsconfig `paths` / vite aliases; published consumers get `dist/` via the package `exports` map. The desktop main-process bundle inlines core source (only `sql.js` stays external).
 - The desktop package name MUST stay `evolution2` — the dev userData path (`%APPDATA%\evolution2\evolution.db`) and the CLI's shared-database discovery depend on it.
 
 ## Commands (run from repo root)
@@ -46,7 +46,7 @@ Tests live in `packages/core/tests/`, `packages/cli/tests/`, and `apps/desktop/t
 
 ```
 Renderer (React)  <--IPC-->  Main Process (Node.js)
-   Zustand store               @promptengine/core engine
+   Zustand store               @lineage/core engine
    React Flow graph            IPC handlers + logger
    shadcn/ui components        electron-store (injected via setStore)
 ```
@@ -76,7 +76,7 @@ Renderer (React)  <--IPC-->  Main Process (Node.js)
 - `electron/main.ts` — window + platform-service injection (store, sendUpdate, db path)
 - `electron/ipc/handlers.ts` — all IPC endpoints: `eval:*`, settings/keys/costs/models/logs/systemPrompts
 - `src/` — React renderer; Zustand store in `src/store/evaluationStore.ts`; React Flow graph in `CenterView.tsx`
-- `src/types/index.ts` — type-only re-export shim from `@promptengine/core` (keeps `@/types` imports working)
+- `src/types/index.ts` — type-only re-export shim from `@lineage/core` (keeps `@/types` imports working)
 
 ## Key Conventions
 

@@ -32,7 +32,7 @@ export function resolveDbPath(explicitPath?: string): string {
   // the current working directory happened to be and a second invocation from
   // another directory silently started from scratch.
   const home = process.env.HOME || process.env.USERPROFILE || os.homedir() || os.tmpdir();
-  const cliDir = path.join(home, '.promptengine');
+  const cliDir = path.join(home, '.lineage');
   const resolved = path.join(cliDir, 'evolution.db');
   return path.resolve(resolved);
 }
@@ -68,7 +68,7 @@ export async function initCliDatabase(explicitPath?: string, options: { readOnly
 
   // Say which database, always. Without --db the CLI silently adopts the
   // DESKTOP app's database when its userData directory exists, and a
-  // CLI-specific file under ~/.promptengine otherwise — so "my runs are
+  // CLI-specific file under ~/.lineage otherwise — so "my runs are
   // missing" and "the desktop shows runs I never started there" both have the
   // same invisible cause. stderr, so --output/JSON capture is unaffected.
   process.stderr.write(
@@ -76,7 +76,7 @@ export async function initCliDatabase(explicitPath?: string, options: { readOnly
   );
 
   // Import the engine's database init — it accepts an optional dbPath
-  const { initializeDatabase } = await import('@promptengine/core');
+  const { initializeDatabase } = await import('@lineage/core');
   await initializeDatabase(dbPath, { readOnly: options.readOnly });
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "evolution2",
   "version": "1.0.0",
-  "description": "PromptEngine.AI desktop app - Genetic Algorithm for LLM Prompt Optimization",
+  "description": "Lineage desktop app - Genetic Algorithm for LLM Prompt Optimization",
   "author": "Alexander Goncharov",
   "private": true,
   "type": "module",
@@ -40,7 +40,7 @@
     "zustand": "^4.4.7"
   },
   "devDependencies": {
-    "@promptengine/core": "^1.0.0",
+    "@lineage/core": "^1.0.0",
     "@types/d3": "^7.4.3",
     "@types/react": "^18.2.46",
     "@types/react-dom": "^18.2.18",
@@ -59,8 +59,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.promptengine.evolution",
-    "productName": "PromptEngine.AI",
+    "appId": "com.lineage.evolution",
+    "productName": "Lineage",
     "directories": {
       "output": "release"
     },
@@ -93,7 +93,7 @@
       "createStartMenuShortcut": true
     },
     "portable": {
-      "artifactName": "PromptEngine-${version}-portable.exe"
+      "artifactName": "Lineage-${version}-portable.exe"
     },
     "mac": {
       "target": [

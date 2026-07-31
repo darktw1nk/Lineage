@@ -11,7 +11,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import type { UUID } from '../types';
-import { selectChampion } from '@promptengine/core';
+import { selectChampion } from '@lineage/core';
 import { useEvaluation } from '../hooks/useEvaluation';
 
 interface CenterViewProps {

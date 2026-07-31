@@ -82,16 +82,16 @@ Notes:
 
 ## Installable packages
 
-`@promptengine/core` (engine) and `@promptengine/cli` (the `promptengine` command) are publish-ready but not yet on npm. To use them outside this repo today:
+`@lineage/core` (engine) and `@lineage/cli` (the `lineage` command) are publish-ready but not yet on npm. To use them outside this repo today:
 
 ```bash
 npm run build:packages
-cd packages/core && npm pack       # -> promptengine-core-1.0.0.tgz
-cd ../cli && npm pack              # -> promptengine-cli-1.0.0.tgz
+cd packages/core && npm pack       # -> lineage-core-1.0.0.tgz
+cd ../cli && npm pack              # -> lineage-cli-1.0.0.tgz
 
 # in any project or empty directory:
-npm install /path/to/promptengine-core-1.0.0.tgz /path/to/promptengine-cli-1.0.0.tgz
-npx promptengine --help
+npm install /path/to/lineage-core-1.0.0.tgz /path/to/lineage-cli-1.0.0.tgz
+npx lineage --help
 ```
 
 Requires only plain Node — the engine uses sql.js (WebAssembly), so there are no native modules to compile.

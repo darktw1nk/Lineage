@@ -4,7 +4,7 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@promptengine/core': path.resolve(__dirname, '../core/src/index.ts'),
+      '@lineage/core': path.resolve(__dirname, '../core/src/index.ts'),
     },
   },
   test: {

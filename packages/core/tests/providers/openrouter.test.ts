@@ -70,7 +70,7 @@ describe('OpenRouterAdapter', () => {
             'Authorization': 'Bearer sk-test-key',
             'Content-Type': 'application/json',
             'HTTP-Referer': expect.any(String),
-            'X-Title': 'PromptEngine',
+            'X-Title': 'Lineage',
           }),
         }),
       );

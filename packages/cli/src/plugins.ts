@@ -5,7 +5,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { loadPlugins, type PluginManifest } from '@promptengine/core';
+import { loadPlugins, type PluginManifest } from '@lineage/core';
 
 export interface CliPluginOptions {
   configDir: string;

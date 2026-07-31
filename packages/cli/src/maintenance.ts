@@ -153,7 +153,7 @@ export async function pruneRuns(
     // called on a clean finish and on desktop delete, so a run that crashed
     // and was never resumed left `.spend-<uuid>.json` next to the database
     // forever — and pruning its row did not take the file with it.
-    const { clearSpend } = await import('@promptengine/core');
+    const { clearSpend } = await import('@lineage/core');
     for (const id of deleted) clearSpend(dbPath, id);
   }
 

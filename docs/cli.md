@@ -1,9 +1,9 @@
-# PromptEngine.AI — CLI Reference
+# Lineage — CLI Reference
 
 ## Install
 
 - **From this repo**: `npm run cli -- <options>` (runs from source via tsx).
-- **As a package** (not yet published to npm): install `@promptengine/core` + `@promptengine/cli` tarballs (`npm pack` in each package), then use `npx promptengine <options>`.
+- **As a package** (not yet published to npm): install `@lineage/core` + `@lineage/cli` tarballs (`npm pack` in each package), then use `npx lineage <options>`.
 
 ## Usage
 
@@ -26,7 +26,7 @@ npm run cli -- --help                       # Show help
 
 Starting from nothing: `--init` writes a runnable config (four tests, a $1 budget, a 25% holdout, and models that are all in the fresh-install price catalog) so `--estimate` on it quotes real numbers. It refuses to overwrite an existing file.
 
-Any command that opens the database prints `Database: <path>` to stderr (`--help`, `--init` and `--set-key` do not open one). Without `--db` the CLI shares the **desktop app's** database when its data directory exists, and uses `~/.promptengine/evolution.db` otherwise — so it is worth reading that line before wondering where a run went.
+Any command that opens the database prints `Database: <path>` to stderr (`--help`, `--init` and `--set-key` do not open one). Without `--db` the CLI shares the **desktop app's** database when its data directory exists, and uses `~/.lineage/evolution.db` otherwise — so it is worth reading that line before wondering where a run went.
 
 Progress and all engine logs go to stderr. **stdout carries the JSON result for `--config` runs and for `--estimate`**; `--help` and `--list-models` print human-readable text there instead, and `--init`, `--set-key`, `--archive-runs` and `--prune-runs` write only to stderr. Every error path exits non-zero with an empty stdout. **When capturing stdout, add `--silent` to `npm run`** — without it npm prints its own two-line banner to stdout ahead of the payload, and `JSON.parse` fails on it:
 
