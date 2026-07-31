@@ -22,6 +22,8 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 
 *One real run: 4 generations, 24 candidates, 3 models, 2m43s, $0.20.*
 
+**Set it up whichever way you work:** click it together in the desktop app, write a JSON config for the `lineage` CLI — or describe the job to your coding agent and let it run the whole thing, using the [`evolving-prompts` skill](.claude/skills/evolving-prompts/SKILL.md) this repo ships.
+
 ## Why this beats prompt engineering by hand
 
 **Prompting is empirical, but nobody treats it that way.** You tweak a word, eyeball three outputs, and ship. Lineage replaces that loop with selection pressure: every candidate is scored on every test, every generation, and only measured improvement survives. The lineage graph shows you exactly which edit earned its place.
