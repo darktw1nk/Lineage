@@ -12,7 +12,15 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 
 ![Evolution run](docs/assets/evolution-run.gif)
 
-*A real run: 24 candidates, 4 generations, 3 models competing, 2m43s, $0.20 total. The task: turn support tickets into a strict one-line record. The hand-written seed — "Summarize the customer ticket." — scored **2.25**: it writes prose, and prose is the wrong answer. By generation 2, meta-prompting had read the graded failures and written the output contract itself (`order=<order_number> | issue=<core_issue> | request=<specific_request>`) — **6.25**. And the number that counts, bottom right: on two tickets evolution never saw, **3.00 → 8.00**. The format it discovered generalized; that's the claim the holdout is there to license.*
+**The task:** turn a support ticket into one structured line — `order=4821 | issue=cracked jar | request=replacement`.
+
+**The starting prompt** was *"Summarize the customer ticket."* It writes a paragraph when the answer is a record, so it scores **2.25/10**.
+
+**What you're watching:** each row is one generation of 6 competing prompts. By generation 2 the engine had read its own graded failures and rewritten the prompt to specify the exact output format — **6.25/10** (gold).
+
+**The honest check:** two tickets were held back from training entirely. The starting prompt scores **3/10** on them, the evolved prompt **8/10**. It learned the task, not the test set.
+
+*One real run: 4 generations, 24 candidates, 3 models, 2m43s, $0.20.*
 
 ## Why this beats prompt engineering by hand
 
