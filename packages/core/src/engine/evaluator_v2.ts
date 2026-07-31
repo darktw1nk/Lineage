@@ -81,37 +81,12 @@ interface EvaluationState {
   totalPausedMs: number; // Total time spent paused
   gradingTotal: number; // Total grading calls completed
   gradingFailures: number; // Grading calls that failed to parse JSON
-  /**
-   * Worst-case dollars for calls that have been COMMITTED but have not settled.
-   *
-   * budgetUSD used to be checked against settled spend alone. Every test x
-   * sample of a node reaches the gate in the same tick (see the Promise.all in
-   * runNodeTests), and `parallelLimit` nodes do it at once, so they all read the
-   * same totals.usd and all pass. Measured on a 5-test x 4-sample config with a
-   * $7 cap: $26 at parallelLimit 1, $166 at parallelLimit 8 — a 23.7x breach.
-   * Counting in-flight commitments against the cap is what makes it a cap.
-   */
-  reservedUSD: number;
-  /**
-   * Catalog prices per model, cached so the gate costs no lookups.
-   * A struct, NOT two entries with a `#c` suffix on the key: a model literally
-   * named `x#c` then read another model's completion price as its prompt
-   * price, refused every call, and finished `exhausted` with nothing produced.
-   */
-  callCeilingUSD: Map<string, { prompt: number; completion: number }>;
-  /** Completion tokens this run has actually seen per model — reservations adapt to it. */
-  observedCompletion: Map<string, { sum: number; n: number }>;
-  /** Priciest single call settled so far — the reservation floor for adapter-priced models. */
-  maxObservedCallUSD: number;
-  /**
-   * Resolves when the first call of an UNPRICED model settles.
-   *
-   * With no catalog row and nothing billed yet there is no way to know what a
-   * call costs, so a reservation of $0 lets an unlimited number start at once —
-   * which is how the fill phase spent 3x a two-call budget. Exactly one call is
-   * allowed to run as the price probe; the rest wait for its answer, then
-   * reserve against real evidence.
-   */
+  // The predictive-reservation state (reservedUSD, callCeilingUSD,
+  // observedCompletion, maxObservedCallUSD) was deleted in pass 20's cleanup:
+  // the reservation model was reverted to a settled-spend gate long ago and
+  // pass-20's hunter proved the fields were written but never read anywhere.
+  // reserveCall's comment records why prediction was abandoned; do not
+  // reintroduce these without measuring both failure directions.
   /** Calls that threw. Their provider-side spend, if any, is unknowable here. */
   failedCalls: number;
   /** Times the cap REFUSED a call. Settled spend can sit below the cap while this climbs. */
@@ -422,10 +397,6 @@ async function startEvaluationInner(
     warnedStabilityNeedsSamples: false,
     warnedTruncation: false,
     warnedZeroCostModels: new Set(),
-    reservedUSD: 0,
-    callCeilingUSD: new Map(),
-    observedCompletion: new Map(),
-    maxObservedCallUSD: 0,
     budgetRefusals: 0,
     failedCalls: 0,
     lastNodeCheckpointAt: 0, // 0 => the first node always checkpoints
@@ -656,28 +627,20 @@ async function mutatePopulationInBackground(
 
       // Stable label: the node's index in generation 0 — identical streams across resume
       const gen0Index = shellNodes.indexOf(node);
-      // HONESTY NOTE (pass 19, hunter B F4): reserveCall is a settled-spend
-      // CHECK, not a reservation — its sizing arguments are ignored. The
+      // reserveCall is a settled-spend CHECK, not a reservation. The
       // between-calls protection comes from the shouldAbort gate passed to
       // mutateNode below, which sees the operator's own unsettled spend.
-      const fillMaxTokens = (state.config as any).serviceModelMaxTokens || 20000;
-      const fillReserved = await reserveCall(
-        state, state.config.serviceModel, shellNodes[0].prompt, fillMaxTokens * 2);
-      let result;
-      try {
-        result = await mutateNode(
-          shellNodes[0].prompt,
-          state.config,
-          rngFor(state.config.seed, 'fill', gen0Index),
-          // Between its own billed calls the operator asks whether its
-          // unsettled spend has crossed the cap — the gate above only ran once.
-          (spentSoFarUSD = 0) =>
-            budgetExhausted(state, spentSoFarUSD) ||
-            state.status === 'stopped' || state.status === 'pausing',
-        );
-      } finally {
-        releaseCall(state, fillReserved);
-      }
+      await reserveCall(state);
+      const result = await mutateNode(
+        shellNodes[0].prompt,
+        state.config,
+        rngFor(state.config.seed, 'fill', gen0Index),
+        // Between its own billed calls the operator asks whether its
+        // unsettled spend has crossed the cap — the gate above only ran once.
+        (spentSoFarUSD = 0) =>
+          budgetExhausted(state, spentSoFarUSD) ||
+          state.status === 'stopped' || state.status === 'pausing',
+      );
 
       // Update node
       node.prompt = result.prompt;
@@ -1428,9 +1391,8 @@ async function runSingleSample(
       throw new BudgetExhaustedError();
     }
 
-    // Reserve BEFORE the await so concurrent samples cannot all clear the same
-    // gate; release in `finally` so a throw never strands the reservation.
-    const reserved = await reserveCall(state, params.model, `${system ?? ''}${samplePrompt}`, maxTokens);
+    // The settled-spend gate, checked immediately before the billable call.
+    await reserveCall(state);
     let result;
     try {
       result = await adapter.call({
@@ -1455,8 +1417,6 @@ async function runSingleSample(
           params.model, { usd: 0, promptTokens: 0, completionTokens: 0, calls: 1 });
       }
       throw callErr;
-    } finally {
-      releaseCall(state, reserved);
     }
 
     // A reply the CAP ended, not the model, is not a bad answer — but every
@@ -1503,25 +1463,19 @@ async function runSingleSample(
       const { evaluateTestResultLLM } = await import('./fitness.js');
       const serviceAdapter = getProviderAdapter(state.config.serviceModel.provider);
 
-      // Reserved like the candidate call above. Grading fans out exactly as
-      // wide (one per llm_grade test per sample), so leaving it unreserved
-      // reopened the same "everyone reads the same settled total" hole.
-      const gradeReserved = await reserveCall(state, state.config.serviceModel, result.output, maxTokens);
-      let gradingResult;
-      try {
-        gradingResult = await evaluateTestResultLLM(
-          test,
-          candidatePrompt,
-          test.prompt,
-          result.output,
-          state.config.serviceModel,
-          serviceAdapter,
-          maxTokens,
-          state.config.callTimeoutMs
-        );
-      } finally {
-        releaseCall(state, gradeReserved);
-      }
+      // Gated like the candidate call above. Grading fans out exactly as wide
+      // (one per llm_grade test per sample).
+      await reserveCall(state);
+      const gradingResult = await evaluateTestResultLLM(
+        test,
+        candidatePrompt,
+        test.prompt,
+        result.output,
+        state.config.serviceModel,
+        serviceAdapter,
+        maxTokens,
+        state.config.callTimeoutMs
+      );
 
       score = gradingResult.score;
       passed = gradingResult.passed;
@@ -1839,7 +1793,6 @@ async function moveToNextGeneration(
   state.currentGeneration++;
   state.run.generations.push([]);
   
-  const opMaxTokens = (state.config as any).serviceModelMaxTokens || 20000;
   const result = await createNextGeneration(
     topPerformers,
     currentGen,
@@ -1847,9 +1800,9 @@ async function moveToNextGeneration(
     state.config,
     state.run.generations, // Pass all generations for elitism
     {
-      // An operator child is 2+ service calls; reserve for both.
-      reserve: (promptText: string) => reserveCall(state, state.config.serviceModel, promptText, opMaxTokens * 2),
-      release: (reserved: number) => releaseCall(state, reserved),
+      // The settled-spend gate, thrown as BudgetExhaustedError when the cap
+      // is already crossed — the per-child catch carries the parent unpaid.
+      reserve: () => reserveCall(state),
       // Stop as well as budget: the operator batch ran on after a manual Stop
       // for the same reason the playoff did.
       exhausted: (extraUSD = 0) =>
@@ -2207,16 +2160,11 @@ function budgetExhausted(state: EvaluationState, extraUSD = 0): boolean {
  * 9.4% of the budget spent. The cap became a floor on what you had to budget:
  * parallelLimit x 2 x maxTokens/1000 x completionPrice, regardless of the run.
  *
- * A realistic reservation that ADAPTS to what this run actually produces keeps
- * the gate honest (concurrent calls still cannot all clear the same total)
- * while leaving the overshoot bounded and small.
  */
-/** Commit a call's worst case against the cap, or refuse it if it does not fit. */
-async function reserveCall(
-  state: EvaluationState, _model: ModelRef, _promptText: string, _maxTokens: number,
-): Promise<number> {
+/** The settled-spend budget gate: throws BudgetExhaustedError once the cap is crossed. */
+async function reserveCall(state: EvaluationState): Promise<void> {
   const budget = state.config.targets.budgetUSD;
-  if (budget === undefined) return 0;
+  if (budget === undefined) return;
   // REVERTED to a settled-spend gate. Reserving a predicted per-call cost
   // was tried three times and failed a different way each time:
   //   - reserving serviceModelMaxTokens strangled runs at 2.6x their true
@@ -2235,21 +2183,6 @@ async function reserveCall(
   if (state.run.totals.usd >= budget) {
     state.budgetRefusals++;
     throw new BudgetExhaustedError();
-  }
-  return 0;
-}
-
-/**
- * Release a reservation once the call has settled (or failed).
- *
- * The reservation model was reverted (a settled-spend gate replaced it), so
- * `reserved` is always 0 today. The function stays as the single release point
- * in the `finally`, but the price-probe microtask it used to queue is gone: it
- * fired on EVERY call to resolve a probe that can no longer be created.
- */
-function releaseCall(state: EvaluationState, reserved: number): void {
-  if (reserved > 0) {
-    state.reservedUSD = Math.max(0, state.reservedUSD - reserved);
   }
 }
 
@@ -2344,22 +2277,6 @@ function accrueCost(
       `${c.promptTokens + c.completionTokens} tokens. If that is not a genuinely free model, budgetUSD ` +
       `cannot be enforced for it — a provider adapter must return a real "usd" value.`,
     );
-  }
-
-  // Per-call, not per-batch: a multi-call accrual (safety guardrails, an
-  // operator) would otherwise overstate what one call can cost.
-  if (c.calls > 0) {
-    state.maxObservedCallUSD = Math.max(state.maxObservedCallUSD, c.usd / c.calls);
-    // Feed the reservation model what completions on this model really look
-    // like, so the cap stops being a floor on what you have to budget.
-    // Lazily initialised: accrueCost is also reached from helpers that build a
-    // partial state (evaluatePromptOnTests is exported and called directly).
-    const observed = (state.observedCompletion ??= new Map());
-    const key = `${model.provider}/${model.model}`;
-    const seen = observed.get(key) ?? { sum: 0, n: 0 };
-    seen.sum += c.completionTokens;
-    seen.n += c.calls;
-    observed.set(key, seen);
   }
 
   state.run.totals.usd += c.usd;

@@ -5,6 +5,7 @@ import { Pause, Play, Square, Loader2, Settings2 } from 'lucide-react';
 import type { UUID } from '../types';
 import { useEvaluation } from '../hooks/useEvaluation';
 import { holdoutTile } from '../utils/holdoutTile';
+import { carryShare, carryShareWarns } from '../utils/carryShare';
 
 interface FooterProps {
   evaluationId: UUID | null;
@@ -197,6 +198,22 @@ export function Footer({ evaluationId, onShowConfig }: FooterProps) {
               <div className={`text-xs ${tile.warn ? 'text-amber-500' : 'text-muted-foreground'}`}>Holdout</div>
               <div className={`text-sm font-medium ${tile.warn ? 'text-amber-500' : ''}`}>
                 {tile.value}{tile.warn ? ' ⚠️' : ''}
+              </div>
+            </div>
+          );
+        })()}
+
+        {(() => {
+          // A run where evolution silently did nothing (all children carried
+          // after rejected operator output or an exhausted budget) must not
+          // look like a healthy one. The CLI report warns at the same 50%.
+          const share = carryShare(evaluation.generations);
+          if (!carryShareWarns(share)) return null;
+          return (
+            <div title="These children kept their parent's prompt unchanged — the operator's output was rejected (echo/JSON/no-op), the operator failed, or the budget ran out. Evolution explored far less than the generation count suggests.">
+              <div className="text-xs text-amber-500">Carried</div>
+              <div className="text-sm font-medium text-amber-500">
+                {share.carried}/{share.children} unchanged ⚠️
               </div>
             </div>
           );

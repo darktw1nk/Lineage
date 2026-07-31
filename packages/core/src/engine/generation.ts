@@ -359,8 +359,8 @@ export async function createNextGeneration(
    * below turns that into a CARRY, so the parent advances unchanged and unpaid.
    */
   budget?: {
-    reserve: (promptText: string) => Promise<number>;
-    release: (reserved: number) => void;
+    /** The settled-spend gate: rejects (BudgetExhaustedError) when the cap is crossed. */
+    reserve: () => Promise<void>;
     /** `extraUSD` = spend a caller has billed but not yet settled into totals. */
     exhausted: (extraUSD?: number) => boolean;
     /**
@@ -608,12 +608,10 @@ export async function createNextGeneration(
         // plugin that mutated the live parent rewrote the already-scored
         // parent node in place and every sibling saw the damage, because the
         // same object was handed to all of them.
-        // HONESTY NOTE (pass 19): `reserve` is a settled-spend CHECK, not a
-        // hold — its sizing is ignored upstream. Real between-call protection:
+        // `reserve` is the settled-spend CHECK. Real between-call protection:
         // accrueChild settles each completed child into totals, and shouldAbort
         // (below) lets multi-call operators see their own unsettled spend.
-        const reserved = await budget?.reserve(parent.prompt) ?? 0;
-        try {
+        await budget?.reserve();
         const result = await withOperatorTimeout(
           op.apply({
             parent: snapshot(parent),
@@ -693,9 +691,6 @@ export async function createNextGeneration(
           operatorType: operatorName as string | null,
           cost: validated.cost,
         };
-        } finally {
-          budget?.release(reserved);
-        }
       } catch (error) {
         // A refused reservation is not a failure — it is the cap working.
         if ((error as any)?.name === 'BudgetExhaustedError') {

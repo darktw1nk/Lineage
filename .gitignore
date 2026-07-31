@@ -34,3 +34,6 @@ Thumbs.db
 out/
 *.tsbuildinfo
 /experiments/
+
+# Local run artifacts (CLI reports/results scratch)
+/testoutputs/

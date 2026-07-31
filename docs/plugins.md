@@ -28,7 +28,7 @@ Plugins are authored in plain JavaScript (ESM). TypeScript authors precompile �
   label: 'Section Shuffle',      // UI display name
   description: '...',
   parents: 1,                    // 1 = unary (gets `parent`), 2 = binary (also gets `parentB`)
-  async apply({ parent, parentB, config, generation, rng }) {
+  async apply({ parent, parentB, config, generation, rng, shouldAbort }) {
     return {
       prompt: '...',                                    // the child's prompt (required)
       params: { temperature: 1.2 },                     // optional patch: temperature, seed, model
@@ -60,6 +60,8 @@ try { /* ... */ } catch (err) { throw withPartialCost(err, spentSoFar); }
 - Need an LLM inside your operator? `import { getProviderAdapter } from '@lineage/core'` and call the service model from `config.serviceModel` — report the spend in `cost` so budget enforcement stays accurate.
 - Throwing from `apply()` is safe: the engine falls back to carrying the parent forward with an `ERROR` changelog entry.
 - Need randomness? Use `ctx.rng()` instead of `Math.random()` — it's a deterministic stream when the run is seeded (`"seed"` / `--seed`), so your operator stays reproducible for free.
+- **Multi-call operators: check `ctx.shouldAbort(spentSoFarUSD)` between your own LLM calls**, passing what you have billed so far. The host's budget gate only runs once, before your first call — an operator that never checks can bill its whole retry ceiling past `budgetUSD`. When it returns `true`, stop and return a carry (the parent's prompt with an honest changelog) including the spend you already made.
+- **The `shouldAbort` reports are also your crash insurance.** If your `apply()` is declared hung (the liveness timeout), the engine cannot see what your detached calls billed — the last figure you passed to `shouldAbort` is used as the accounting floor. An operator that never calls it and then hangs leaves its spend invisible to totals and budget enforcement; there is nothing the engine can do about that.
 
 ## Providers
 

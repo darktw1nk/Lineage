@@ -252,8 +252,7 @@ describe('the operator batch respects the budget hook', () => {
     } as any);
     let exhausted = false;
     const { newNodes } = await run([makeParent('p1')], makeConfig({ population: { initialSize: 6, generationSize: 6, seedPrompt: 's', fill: 'auto' } } as any), {
-      reserve: async () => 0,
-      release: () => {},
+      reserve: async () => {},
       exhausted: () => { const was = exhausted; exhausted = true; return was; }, // false once, then true
     });
     expect(applied).toBe(1);
@@ -272,7 +271,6 @@ describe('the operator batch respects the budget hook', () => {
     const refuse = () => { const e: any = new Error('Budget exhausted'); e.name = 'BudgetExhaustedError'; throw e; };
     const { newNodes, costTracking } = await run([makeParent('p1')], makeConfig(), {
       reserve: async () => refuse(),
-      release: () => {},
       exhausted: () => false,
     });
     expect(newNodes.every(n => n.changeLog[0]?.label === 'CARRY')).toBe(true);

@@ -167,8 +167,7 @@ describe('a generation transition settles spend per child, not per batch', () =>
     // gate then reads the accrued total and children 3-4 must carry unpaid.
     let settled = 0;
     const budget = {
-      reserve: async () => 0,
-      release: () => {},
+      reserve: async () => {},
       exhausted: (extra = 0) => settled + extra >= 0.015,
       accrueChild: (cost: any) => { settled += cost.usd; },
     };
@@ -205,7 +204,7 @@ describe('pass-20 hunter-B holes: what an operator reports cannot corrupt the bo
     } as any);
     let settled = 0;
     const budget = {
-      reserve: async () => 0, release: () => {},
+      reserve: async () => {},
       exhausted: () => false,
       accrueChild: (cost: any) => { settled += cost.usd; },
     };
