@@ -44,6 +44,19 @@ const createWindow = () => {
     },
   });
 
+  // Intercept the CLOSE, not the quit. Here the window still exists, so
+  // cancelling leaves a usable app instead of a headless one.
+  mainWindow.on('close', (event) => {
+    if (quitConfirmed) return;
+    const running = runningEvaluationIds();
+    if (running.length === 0) return;
+    if (!confirmEndingRun(running.length)) {
+      event.preventDefault();
+      return;
+    }
+    quitConfirmed = true;
+  });
+
   // Load the app
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -118,30 +131,38 @@ app.whenReady().then(async () => {
 // unrecoverable (the spend sidecar only recovers SETTLED spend), and the run
 // reappeared as `interrupted` with nothing explaining why.
 let quitConfirmed = false;
-app.on('before-quit', (event) => {
-  // Only ask while a WINDOW still exists. Clicking X destroys the window, which
-  // fires window-all-closed -> app.quit() -> here; choosing 'Keep running' then
-  // preventDefault()s a quit for an app that has no UI left, so the run cannot
-  // be observed, paused or stopped and every further quit re-raises a
-  // parent-less modal. Before the prompt existed, closing the window simply
-  // ended the process.
-  const running = quitConfirmed ? [] : runningEvaluationIds();
-  if (running.length > 0) {
-    event.preventDefault();
-    const keep = dialog.showMessageBoxSync({
-      type: 'warning',
-      buttons: ['Keep running', 'Quit anyway'],
-      defaultId: 0,
-      cancelId: 0,
-      title: 'An evaluation is still running',
-      message: `Quitting now will end ${running.length} run(s) in progress.`,
-      detail: 'Calls already in flight are paid for and cannot be recovered. The run can be resumed later from its last checkpoint.',
-    }) === 0;
-    if (keep) return;
-    quitConfirmed = true;
-    app.quit();
-    return;
-  }
+
+/**
+ * Ask before ending a run in progress, and ask WHERE THE WINDOW STILL EXISTS.
+ *
+ * This has cycled between two bugs twice. With no check, clicking X ended the
+ * run silently — calls in flight are paid for and unrecoverable, since the
+ * spend sidecar only recovers SETTLED spend. Adding `getAllWindows().length > 0`
+ * to before-quit made the prompt unreachable from the dominant gesture, because
+ * X destroys the window BEFORE window-all-closed fires. Reverting brought back a
+ * third state: preventDefault on a quit for an app with no UI, leaving it
+ * headless and unquittable.
+ *
+ * The gesture has to be intercepted at the WINDOW's close event, which runs
+ * while the window is still alive and can simply be cancelled.
+ */
+function confirmEndingRun(count: number): boolean {
+  return dialog.showMessageBoxSync({
+    type: 'warning',
+    buttons: ['Keep running', 'Quit anyway'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'An evaluation is still running',
+    message: `Quitting now will end ${count} run(s) in progress.`,
+    detail: 'Calls already in flight are paid for and cannot be recovered. The run can be resumed later from its last checkpoint.',
+  }) === 1;
+}
+app.on('before-quit', () => {
+  // No prompt here. The window's own `close` handler above owns the question,
+  // where cancelling still leaves a usable app; asking at before-quit means
+  // either missing the dominant gesture (the window is already gone) or
+  // cancelling a quit for an app with no UI. This path just releases the
+  // database, which the previous version could skip entirely.
   closeDatabase();
 });
 

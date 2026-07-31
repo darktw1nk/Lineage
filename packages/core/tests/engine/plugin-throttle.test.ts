@@ -194,6 +194,7 @@ describe('the timeout must not break the concurrency cap it sits beside', () => 
       name: 'slowplug',
       estimateTokens: () => ({ prompt: 1 }),
       call: async () => {
+        issued++;
         inFlight++; peak = Math.max(peak, inFlight);
         await new Promise(r => setTimeout(r, 600));
         inFlight--; done++;
@@ -212,6 +213,10 @@ describe('the timeout must not break the concurrency cap it sits beside', () => 
     // starves every later test in this file — which is what a 1500ms guess did.
     // Wait for the work that was actually STARTED. Calls beyond the leak
     // budget are refused before reaching the plugin, so `issued` < 8.
+    // `issued` was DECLARED AND NEVER INCREMENTED, so this read `while (done < 0)`
+    // and never looped once — drainSemaphore() below did all the work while the
+    // comment claimed this line waited for the work that had started.
+    expect(issued).toBeGreaterThan(0);
     while (done < issued) await new Promise(r => setTimeout(r, 50));
     // done++ runs inside the plugin, BEFORE withGlobalSemaphore's finally has
     // released the permit. The semaphore is a singleton and setPermits computes
@@ -275,7 +280,11 @@ describe('callTimeoutMs measures the CALL, not the queue wait', () => {
     const gaveUp = results.filter(r => r === 'timeout').length;
     await new Promise(r => setTimeout(r, 1600)); // let the queue drain
     // Whatever timed out must NOT have been sent to the provider.
-    expect(issued).toBe(3 - gaveUp);
+    // `gaveUp` is structurally 0 here — the timer is armed AFTER acquiring, so
+    // 3 x 400ms calls under a 500ms timeout never time out, which made the old
+    // assertion literally `expect(3).toBe(3)`. Assert both halves explicitly.
+    expect(gaveUp).toBe(0);
+    expect(issued).toBe(3);
   }, 30000);
 });
 

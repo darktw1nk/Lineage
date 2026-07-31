@@ -52,18 +52,29 @@ describe('events arriving before hydrate are not lost', () => {
   });
 
   it('drains the buffer, so a re-hydrate cannot replay it again', () => {
-    // `totals` is NOT cumulative — updateTotals does { ...evaluation, totals },
-    // a replace — so using it here was exactly as idempotent as the `status`
-    // event it replaced, and the mutation that removes the drain SURVIVED.
-    // node_created appends, so a second replay is visible as a duplicate.
+    // Assert on the REPLAY, not on state. Every store mutator is idempotent by
+    // design — addNode replaces by id, addPlayoff replaces by generation,
+    // updateTotals overwrites — because resume replays events for records the
+    // store may already hold. So NO event can reveal a double-replay through
+    // state, which is why two earlier attempts at this test were tautological
+    // and deleting the drain survived the whole 1086-test suite twice.
     const store = useEvaluationStore.getState();
     store.subscribe(RUN);
     handler!(null, { type: 'node_created', node: { id: 'n1', generation: 0, status: 'pending' } });
-    useEvaluationStore.getState().hydrate(RUN, snapshot());
-    const afterFirst = useEvaluationStore.getState().evaluations.get(RUN)!.generations.flat().length;
-    useEvaluationStore.getState().hydrate(RUN, snapshot());
-    const afterSecond = useEvaluationStore.getState().evaluations.get(RUN)!.generations.flat().length;
-    expect(afterSecond).toBe(afterFirst);
+
+    const replays: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => {
+      const line = args.map(String).join(' ');
+      if (line.includes('Replaying')) replays.push(line);
+    };
+    try {
+      useEvaluationStore.getState().hydrate(RUN, snapshot());
+      useEvaluationStore.getState().hydrate(RUN, snapshot());
+    } finally {
+      console.log = realLog;
+    }
+    expect(replays).toHaveLength(1);
   });
 
   it('keeps the TERMINAL events AND enforces the bound', () => {

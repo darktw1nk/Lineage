@@ -105,10 +105,20 @@ function parseVerdict(raw: string, echoed: readonly string[] = []): 'A' | 'B' | 
   // WORST of four contenders from last to second while stealing half a point
   // from every rival; evolution finds that immediately because it is free.
   // Prose written by the judge cannot be forged by a candidate this way.
+  // Echo-check the PROSE rung too. The skip below guarded only rung 3, and this
+  // rung runs FIRST — so a candidate writing `output B is better` or `Winner: B`
+  // was read as the verdict, and because the reply is then READABLE attribution
+  // never ran. Measured: a fitness-2 candidate took half a point off a
+  // fitness-9 rival, and at MIN_DECISIVE_MARGIN 1 that 0.5/0.5 also discards the
+  // whole playoff. Both harms are the ones the previous fix claimed to close.
+  const flat = (t: string) => t.replace(/\s+/g, '');
+  const echoedFlat = echoed.map(flat);
+  const echoedByCandidate = (span: string) => echoedFlat.some(e => e.includes(flat(span)));
+
   const prose =
     text.match(/output\s*([ab])\s+is\s+(?:better|superior|preferred|stronger)/i) ??
     text.match(/winner\s*(?:is|:)?\s*"?(?:output\s*)?([ab])\b/i);
-  if (prose) return prose[1].toUpperCase() as 'A' | 'B';
+  if (prose && !echoedByCandidate(prose[0])) return prose[1].toUpperCase() as 'A' | 'B';
 
   // 3) Last resort: a JSON object embedded in prose ("Verdict follows: {...}").
   //    Take the LAST one — the judge writes its own conclusion after anything
@@ -123,11 +133,9 @@ function parseVerdict(raw: string, echoed: readonly string[] = []): 'A' | 'B' | 
   //    emitting the letter-symmetric {"winner":"tie"} stole half a point from a
   //    fitness-9 rival, and order-swapping cannot cancel a tie. Whitespace is
   //    collapsed so formatting differences do not evade the comparison.
-  const flat = (t: string) => t.replace(/\s+/g, '');
-  const echoedFlat = echoed.map(flat);
   const embedded = balancedSpans(text, '{', '}').reverse();
   for (const candidate of embedded) {
-    if (echoedFlat.some(e => e.includes(flat(candidate)))) continue;
+    if (echoedByCandidate(candidate)) continue;
     const verdict = asVerdict(candidate);
     if (verdict) return verdict;
   }

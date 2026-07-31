@@ -273,7 +273,13 @@ export function scoreJsonSchema(
     const fraction = satisfiedFraction(wholeTextParsed, schema as any, errors);
     return {
       passed: false,
-      score: Math.min(5, Math.max(1, Math.round(1 + 4 * fraction))),
+      // Capped BELOW the conforming-but-wrong rung when a reference exists.
+      // At Math.min(5, ...) a schema-VIOLATING answer reached 5, above the 4
+      // given to a CONFORMING one with wrong values — so adding a junk key to a
+      // wrong answer paid +1, at any schema with 6+ required keys, which is
+      // ordinary. That is the same 'breaking the contract pays' shape fixed one
+      // rung over for prose, reopened here.
+      score: Math.min(expectedValue !== undefined ? 3 : 5, Math.max(1, Math.round(1 + 4 * fraction))),
       detail: `schema violations (${errors.length}, ${Math.round(fraction * 100)}% of required satisfied): ` +
         errors.slice(0, 3).map(e => `${e.instancePath || '/'} ${e.message}`).join('; '),
     };

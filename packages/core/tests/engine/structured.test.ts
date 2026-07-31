@@ -461,3 +461,39 @@ describe('the json_schema ladder is ordered at EVERY rung', () => {
     expect(score(`Here you go: ${stub}`)).toBeLessThanOrEqual(score(stub));
   });
 });
+
+describe('violating the schema never pays', () => {
+  // The clean-violating rung capped at 5, above the 4 given to a CONFORMING
+  // answer with wrong values — so adding one junk key to a wrong answer took it
+  // 4 -> 5, at any schema with 6+ required keys. Same "breaking the contract
+  // pays +1" shape that was fixed one rung over for prose, reopened here.
+  const schema = {
+    type: 'object',
+    properties: Object.fromEntries('abcdef'.split('').map(k => [k, { type: 'string' }])),
+    required: 'abcdef'.split(''),
+    additionalProperties: false,
+  };
+  const correct = JSON.stringify(Object.fromEntries('abcdef'.split('').map(k => [k, k])));
+
+  it('adding a junk key to a wrong answer does not raise its score', () => {
+    const wrong = JSON.stringify({ ...JSON.parse(correct), a: 'WRONG' });
+    const wrongPlusJunk = JSON.stringify({ ...JSON.parse(wrong), junk: 'x' });
+    const conforming = scoreJsonSchema(wrong, schema, undefined, correct).score;
+    const violating = scoreJsonSchema(wrongPlusJunk, schema, undefined, correct).score;
+    expect(violating).toBeLessThanOrEqual(conforming);
+  });
+
+  it('a violating answer never outranks a correct one, however wrapped', () => {
+    const violating = scoreJsonSchema(
+      JSON.stringify({ ...JSON.parse(correct), junk: 'x' }), schema, undefined, correct).score;
+    expect(scoreJsonSchema(correct, schema, undefined, correct).score).toBeGreaterThan(violating);
+    expect(scoreJsonSchema(`Here: ${correct}`, schema, undefined, correct).score).toBeGreaterThan(violating);
+  });
+
+  it('with no reference, the violating rung keeps its original range', () => {
+    const violating = scoreJsonSchema(
+      JSON.stringify({ ...JSON.parse(correct), junk: 'x' }), schema).score;
+    expect(violating).toBeGreaterThan(0);
+    expect(violating).toBeLessThan(10);
+  });
+});
