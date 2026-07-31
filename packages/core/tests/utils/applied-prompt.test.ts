@@ -209,6 +209,82 @@ describe('appliedPromptProblem', () => {
     });
   });
 
+  describe('pass-20 fixes: the exemptions must not reopen the channel', () => {
+    const PARENT = 'Summarize the customer ticket.';
+
+    it('rejects verbatim echoes of built-in strategies the verb catalog missed', () => {
+      // Pass 19 gated echo rejection on an English verb+noun pattern; six of
+      // the seventeen built-in strategies failed it and their echoes were
+      // ADOPTED as candidate prompts (pass 20, F1).
+      for (const strategy of [
+        '[Structure] Insert a thinking scaffold (e.g., "First, extract actors… Then, dedupe…")',
+        '[Regularizers] Force field-by-field validation hints (e.g., JSON schema embedded)',
+        '[Content] Introduce domain terms/ontologies',
+      ]) {
+        const body = strategy.replace(/^\s*\[[^\]]+\]\s*/, '');
+        expect(appliedPromptProblem(body, { parents: [PARENT], instructions: [strategy] })?.code,
+          `should reject echo of: ${strategy}`).toBe('echo');
+      }
+    });
+
+    it('rejects an echo of an unlisted-verb instruction too', () => {
+      const edit = 'Use markdown headers to separate the response into sections (e.g., ## Answer)';
+      expect(appliedPromptProblem(edit, { parents: [PARENT], instructions: [edit] })?.code).toBe('echo');
+    });
+
+    it('still rejects the ACTUAL edits payload behind a preamble for an edit-shaped parent (F2)', () => {
+      const taxonomy = '[{"label":"positive"},{"label":"negative"}]';
+      const p = appliedPromptProblem(
+        'Here is the new prompt:\n[{"label":"MUTATION","edit":"[Structure] Reorder sections for clarity"}]',
+        { parents: [taxonomy], instructions: ['[Structure] Reorder sections for clarity'] },
+      );
+      expect(p?.code).toBe('json');
+    });
+
+    it('catches the payload emitted twice with no prose (F3b)', () => {
+      const payload = '[{"label":"MUTATION","edit":"Tighten all the output constraints"}]';
+      const p = appliedPromptProblem(`${payload}\n\n${payload}`, { parents: [PARENT] });
+      expect(p?.code).toBe('json');
+    });
+
+    it('catches the ACTUAL payload however much prose pads it (F3a)', () => {
+      const pad = 'Certainly! I considered the request carefully and here is my response, with reasoning. '.repeat(4);
+      const p = appliedPromptProblem(
+        `${pad}\n[{"label":"MUTATION","edit":"Tighten all the output constraints"}]`,
+        { parents: [PARENT], instructions: ['Tighten all the output constraints'] },
+      );
+      expect(p?.code).toBe('json');
+    });
+
+    it('catches scaffolding on exotic line terminators and one-line folds (F4)', () => {
+      // CR-only line break
+      expect(appliedPromptProblem('Original: <<<\rYou are helpful.\r>>>', { parents: [PARENT] })?.code)
+        .toBe('scaffolding');
+      // The whole template folded onto ONE line
+      expect(appliedPromptProblem(
+        'Original: <<< Summarize the customer ticket. >>> Edits: [] Produce the NEW prompt ONLY.',
+        { parents: [PARENT] },
+      )?.code).toBe('scaffolding');
+      // A herestring (only <<<, no >>>) is still fine
+      expect(appliedPromptProblem(
+        'Answer briefly. Example: `tr a-z A-Z <<< "hello"` prints HELLO.',
+        { parents: [PARENT] },
+      )).toBeNull();
+    });
+
+    it('a hiding-character-only "change" is the no-op it is (F5)', () => {
+      const smuggled = PARENT.slice(0, 9) + '​' + PARENT.slice(9);
+      expect(appliedPromptProblem(smuggled, { parents: [PARENT] })?.code).toBe('noop');
+    });
+
+    it('a newline-structure-only edit is a REAL change (F6)', () => {
+      const listified = 'Summarize the customer ticket.\n- name the issue\n- name the ask';
+      expect(appliedPromptProblem(listified, { parents: [PARENT + ' Name the issue and name the ask.'] })).toBeNull();
+      // Breaking one sentence across lines without changing words: still a change.
+      expect(appliedPromptProblem('Summarize\nthe customer ticket.', { parents: [PARENT] })).toBeNull();
+    });
+  });
+
   describe('template scaffolding (bug 2)', () => {
     it('rejects a result that introduces the <<< >>> fences the parent never had', () => {
       const p = appliedPromptProblem(

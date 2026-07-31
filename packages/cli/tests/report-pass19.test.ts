@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateReport } from '../src/report.js';
+import path from 'path';
+import { generateReport, defaultReportDir } from '../src/report.js';
 import type { EvaluationConfig } from '@promptengine/core';
 import type { EvolutionResult } from '../src/engine.js';
 
@@ -150,5 +151,41 @@ describe('an all-carry dead run is called out (hunter A F6)', () => {
     const best = node('best', 'BEST', [t('t1', 8), t('t2', 8)]);
     const md = generateReport(makeResult([[seed, best]], 'best'), CONFIG(T2));
     expect(md).not.toMatch(/carried forward unchanged/);
+  });
+});
+
+describe('pass-20 escaper and path fixes', () => {
+  const ZWSP = String.fromCharCode(0x200B);
+
+  it('bare www domains and emails cannot autolink either (F11)', () => {
+    const reasoning = JSON.stringify({
+      score: 3, justification: 'visit www.evil.example or mail scam@evil.example now',
+    });
+    const seed = node('seed', 'SEED', [t('t1', 3, { llmGradeReasoning: reasoning }), t('t2', 4)]);
+    const best = node('best', 'BEST', [t('t1', 7, { llmGradeReasoning: reasoning }), t('t2', 8)]);
+    const md = generateReport(makeResult([[seed, best]], 'best'), CONFIG(T2));
+    expect(md).not.toContain('www.evil.example');
+    expect(md).not.toContain('scam@evil.example');
+    expect(md).toContain(`www${ZWSP}.evil.example`);
+    expect(md).toContain(`scam${ZWSP}@evil.example`);
+  });
+
+  it('trailing exclamation marks do not double up with the template period (F12)', () => {
+    const reasoning = JSON.stringify({ score: 3, justification: 'Not enough details!' });
+    const seed = node('seed', 'SEED', [t('t1', 3, { llmGradeReasoning: reasoning }), t('t2', 4)]);
+    const best = node('best', 'BEST', [t('t1', 7, { llmGradeReasoning: reasoning }), t('t2', 8)]);
+    const md = generateReport(makeResult([[seed, best]], 'best'), CONFIG(T2));
+    expect(md).not.toContain('details!.');
+    expect(md).toContain('details.');
+  });
+
+  it('defaultReportDir does not nest testoutputs/testoutputs, case-insensitively (F10)', () => {
+    const inTestoutputs = path.join('D:', 'proj', 'testoutputs', 'run.json');
+    expect(defaultReportDir(inTestoutputs)).toBe(path.join('D:', 'proj', 'testoutputs'));
+    const inTestoutputsCased = path.join('D:', 'proj', 'TestOutputs', 'run.json');
+    expect(defaultReportDir(inTestoutputsCased)).toBe(path.join('D:', 'proj', 'TestOutputs'));
+    const elsewhere = path.join('D:', 'proj', 'results', 'run.json');
+    expect(defaultReportDir(elsewhere)).toBe(path.join('D:', 'proj', 'results', 'testoutputs'));
+    expect(defaultReportDir(null)).toBe(path.resolve('testoutputs'));
   });
 });

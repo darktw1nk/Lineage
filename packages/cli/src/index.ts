@@ -627,22 +627,15 @@ async function emitOutputs(
   // Markdown report: --report none skips it; --report <path> writes exactly there;
   // default derives testoutputs/output-<slug>.md next to --output (or under cwd).
   if (reportArg?.toLowerCase() !== 'none') {
-    const { generateReport, slugify } = await import('./report.js');
+    const { generateReport, slugify, defaultReportDir } = await import('./report.js');
     const fs = await import('fs');
     const path = await import('path');
     let reportPath: string;
     if (reportArg) {
       reportPath = path.resolve(reportArg);
     } else {
-      // "testoutputs/ beside the output file" — but when the output file
-      // already lives IN a directory named testoutputs/, appending another
-      // level produced testoutputs/testoutputs/ (pass 19, hunter D F8).
-      const outputDir = outputPath ? path.dirname(path.resolve(outputPath)) : null;
-      const reportDir = outputDir
-        ? (path.basename(outputDir) === 'testoutputs' ? outputDir : path.join(outputDir, 'testoutputs'))
-        : path.resolve('testoutputs');
       const slug = slugify(cliConfig?.name || evalConfig.name || 'evolution');
-      reportPath = path.join(reportDir, `output-${slug}.md`);
+      reportPath = path.join(defaultReportDir(outputPath), `output-${slug}.md`);
     }
     try {
       fs.mkdirSync(path.dirname(reportPath), { recursive: true });

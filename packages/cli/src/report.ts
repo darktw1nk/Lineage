@@ -5,6 +5,7 @@
  * configuration, fitness progression, seed vs best prompt, and improvements.
  */
 
+import path from 'path';
 import type { EvaluationConfig } from '@promptengine/core';
 import type { EvolutionResult, EvolutionResultNode } from './engine.js';
 import type { CliConfig } from './config.js';
@@ -21,6 +22,21 @@ export function slugify(name: string): string {
   // An all-non-ASCII name (e.g. "日本語") reduces to '', so every such run wrote
   // to the same output-.md and clobbered the previous one.
   return slug || 'run';
+}
+
+/**
+ * Where the default report goes: `testoutputs/` beside the output file — but
+ * when the output file already lives IN a directory named testoutputs (any
+ * case: Windows paths are case-insensitive), don't nest another level.
+ * Extracted and exported so a test can bite it — the original fix shipped
+ * inline in index.ts with no test and survived reversion (pass 20, F10).
+ */
+export function defaultReportDir(outputPath: string | null | undefined): string {
+  if (!outputPath) return path.resolve('testoutputs');
+  const outputDir = path.dirname(path.resolve(outputPath));
+  return path.basename(outputDir).toLowerCase() === 'testoutputs'
+    ? outputDir
+    : path.join(outputDir, 'testoutputs');
 }
 
 /**
@@ -141,7 +157,10 @@ function escapeMarkdown(text: string): string {
     // alone still let model text place a live external link in the artifact.
     // A zero-width space after the scheme breaks the autolink pattern without
     // visibly altering the quoted text (pass 19, hunter D F6).
-    .replace(/\b(https?|ftp):\/\//gi, (_m: string, s: string) => s + ':' + String.fromCharCode(0x200B) + '//');
+    .replace(/\b(https?|ftp):\/\//gi, (_m: string, s: string) => s + ':' + String.fromCharCode(0x200B) + '//')
+    // GFM's autolink extension ALSO links bare www. domains and emails (pass 20, F11)
+    .replace(/\bwww\./gi, (m: string) => 'www' + String.fromCharCode(0x200B) + m.slice(3))
+    .replace(/([A-Za-z0-9._%+-])@([A-Za-z0-9-]+\.)/g, (_m: string, a: string, b: string) => a + String.fromCharCode(0x200B) + '@' + b);
 }
 
 /**
@@ -168,7 +187,10 @@ function escapeMarkdownProse(text: string): string {
     .replace(/</g, '&lt;')      // no raw HTML
     .replace(/\|/g, '\\|')      // no table rows
     // no bare-URL autolinks either — GFM links them without any brackets
-    .replace(/\b(https?|ftp):\/\//gi, (_m: string, s: string) => s + ':' + String.fromCharCode(0x200B) + '//');
+    .replace(/\b(https?|ftp):\/\//gi, (_m: string, s: string) => s + ':' + String.fromCharCode(0x200B) + '//')
+    // GFM's autolink extension ALSO links bare www. domains and emails (pass 20, F11)
+    .replace(/\bwww\./gi, (m: string) => 'www' + String.fromCharCode(0x200B) + m.slice(3))
+    .replace(/([A-Za-z0-9._%+-])@([A-Za-z0-9-]+\.)/g, (_m: string, a: string, b: string) => a + String.fromCharCode(0x200B) + '@' + b);
 }
 
 /**
@@ -930,10 +952,10 @@ function extractJustification(reasoning: string | undefined): string {
     // `text.replace is not a function` AFTER the run was paid for, silently
     // destroying the report. Strings only.
     if (typeof parsed.justification !== 'string') return '';
-    // Trailing period stripped: the templates add their own sentence-final
-    // punctuation, and "…of the reference.. Best scored 7" shipped in a real
-    // report today.
-    return parsed.justification.trim().replace(/\.+$/, '');
+    // Trailing punctuation stripped: the templates add their own sentence-final
+    // period, and "…of the reference.. Best scored 7" shipped in a real report
+    // today ("details!." is the same shape one character over — pass 20, F12).
+    return parsed.justification.trim().replace(/[.!?]+$/, '');
   } catch {
     return '';
   }

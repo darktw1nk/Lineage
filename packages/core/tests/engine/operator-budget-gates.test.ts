@@ -12,7 +12,7 @@ import { getProviderAdapter } from '../../src/providers/index.js';
 import { mutateNode } from '../../src/engine/mutations.js';
 import { crossoverNodes } from '../../src/engine/crossover.js';
 import { createNextGeneration } from '../../src/engine/generation.js';
-import { registerOperator, resetRegistry } from '../../src/registry.js';
+import { registerOperator, resetRegistry, getOperator } from '../../src/registry.js';
 import type { CandidateNode, EvaluationConfig } from '../../src/types.js';
 
 /**
@@ -91,6 +91,56 @@ describe('operators stop retrying once the budget is gone', () => {
   });
 });
 
+describe('the REGISTRY forwards shouldAbort to the built-in operators (pass 20, F8/F9)', () => {
+  // Reverting the registry's forwarding (or the operator's own check) left the
+  // whole suite green in pass 20's revert-check — the only wiring that gives
+  // real runs the mid-operator budget gate was unguarded. These drive the
+  // operators THROUGH getOperator(...).apply, exactly as createChild does.
+  const parent = {
+    id: 'p1', generation: 0, lineageParents: [], status: 'finished',
+    prompt: 'Answer the question.', changeLog: [],
+    params: { model: { provider: 'openai', model: 'gpt-x' }, temperature: 0.7 },
+    metrics: { fitness: 5, quality: 5 },
+  } as unknown as CandidateNode;
+  const parentB = { ...parent, id: 'p2', prompt: 'Cite sources always.' } as CandidateNode;
+
+  it('mutation aborts through the registry after the cap trips', async () => {
+    const calls = mockAdapter([PROPOSAL, REJECTED_APPLY, REJECTED_APPLY, REJECTED_APPLY]);
+    const r = await getOperator('mutation')!.apply({
+      parent, config: makeConfig(), generation: [], rng: Math.random,
+      shouldAbort: (spent = 0) => spent >= 0.0015,
+    } as any);
+    expect(r.changeLog[0].label).toBe('CARRY');
+    expect(r.changeLog[0].text).toMatch(/budget exhausted/i);
+    expect(calls).toHaveBeenCalledTimes(2);
+  });
+
+  it('meta aborts through the registry after the proposal spend alone', async () => {
+    const calls = mockAdapter([
+      JSON.stringify([{ label: 'META', edit: 'Add explicit output format rules to the prompt text' }]),
+      'unused apply reply',
+    ]);
+    const r = await getOperator('meta')!.apply({
+      parent, config: makeConfig(), generation: [],
+      shouldAbort: (spent = 0) => spent >= 0.0005,
+    } as any);
+    expect(r.changeLog[0].label).toBe('CARRY');
+    expect(r.changeLog[0].text).toMatch(/budget exhausted/i);
+    expect(calls).toHaveBeenCalledTimes(1);
+  });
+
+  it('crossover aborts through the registry mid-retry', async () => {
+    const calls = mockAdapter(['{"merged": true}', '{"merged": true}', '{"merged": true}']);
+    const r = await getOperator('crossover')!.apply({
+      parent, parentB, config: makeConfig(), generation: [],
+      shouldAbort: (spent = 0) => spent >= 0.0005,
+    } as any);
+    expect(r.changeLog[0].label).toBe('CARRY');
+    expect(r.changeLog[0].text).toMatch(/budget exhausted/i);
+    expect(calls).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('a generation transition settles spend per child, not per batch', () => {
   function makeParent(id: string): CandidateNode {
     return {
@@ -132,5 +182,72 @@ describe('a generation transition settles spend per child, not per batch', () =>
     expect(costTracking.usd).toBeCloseTo(0.02, 10);
     const carried = newNodes.filter(n => n.changeLog[0]?.text?.match(/budget exhausted/i));
     expect(carried.length).toBe(2);
+  });
+});
+
+describe('pass-20 hunter-B holes: what an operator reports cannot corrupt the books', () => {
+  function makeParent(id: string): CandidateNode {
+    return {
+      id, generation: 0, lineageParents: [], status: 'finished', prompt: `prompt-${id}`,
+      params: { model: { provider: 'openai', model: 'gpt-x' }, temperature: 0.7 },
+      changeLog: [], metrics: { fitness: 5, quality: 5 },
+    } as CandidateNode;
+  }
+  const custom = { operators: { mutationShare: 0, crossoverShare: 0, custom: { probe: { share: 1 } } } as any };
+
+  it('NEGATIVE operator cost is clamped, never accrued (F1: totals rewound to -$35.60)', async () => {
+    registerOperator({
+      name: 'probe', parents: 1,
+      apply: async () => ({
+        prompt: 'a different child prompt', changeLog: [{ label: 'MUTATION', text: 'x' }],
+        cost: { promptTokens: -100, completionTokens: -50, usd: -40, calls: -24 },
+      }),
+    } as any);
+    let settled = 0;
+    const budget = {
+      reserve: async () => 0, release: () => {},
+      exhausted: () => false,
+      accrueChild: (cost: any) => { settled += cost.usd; },
+    };
+    const parents = [makeParent('p1')];
+    const { costTracking } = await createNextGeneration(parents, parents, 1, makeConfig(custom), [parents], budget);
+    expect(costTracking.usd).toBe(0);
+    expect(costTracking.calls).toBe(0);
+    expect(settled).toBe(0);
+  });
+
+  it('a HUNG operator\'s last self-reported spend reaches cost tracking (F2: 67% invisible)', async () => {
+    registerOperator({
+      name: 'probe', parents: 1,
+      apply: async ({ shouldAbort }: any) => {
+        shouldAbort(0.05); // it reported billing $0.05…
+        await new Promise(() => { /* …then hung forever */ });
+      },
+    } as any);
+    const parents = [makeParent('p1')];
+    const config = makeConfig({
+      ...custom, callTimeoutMs: 50, retries: 1,
+      population: { initialSize: 1, generationSize: 1, seedPrompt: 's', fill: 'auto' },
+    } as any);
+    const { newNodes, costTracking } = await createNextGeneration(parents, parents, 1, config, [parents]);
+    expect(newNodes[0].changeLog[0].label).toBe('ERROR');
+    expect(newNodes[0].changeLog[0].text).toMatch(/hung/i);
+    // The floor it reported is in the books instead of $0.
+    expect(costTracking.usd).toBeCloseTo(0.05, 10);
+  });
+
+  it('an absurd retries value cannot wrap the liveness timer (F7: insta-hung at retries 5000)', async () => {
+    registerOperator({
+      name: 'probe', parents: 1,
+      apply: async () => {
+        await new Promise(r => setTimeout(r, 30));
+        return { prompt: 'lively child', changeLog: [{ label: 'MUTATION', text: 'x' }], cost: { promptTokens: 1, completionTokens: 1, usd: 0.001, calls: 1 } };
+      },
+    } as any);
+    const parents = [makeParent('p1')];
+    const config = makeConfig({ ...custom, callTimeoutMs: 300000, retries: 5000 } as any);
+    const { newNodes } = await createNextGeneration(parents, parents, 1, config, [parents]);
+    expect(newNodes[0].prompt).toBe('lively child');
+    expect(newNodes[0].changeLog[0].label).toBe('MUTATION');
   });
 });

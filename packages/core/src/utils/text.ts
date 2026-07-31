@@ -227,36 +227,71 @@ function normalizeForEcho(text: string): string {
   return stripHidingChars(text).replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-/** Whitespace-collapsed equality — a "mutation" that only reflows whitespace
- * is still the paid no-op of open-bugs #1 (pass 19: exact trim equality let
- * a collapsed double-space count as a change and re-bill the node). */
-function sameCollapsed(a: string, b: string): boolean {
-  return a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+/**
+ * Prompt-text equality for no-op detection, exported so the generation
+ * chokepoint applies the identical rule.
+ *
+ * Pass 20 tightened this twice: hiding characters are stripped (parent + one
+ * ZWSP was adopted as a "change" and re-billed — the pass-19 echo fix covered
+ * this class but neither equality gate did), and NEWLINE STRUCTURE counts as
+ * real change — a mutation that breaks a paragraph into lines is semantically
+ * real for an LLM prompt, and collapsing all whitespace put it into the same
+ * unwinnable reject-retry-carry loop pass 19 fixed for rewrites. Only runs of
+ * spaces/tabs and blank-line multiplicity are ignored.
+ */
+export function samePromptText(a: string, b: string): boolean {
+  const canon = (t: string) => stripHidingChars(t)
+    .replace(/\r\n?|[\u0085\u000B\u000C\u2028\u2029]/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .split('\n').map(l => l.trim()).filter(l => l !== '').join('\n');
+  return canon(a) === canon(b);
 }
 
 /**
  * Is this instruction EDIT-language (an imperative about the prompt) rather
  * than replacement text? "Rewrite the role/identity statement…" is an
- * instruction; "Extract key information from the ticket…" is a prompt. The
- * distinction matters because a FAITHFUL application of a full-rewrite edit is
- * byte-equal to the edit text — pass 18 rejected that as an echo, observed
- * live: three deterministic retries, all rejected, a legitimate rewrite
- * discarded (pass-19 hunter A, F1).
+ * instruction; "Extract key information from the ticket…" is a prompt.
+ *
+ * Pass 20 (hunter F1): this classifier must never be the thing that ADMITS an
+ * echo — six of the seventeen built-in strategies fail the verb+noun pattern
+ * and their echoes were adopted as candidate prompts. It is now only one of
+ * several conditions on the narrow accept-side exemption below; rejection is
+ * the default again.
  */
 function isEditLanguage(instruction: string): boolean {
-  return /\b(rewrite|replace|reword|rephrase|remove|delete|prune|add|insert|append|convert|reorder|restructure|tighten|adjust|switch|merge|change)\b[^.!?]{0,60}\b(prompt|instruction|statement|section|line|sentence|paragraph|wording|phrasing|role|identity|constraint|rule|example)s?\b/i
+  return /\b(rewrite|replace|reword|rephrase|remove|delete|prune|add|insert|append|convert|reorder|restructure|tighten|adjust|switch|merge|change|force|introduce)\b[^.!?]{0,60}\b(prompt|instruction|statement|section|line|sentence|paragraph|wording|phrasing|role|identity|constraint|rule|example|scaffold|hint|term|block|pattern)s?\b/i
     .test(instruction);
 }
 
-/** A line that reproduces the operator template's fence shape: a line that is
- * only `>>>` (closes a block) or ends in `<<<` (opens one). Substring matching
- * rejected real content — a bash herestring (`tr a-z A-Z <<< "x"`) is mid-line
- * and can never escape or open a block (pass-19 hunter A, F8). */
+/**
+ * Does this instruction read as REPLACEMENT TEXT — something that could stand
+ * as a prompt itself? The narrow gate for accepting a byte-equal "echo" as a
+ * faithful full-rewrite application (the live pass-19 incident). Substantial,
+ * not edit-language, and free of the strategy catalog's example-markers
+ * ("(e.g., …)", quoted anti-pattern lists) that mark advice-about-prompts.
+ */
+function readsAsReplacementText(instruction: string): boolean {
+  return instruction.trim().length >= 40 &&
+    !isEditLanguage(instruction) &&
+    !/\(e\.?g\.?[,.]?\s/i.test(instruction) &&
+    !/["“'’][^"“”'’]{3,}["”'’]\s*\)/.test(instruction);
+}
+
+/**
+ * Template-scaffolding detection (pass 20, hunter F4 rewrite). Line-shaped
+ * fences are matched against EVERY terminator the repo already catalogued for
+ * sanitizeForJudge — CR-only, LS, PS, NEL, VT, FF — not just \n; and a
+ * template echo folded onto ONE line ("Original: <<< … >>> Edits: …") is
+ * caught by requiring both fence directions to appear. A bash herestring
+ * (`tr a-z A-Z <<< "x"`) has only `<<<` mid-line and passes.
+ */
 function hasScaffoldLine(text: string): boolean {
-  return text.split(/\r?\n/).some(line => {
+  const lineShaped = text.split(/\r\n|[\r\n\u0085\u000B\u000C\u2028\u2029]/).some(line => {
     const l = line.trim();
     return /^>{3,}$/.test(l) || /<{3,}$/.test(l);
   });
+  const bothDirections = /<{3,}/.test(text) && />{3,}/.test(text);
+  return lineShaped || bothDirections;
 }
 
 /** Parse `text` as JSON after unwrapping a ```fence```, or return undefined. */
@@ -345,19 +380,29 @@ export function appliedPromptProblem(
     if (!parentIsJson) {
       return { code: 'json', reason: 'is JSON, not a prompt' };
     }
-  } else if (!parentIsEditShaped) {
+  } else {
     // Not whole-text JSON — but the observed open-bugs #2 artifact returns
-    // behind one line of prose ("Here is the new prompt:\n[{…}]"). An
-    // edit-shaped array that constitutes the bulk of the reply is the payload,
-    // not a prompt (pass-19 hunter A, F5).
+    // behind one line of prose ("Here is the new prompt:\n[{…}]").
+    //
+    // Pass 20 (F2/F3): this scan runs for EVERY parent genre — an edit-shaped
+    // parent exempts only the shape test, never an echo of the ACTUAL edits
+    // payload, which is illegitimate everywhere and is rejected at ANY size.
+    // The shape-only ratio SUMS edit-shaped spans (emitting the payload twice
+    // made each span ~50% and both passed the old per-span 60% bar). A ratio
+    // is still a ratio: heavy prose padding can dilute a shape-only list —
+    // the observed artifact (the actual payload) is what is caught cold.
+    let editShapedTotal = 0;
     for (const span of balancedSpans(trimmed, '[', ']')) {
-      if (span.length < trimmed.length * 0.6) continue;
       try {
         const v = JSON.parse(span);
-        if (isEditListShape(v) || isActualEditsEcho(v)) {
+        if (isActualEditsEcho(v)) {
           return { code: 'json', reason: 'is the operator edit list echoed back behind a preamble' };
         }
+        if (isEditListShape(v)) editShapedTotal += span.length;
       } catch { /* not JSON — keep looking */ }
+    }
+    if (!parentIsEditShaped && editShapedTotal >= trimmed.length * 0.3) {
+      return { code: 'json', reason: 'is the operator edit list echoed back behind a preamble' };
     }
   }
 
@@ -368,26 +413,27 @@ export function appliedPromptProblem(
     const rawBody = instruction.replace(/^\s*\[[^\]]{1,40}\]\s*/, '');
     const body = normalizeForEcho(rawBody);
     if (body.length < 20) continue; // too short to be evidence either way
-    // An echo is only evidence when the instruction is EDIT-language. A
-    // full-rewrite edit's text IS the intended prompt, so a faithful
-    // application is byte-equal to it — rejecting that burned every retry on
-    // an unwinnable demand and discarded legitimate rewrites (observed live;
-    // pass-19 hunter A, F1).
-    if (!isEditLanguage(rawBody)) continue;
     const idx = norm.indexOf(body);
-    const echoed = norm.startsWith(body) ||
+    const echoShaped = norm.startsWith(body) ||
       // tolerate a short preamble ("Sure! …") before the echoed instruction
       (idx !== -1 && idx <= 30 && norm.length <= body.length * 1.5);
-    if (echoed) {
-      return { code: 'echo', reason: 'reproduces the edit instruction instead of applying it' };
-    }
+    if (!echoShaped) continue;
+    // REJECTION is the default (pass 20 F1 — pass 19 gated rejection on an
+    // English verb catalog and echoes of six built-in strategies were adopted
+    // as candidate prompts). The one narrow exemption: an EXACT reproduction
+    // of an instruction that itself reads as replacement text is a faithful
+    // full-rewrite application (the live pass-19 incident) — instruction plus
+    // trailing junk, partial echoes, and advice-shaped instructions all fail.
+    if (norm === body && readsAsReplacementText(rawBody)) continue;
+    return { code: 'echo', reason: 'reproduces the edit instruction instead of applying it' };
   }
 
   for (const parent of parents) {
-    // Collapsed comparison: a whitespace-reflow "mutation" is still a paid
-    // no-op — same prompt, re-measured at full price under a changelog
-    // claiming a change (pass-19 hunter A, F4).
-    if (sameCollapsed(trimmed, parent)) {
+    // samePromptText: hiding characters stripped, space/tab runs collapsed,
+    // but NEWLINE STRUCTURE preserved — a whitespace-reflow "mutation" is
+    // still the paid no-op of open-bugs #1, while breaking a paragraph into
+    // list lines is a real change (pass 20, F5/F6).
+    if (samePromptText(trimmed, parent)) {
       return { code: 'noop', reason: 'is identical to the parent prompt' };
     }
   }

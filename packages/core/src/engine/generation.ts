@@ -55,6 +55,7 @@ import type {
 import { getOperator } from '../registry.js';
 import { rngFor } from './rng.js';
 import { partialCostOf } from './operator-cost.js';
+import { samePromptText } from '../utils/text.js';
 
 export interface GenerationResult {
   newNodes: CandidateNode[];
@@ -74,7 +75,12 @@ function snapshot<T>(value: T): T {
 }
 
 function finite(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  // NEGATIVES CLAMPED (pass 20, hunter B F1): a plugin operator reporting
+  // usd:-40 rewound run totals to -$35.60 while the adapter really billed
+  // $4.40 — budgetUSD could never trip and the desktop meter ran backwards.
+  // partialCostOf clamps on the failure path; this entry point
+  // (validateOperatorResult → accrueChild) did not. Zero is legitimate.
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 /**
@@ -106,6 +112,12 @@ function validateOperatorResult(
     ? result.params
     : {};
   const rawCost = result.cost && typeof result.cost === 'object' ? result.cost : {};
+  if (typeof rawCost.usd === 'number' && rawCost.usd < 0) {
+    console.warn(
+      `[Generation] Operator '${operatorName}' reported a NEGATIVE cost ($${rawCost.usd}) — clamped to $0. ` +
+      'Negative spend rewinds run totals and disarms budgetUSD; fix the plugin.',
+    );
+  }
   return {
     prompt: result.prompt,
     changeLog,
@@ -147,7 +159,10 @@ function withOperatorTimeout<T>(
   callBudget: number = OPERATOR_CALL_BUDGET,
 ): Promise<T> {
   if (!Number.isFinite(callTimeoutMs) || callTimeoutMs <= 0) return work;
-  const timeoutMs = callTimeoutMs * Math.max(OPERATOR_CALL_BUDGET, callBudget);
+  // Clamped to the 32-bit setTimeout ceiling: `retries` is unbounded in
+  // config, and a wrapped delay fires after 1ms — every live operator would be
+  // insta-declared hung (pass 20, F7; same wrap registry.ts already guards).
+  const timeoutMs = Math.min(2_147_483_647, callTimeoutMs * Math.max(OPERATOR_CALL_BUDGET, callBudget));
   let timer: NodeJS.Timeout;
   return Promise.race([
     work,
@@ -579,6 +594,13 @@ export async function createNextGeneration(
         return carry('CARRY', 'Budget exhausted before this operator ran');
       }
 
+      // The operator's own running spend, as it reports through shouldAbort.
+      // When the liveness timeout wins the race, partialCostOf(freshError) is
+      // zero and the detached work's billing was invisible to every book —
+      // measured 67% of real spend unaccounted (pass 20, hunter B F2). The
+      // last reported figure is a floor, not the truth; an operator that never
+      // checks shouldAbort stays unrecoverable (docs/plugins.md says so).
+      let lastReportedUSD = 0;
       try {
         const parentB = op.parents === 2 ? pickSecondParent(parent) : undefined;
         const childRng = rngFor(config.seed, 'operator', nextGenerationNumber, i);
@@ -608,7 +630,10 @@ export async function createNextGeneration(
             rng: childRng,
             // Multi-call operators check this between their own billed calls;
             // the per-child gate above only fires once, before the first.
-            shouldAbort: (spentSoFarUSD = 0) => !!budget?.exhausted(spentSoFarUSD),
+            shouldAbort: (spentSoFarUSD = 0) => {
+              lastReportedUSD = Math.max(lastReportedUSD, finite(spentSoFarUSD));
+              return !!budget?.exhausted(spentSoFarUSD);
+            },
           }),
           config.callTimeoutMs ?? 120_000,
           operatorName,
@@ -627,10 +652,10 @@ export async function createNextGeneration(
         // evaluation cache serves it for free. Operators that return an honest
         // CARRY/ERROR line themselves keep their own wording. This chokepoint
         // covers plugin operators, which never pass mutateNode's gate.
-        // Whitespace-collapsed: exact trim equality let a reflowed double-space
-        // count as a "change" and re-bill the node at full price (pass 19, F4).
-        const collapse = (t: string) => t.replace(/\s+/g, ' ').trim();
-        const promptUnchanged = collapse(validated.prompt) === collapse(parent.prompt);
+        // samePromptText: the SAME rule the validator applies — hiding chars
+        // stripped (pass 20 F5: parent+ZWSP was adopted with full credit and
+        // re-billed), space runs collapsed, newline structure preserved.
+        const promptUnchanged = samePromptText(validated.prompt, parent.prompt);
         const paramsUnchanged = Object.entries(validated.params).every(
           ([k, v]) => JSON.stringify(v) === JSON.stringify((parent.params as any)[k]),
         );
@@ -677,8 +702,14 @@ export async function createNextGeneration(
           return carry('CARRY', 'Budget exhausted before this operator ran');
         }
         console.error(`[Generation] Operator '${operatorName}' failed for child ${i}:`, error);
-        const spent = partialCostOf(error);
-        if (spent.calls > 0) {
+        const spent = { ...partialCostOf(error) };
+        if (lastReportedUSD > finite(spent.usd)) {
+          // A hung operator's error carries no cost — its last shouldAbort
+          // report is the best floor we have for what it already billed.
+          console.warn(`[Generation] '${operatorName}' had reported $${lastReportedUSD.toFixed(6)} spent before it failed/hung — accounting for that floor`);
+          spent.usd = lastReportedUSD;
+        }
+        if (spent.calls > 0 || spent.usd > 0) {
           console.warn(`[Generation] Failed '${operatorName}' still spent $${spent.usd.toFixed(6)} over ${spent.calls} call(s) — accounting for it`);
         }
         // Name the actual cause. "failed, using parent" alone sent the reason
