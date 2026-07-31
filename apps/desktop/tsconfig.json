@@ -20,7 +20,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@lineage/core": ["../../packages/core/src/index.ts"]
+      "@lineage/core": ["../../packages/core/src/index.ts"],
+      "@lineage/core/champion": ["../../packages/core/src/engine/champion.ts"]
     }
   },
   "include": ["src"]

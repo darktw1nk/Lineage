@@ -205,4 +205,25 @@ describe('model cost handlers', () => {
     const entry = await invoke('costs:get', { provider: 'groq', model: 'test-model-x' });
     expect(entry.promptUSDper1k).toBeCloseTo(0.001, 10);
   });
+
+  it('hides catalog rows with NEGATIVE stored prices instead of offering them', async () => {
+    // Write-side guards (validateModelCost, the OpenRouter "-1" sentinel
+    // filter) only protect rows written after they existed. Rows synced
+    // earlier are in real databases today: the model list showed
+    // `openrouter/auto` at -$1,000,000 and let it be selected, which inverts
+    // fitness and disarms budgetUSD. The READ path must refuse them too.
+    const { getDatabase } = await import('@lineage/core');
+    const db = getDatabase();
+    db.prepare(`
+      INSERT OR REPLACE INTO model_costs (provider, model, prompt_usd_per_1k, completion_usd_per_1k)
+      VALUES ('openrouter', 'openrouter/auto', -1000, -1000)
+    `).run();
+
+    const all = await invoke('costs:getAll');
+    expect(all.some((e: any) => e.model === 'openrouter/auto')).toBe(false);
+    expect(all.every((e: any) => e.promptUSDper1k >= 0 && e.completionUSDper1k >= 0)).toBe(true);
+
+    // A direct lookup must not hand a negative price to fitness or the estimator.
+    expect(await invoke('costs:get', { provider: 'openrouter', model: 'openrouter/auto' })).toBeNull();
+  });
 });

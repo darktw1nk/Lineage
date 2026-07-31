@@ -919,6 +919,24 @@ async function testApiKey(provider: string): Promise<boolean> {
   }
 }
 
+/**
+ * Is a stored catalog row usable as a price?
+ *
+ * WRITE-side validation (validateModelCost, and the OpenRouter sync's own
+ * filter for the "-1" price-varies sentinel) only protects rows written AFTER
+ * those guards existed. Rows synced before them are still in every user's
+ * database, and the READ path served them happily: the desktop model list
+ * showed `openrouter/auto` at -$1,000,000 and let it be selected, which
+ * inverts fitness (a worse prompt scores higher) and lets totals run away from
+ * budgetUSD so the cap can never trip. Reject at every entry point means the
+ * read side too.
+ */
+function usableCostRow(row: { promptUSDper1k: unknown; completionUSDper1k: unknown }): boolean {
+  return [row.promptUSDper1k, row.completionUSDper1k].every(
+    v => typeof v === 'number' && Number.isFinite(v) && v >= 0,
+  );
+}
+
 async function getModelCost(modelRef: ModelRef): Promise<ModelCostEntry | null> {
   const db = getDatabase();
   const row = db.prepare(`
@@ -926,15 +944,23 @@ async function getModelCost(modelRef: ModelRef): Promise<ModelCostEntry | null> 
     FROM model_costs
     WHERE provider = ? AND model = ?
   `).get(modelRef.provider, modelRef.model) as any;
-  
+
   if (!row) return null;
-  
-  return {
+
+  const entry: ModelCostEntry = {
     provider: row.provider,
     model: row.model,
     promptUSDper1k: row.prompt_usd_per_1k,
     completionUSDper1k: row.completion_usd_per_1k,
   };
+  if (!usableCostRow(entry)) {
+    console.warn(
+      `[Costs] ${entry.provider}/${entry.model} has an invalid stored price ` +
+      `(${entry.promptUSDper1k}/${entry.completionUSDper1k}) — treating it as unpriced. Re-sync models.`,
+    );
+    return null;
+  }
+  return entry;
 }
 
 /**
@@ -995,7 +1021,18 @@ async function getAllModelCosts(): Promise<ModelCostEntry[]> {
     FROM model_costs
   `).all() as any[];
   
-  return rows.map(row => ({
+  // Stale invalid rows are hidden, not shown-and-selectable: see usableCostRow.
+  const usable = rows.filter(row => usableCostRow({
+    promptUSDper1k: row.prompt_usd_per_1k, completionUSDper1k: row.completion_usd_per_1k,
+  }));
+  if (usable.length !== rows.length) {
+    console.warn(
+      `[Costs] Hiding ${rows.length - usable.length} model(s) with invalid stored prices ` +
+      `(negative or non-finite — e.g. OpenRouter's "-1" price-varies sentinel). Re-sync models to refresh them.`,
+    );
+  }
+
+  return usable.map(row => ({
     provider: row.provider,
     model: row.model,
     promptUSDper1k: row.prompt_usd_per_1k,

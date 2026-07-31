@@ -12,7 +12,7 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 
 ![Evolution run](docs/assets/evolution-run.gif)
 
-*A real 47-second run: 30 candidates, 3 generations, 6 models competing, $0.013 total. The hand-written seed scored 5.30. The evolved champion scored 9.73 — created by crossover of two strong parents, running on a model 25× cheaper than the flagship in the same population.*
+*A real 48-second run: 24 candidates, 4 generations, 4 models competing, $0.026 total. The hand-written seed scored 6.67; the champion 7.33, reached by meta-prompting that read the judge's complaints and added few-shot examples. Two candidates on one OpenRouter model failed outright (red) and the run carried on. Note the footer: `Holdout 7.00 → 7.00`. The training score improved and the held-out score did not — so this run bought a better prompt on the tests it could see and no proven generalization. The tool says so on its own front page rather than quoting you the training delta.*
 
 ## Why this beats prompt engineering by hand
 
@@ -20,7 +20,7 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 
 **It optimizes trade-offs, not just quality.** Fitness is a weighted blend of five dimensions — quality, safety, cost, latency, stability — so the questions in the header aren't marketing: they're just weight configurations. The population converges toward *your* trade-off, not toward generic eloquence.
 
-**It discovers model arbitrage.** With several models in the gene pool, the model-variation operator keeps re-dealing prompts to different models. Evolution routinely finds that a tuned prompt on a cheap model beats a mediocre prompt on an expensive one — in the demo run above, `gemini-2.5-flash-lite` outscored `gpt-5-mini` candidates at a fraction of the cost.
+**It searches model choice, not just wording.** With several models in the gene pool, the model-variation operator keeps re-dealing prompts to different models, and the per-model scores fall out of the same run — in the demo above, four models competed and the champion ended up on `gemini-2.5-flash` (best 7.33) over `gemini-2.5-flash-lite` (7.00) and `openai/gpt-4o-mini` (6.00), at $0.0014 per candidate. Sometimes that finds a cheap model that matches an expensive one; either way you get the comparison as evidence instead of a hunch.
 
 **It learns from its own failures.** The meta-prompting operator reads the judge's actual feedback on failing tests ("added a preamble", "wrong date format") and performs surgical fixes — not blind rewrites. It's the closest thing to a prompt engineer in the loop, except it reads every test result, every time.
 
@@ -38,7 +38,7 @@ Each generation, the engine:
 | Operator | What it does | Why it's interesting |
 |---|---|---|
 | **Mutation** | Rewrites guided by a strategy catalog: restructuring, compression, tightening constraints, adding anti-patterns, injecting thinking scaffolds — and *removal* of harmful lines | Strategies are sampled per mutation, so the search explores different editing philosophies, not one style |
-| **Crossover** | LLM-merges two strong parents into one prompt without redundancy | The demo's champion was a crossover — traits from two lineages combined |
+| **Crossover** | LLM-merges two strong parents into one prompt without redundancy | Traits from two lineages combine — the merge is validated, and a "merge" that just returns a parent is recorded as a carry, not a change |
 | **Meta-prompting** | Reads the worst-scoring tests (inputs, outputs, judge justifications) and proposes targeted edits | The only *failure-aware* operator — this is directed evolution, not random walk |
 | **Param variation** | Same prompt, different temperature/seed within a configured range | Sometimes the prompt is fine and the sampling is wrong |
 | **Model variation** | Same prompt, different model from your enabled set | Turns model choice into a searchable dimension |
@@ -138,9 +138,11 @@ In the desktop app, models load from the catalog with live pricing:
 
 ![New evaluation](docs/assets/new-evaluation.png)
 
-Watch generations appear with full lineage, then click any node: its evolved prompt, the changelog of what created it, per-test scores with the judge's reasoning, and exact cost:
+Watch generations appear with full lineage — the champion in gold, failed candidates in red, the footer carrying spend, cache hits and the holdout number as they change:
 
 ![Evolution graph](docs/assets/evolution-graph.png)
+
+Click any node for its evolved prompt, the changelog of exactly what created it (here: meta-prompting adding few-shot examples after reading the judge), and per-test scores with the graded output and the judge's reasoning:
 
 ![Node details](docs/assets/node-details.png)
 
