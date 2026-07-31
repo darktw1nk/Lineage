@@ -1,4 +1,4 @@
-# PromptEngine.AI
+# Lineage
 
 **Stop hand-tuning prompts. Breed them.**
 
@@ -8,7 +8,7 @@
 >
 > These are questions you can literally type into a config and get answered — with measurements, not vibes.
 
-PromptEngine treats a prompt like a genome: it spawns a population of variants, scores every one of them against *your* test set on real models, kills the weak, breeds the strong, and repeats — until it finds a prompt that is measurably better than anything you'd write by hand. Not "feels better" — better on a fitness function you define.
+Lineage treats a prompt like a genome: it spawns a population of variants, scores every one of them against *your* test set on real models, kills the weak, breeds the strong, and repeats — until it finds a prompt that is measurably better than anything you'd write by hand. Not "feels better" — better on a fitness function you define.
 
 ![Evolution run](docs/assets/evolution-run.gif)
 
@@ -16,7 +16,7 @@ PromptEngine treats a prompt like a genome: it spawns a population of variants, 
 
 ## Why this beats prompt engineering by hand
 
-**Prompting is empirical, but nobody treats it that way.** You tweak a word, eyeball three outputs, and ship. PromptEngine replaces that loop with selection pressure: every candidate is scored on every test, every generation, and only measured improvement survives. The lineage graph shows you exactly which edit earned its place.
+**Prompting is empirical, but nobody treats it that way.** You tweak a word, eyeball three outputs, and ship. Lineage replaces that loop with selection pressure: every candidate is scored on every test, every generation, and only measured improvement survives. The lineage graph shows you exactly which edit earned its place.
 
 **It optimizes trade-offs, not just quality.** Fitness is a weighted blend of five dimensions — quality, safety, cost, latency, stability — so the questions in the header aren't marketing: they're just weight configurations. The population converges toward *your* trade-off, not toward generic eloquence.
 
