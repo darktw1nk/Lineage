@@ -2,8 +2,8 @@
 
 **Stop hand-tuning prompts. Breed them.**
 
-> *"What's the best prompt that stays under 1 cent per call?"*
-> *"Maximize accuracy — but punish anything slower than 2 seconds."*
+> *"What's the best prompt that stays under 1 cent per call?"*<br>
+> *"Maximize accuracy — but punish anything slower than 2 seconds."*<br>
 > *"Highest quality that never violates my safety rules, on the cheapest model that can deliver it."*
 >
 > These are questions you can literally type into a config and get answered — with measurements, not vibes.
