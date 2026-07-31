@@ -130,6 +130,85 @@ describe('appliedPromptProblem', () => {
     });
   });
 
+  describe('pass-19 fixes: the gate must not reject legitimate work', () => {
+    it('accepts a FAITHFUL application of a full-rewrite edit (observed live)', () => {
+      // The edit text IS the intended replacement prompt; a faithful
+      // application is byte-equal to it. Pass 18 rejected this as an echo,
+      // burned every retry on an unwinnable demand, and discarded the rewrite.
+      const edit = 'Extract key information from the customer ticket and format it concisely.';
+      expect(appliedPromptProblem(edit, {
+        parents: ['Summarize the customer ticket.'],
+        instructions: [`[REWRITE] ${edit}`],
+      })).toBeNull();
+    });
+
+    it('still rejects an echo of EDIT-language (an imperative about the prompt)', () => {
+      const p = appliedPromptProblem(
+        'Rewrite the role/identity statement to better align with the actual task requirements',
+        {
+          parents: ['Summarize the customer ticket.'],
+          instructions: ['[Rewrite] Rewrite the role/identity statement to better align with the actual task requirements'],
+        },
+      );
+      expect(p?.code).toBe('echo');
+    });
+
+    it('lets a labeled-taxonomy JSON parent be operated on', () => {
+      // Pass 18 classified ANY array of {label} objects as the operator edit
+      // list, before the JSON-parent exemption — such prompts could never be
+      // mutated or crossed over again.
+      const taxonomy = '[{"label":"positive"},{"label":"negative"}]';
+      expect(appliedPromptProblem(
+        '[{"label":"positive"},{"label":"negative"},{"label":"neutral"}]',
+        { parents: [taxonomy] },
+      )).toBeNull();
+      // And a byte-identical result is a NOOP for it, not "json".
+      expect(appliedPromptProblem(taxonomy, { parents: [taxonomy] })?.code).toBe('noop');
+    });
+
+    it('still rejects the ACTUAL edits payload echoed back, taxonomy parent or not', () => {
+      const p = appliedPromptProblem(
+        '[{"label":"MUTATION","edit":"add a neutral category to the label set"}]',
+        {
+          parents: ['[{"label":"positive"},{"label":"negative"}]'],
+          instructions: ['add a neutral category to the label set'],
+        },
+      );
+      expect(p?.code).toBe('json');
+    });
+
+    it('rejects the edit list hidden behind one line of prose', () => {
+      const p = appliedPromptProblem(
+        'Here is the new prompt:\n[{"label":"MUTATION","edit":"Tighten the constraints on the output format"}]',
+        { parents: ['Answer the question.'] },
+      );
+      expect(p?.code).toBe('json');
+    });
+
+    it('accepts a bash herestring — <<< mid-line is not scaffolding', () => {
+      expect(appliedPromptProblem(
+        'Answer the question. Example: `tr a-z A-Z <<< "hello"` prints HELLO.',
+        { parents: ['Answer the question.'] },
+      )).toBeNull();
+    });
+
+    it('catches an echo smuggled past \\s with zero-width characters', () => {
+      const body = 'Rewrite the role/identity statement to better align with the task';
+      const smuggled = body.slice(0, 10) + '​' + body.slice(10);
+      expect(appliedPromptProblem(smuggled, {
+        parents: ['Answer.'],
+        instructions: [`[Rewrite] ${body}`],
+      })?.code).toBe('echo');
+    });
+
+    it('treats a whitespace-reflow as the no-op it is', () => {
+      expect(appliedPromptProblem(
+        'Answer   the question.',
+        { parents: ['Answer the question.'] },
+      )?.code).toBe('noop');
+    });
+  });
+
   describe('template scaffolding (bug 2)', () => {
     it('rejects a result that introduces the <<< >>> fences the parent never had', () => {
       const p = appliedPromptProblem(

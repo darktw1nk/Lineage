@@ -205,6 +205,15 @@ export interface OperatorContext {
   config: EvaluationConfig;
   generation: CandidateNode[];      // current generation snapshot
   rng?: () => number;               // deterministic when the run is seeded; use instead of Math.random
+  /**
+   * Budget/stop gate for multi-call operators. `spentSoFarUSD` is what THIS
+   * operator has already billed (not yet settled into run totals). Check it
+   * between service calls and stop retrying when it returns true — the host
+   * only gates the first call, so an operator that ignores this can bill its
+   * whole retry ceiling past budgetUSD (pass 19: measured 2×retries calls
+   * behind one settled-spend check).
+   */
+  shouldAbort?: (spentSoFarUSD?: number) => boolean;
 }
 
 export interface OperatorResult {

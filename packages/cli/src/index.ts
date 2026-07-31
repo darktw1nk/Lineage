@@ -634,8 +634,12 @@ async function emitOutputs(
     if (reportArg) {
       reportPath = path.resolve(reportArg);
     } else {
-      const reportDir = outputPath
-        ? path.join(path.dirname(path.resolve(outputPath)), 'testoutputs')
+      // "testoutputs/ beside the output file" — but when the output file
+      // already lives IN a directory named testoutputs/, appending another
+      // level produced testoutputs/testoutputs/ (pass 19, hunter D F8).
+      const outputDir = outputPath ? path.dirname(path.resolve(outputPath)) : null;
+      const reportDir = outputDir
+        ? (path.basename(outputDir) === 'testoutputs' ? outputDir : path.join(outputDir, 'testoutputs'))
         : path.resolve('testoutputs');
       const slug = slugify(cliConfig?.name || evalConfig.name || 'evolution');
       reportPath = path.join(reportDir, `output-${slug}.md`);

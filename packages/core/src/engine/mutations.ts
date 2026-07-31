@@ -173,7 +173,11 @@ function selectRandomStrategies(count: number = 2, rng: () => number = Math.rand
 export async function mutateNode(
   basePrompt: string,
   config: EvaluationConfig,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  // Checked between billed calls with THIS operator's unsettled spend — the
+  // caller's budget gate only runs before the first call, so without this a
+  // mutation bills its whole 2×retries ceiling past the cap (pass 19).
+  shouldAbort?: (spentSoFarUSD?: number) => boolean,
 ): Promise<{ prompt: string; changeLog: ChangeLogLine[]; cost: { promptTokens: number; completionTokens: number; usd: number; calls: number } }> {
   const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
@@ -204,10 +208,31 @@ export async function mutateNode(
   let edits!: any[];
   let lastProposalError: Error | undefined;
   
+  // Carrying the parent is the budget-abort outcome for BOTH loops: the parent
+  // is a valid prompt, the changelog is honest, and the caller (which treats a
+  // thrown error as a failed node in the gen-0 fill) keeps its slot.
+  const budgetCarry = (phase: string) => ({
+    prompt: basePrompt,
+    changeLog: [{
+      label: 'CARRY' as const,
+      text: `Budget exhausted during ${phase} — carried the parent unchanged`,
+    }],
+    cost: {
+      promptTokens: totalPromptTokens,
+      completionTokens: totalCompletionTokens,
+      usd: totalUsd,
+      calls: totalCalls,
+    },
+  });
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       if (attempt > 0) {
         console.log(`[Mutation] Retry attempt ${attempt + 1}/${maxRetries} for proposal step`);
+        if (shouldAbort?.(totalUsd)) {
+          console.warn('[Mutation] Budget exhausted mid-proposal — carrying the parent');
+          return budgetCarry('the mutation proposal');
+        }
       }
       
       const proposalResult = await serviceAdapter.call({
@@ -286,6 +311,12 @@ export async function mutateNode(
 
   let lastProblem: AppliedPromptProblem | null = null;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // Every apply attempt is checked (not just retries): the proposal step's
+    // spend precedes this loop and may already have crossed the cap.
+    if (shouldAbort?.(totalUsd)) {
+      console.warn('[Mutation] Budget exhausted before the apply step — carrying the parent');
+      return budgetCarry('the mutation apply step');
+    }
     const applyPrompt = attempt === 0
       ? applyPromptBase
       : `${applyPromptBase}\n\nIMPORTANT: Your previous reply was rejected because it ` +

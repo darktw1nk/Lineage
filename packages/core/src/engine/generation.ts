@@ -136,9 +136,18 @@ const OPERATOR_CALL_BUDGET = 6;
  * `callTimeoutMs` bounds provider calls but never bounded the operator itself,
  * so a plugin whose apply() never resolved hung the whole run forever.
  */
-function withOperatorTimeout<T>(work: Promise<T>, callTimeoutMs: number, operatorName: string): Promise<T> {
+function withOperatorTimeout<T>(
+  work: Promise<T>,
+  callTimeoutMs: number,
+  operatorName: string,
+  // Pass 19 (F3): the pass-18 apply-retry loops made the worst case 2×retries
+  // calls, so the fixed budget of 6 declared a LIVE operator hung at retries
+  // above 2 — and its billed spend never reached cost tracking. Callers scale
+  // this with config.retries.
+  callBudget: number = OPERATOR_CALL_BUDGET,
+): Promise<T> {
   if (!Number.isFinite(callTimeoutMs) || callTimeoutMs <= 0) return work;
-  const timeoutMs = callTimeoutMs * OPERATOR_CALL_BUDGET;
+  const timeoutMs = callTimeoutMs * Math.max(OPERATOR_CALL_BUDGET, callBudget);
   let timer: NodeJS.Timeout;
   return Promise.race([
     work,
@@ -146,7 +155,7 @@ function withOperatorTimeout<T>(work: Promise<T>, callTimeoutMs: number, operato
       timer = setTimeout(
         () => reject(new Error(
           `Operator '${operatorName}' did not finish within ${timeoutMs}ms ` +
-          `(${OPERATOR_CALL_BUDGET} x callTimeoutMs) — treating it as hung`,
+          `(${Math.max(OPERATOR_CALL_BUDGET, callBudget)} x callTimeoutMs) — treating it as hung`,
         )),
         timeoutMs,
       );
@@ -337,7 +346,16 @@ export async function createNextGeneration(
   budget?: {
     reserve: (promptText: string) => Promise<number>;
     release: (reserved: number) => void;
-    exhausted: () => boolean;
+    /** `extraUSD` = spend a caller has billed but not yet settled into totals. */
+    exhausted: (extraUSD?: number) => boolean;
+    /**
+     * Settle one child's operator spend the moment that child completes.
+     * Pass 19 (hunter B, F2): operator spend used to accrue in a single lump
+     * AFTER createNextGeneration returned, so every per-child `exhausted()`
+     * check read a total frozen at transition start — the whole batch ran its
+     * full retry ceilings past the cap (measured 4.6x with generationSize 6).
+     */
+    accrueChild?: (cost: OperatorCost) => void;
   },
 ): Promise<GenerationResult> {
   const newGenNodes: CandidateNode[] = [];
@@ -568,9 +586,10 @@ export async function createNextGeneration(
         // plugin that mutated the live parent rewrote the already-scored
         // parent node in place and every sibling saw the damage, because the
         // same object was handed to all of them.
-        // Reserve for the duration of this child's calls. The per-child check
-        // above only sees SETTLED spend, and every child reaches it in the same
-        // tick, so without a reservation they all pass together.
+        // HONESTY NOTE (pass 19): `reserve` is a settled-spend CHECK, not a
+        // hold — its sizing is ignored upstream. Real between-call protection:
+        // accrueChild settles each completed child into totals, and shouldAbort
+        // (below) lets multi-call operators see their own unsettled spend.
         const reserved = await budget?.reserve(parent.prompt) ?? 0;
         try {
         const result = await withOperatorTimeout(
@@ -587,9 +606,15 @@ export async function createNextGeneration(
             // isolated copy; everyone else pays nothing.
             get generation() { return currentGeneration.map(snapshot); },
             rng: childRng,
+            // Multi-call operators check this between their own billed calls;
+            // the per-child gate above only fires once, before the first.
+            shouldAbort: (spentSoFarUSD = 0) => !!budget?.exhausted(spentSoFarUSD),
           }),
           config.callTimeoutMs ?? 120_000,
           operatorName,
+          // Worst case since the apply step retries too: retries proposals +
+          // retries applies, plus slack for inter-attempt backoff.
+          2 * Math.max(1, config.retries ?? 3) + 2,
         );
 
         const validated = validateOperatorResult(result, operatorName);
@@ -602,17 +627,34 @@ export async function createNextGeneration(
         // evaluation cache serves it for free. Operators that return an honest
         // CARRY/ERROR line themselves keep their own wording. This chokepoint
         // covers plugin operators, which never pass mutateNode's gate.
-        const promptUnchanged = validated.prompt.trim() === parent.prompt.trim();
+        // Whitespace-collapsed: exact trim equality let a reflowed double-space
+        // count as a "change" and re-bill the node at full price (pass 19, F4).
+        const collapse = (t: string) => t.replace(/\s+/g, ' ').trim();
+        const promptUnchanged = collapse(validated.prompt) === collapse(parent.prompt);
         const paramsUnchanged = Object.entries(validated.params).every(
           ([k, v]) => JSON.stringify(v) === JSON.stringify((parent.params as any)[k]),
         );
         const alreadyHonest = ['CARRY', 'ERROR'].includes(String(validated.changeLog[0]?.label));
-        if (promptUnchanged && paramsUnchanged && !alreadyHonest) {
-          console.warn(
-            `[Generation] Operator '${operatorName}' returned the parent unchanged for child ${i} — recording a carry-forward, not a change`,
-          );
+        if (promptUnchanged && paramsUnchanged) {
+          if (!alreadyHonest) {
+            console.warn(
+              `[Generation] Operator '${operatorName}' returned the parent unchanged for child ${i} — recording a carry-forward, not a change`,
+            );
+            return {
+              ...carry('CARRY', `Operator '${operatorName}' returned the parent prompt unchanged — carried forward`, validated.cost),
+            };
+          }
+          // The operator carried honestly — keep its own wording, but a
+          // no-op earns NO operator-effectiveness credit either way, and the
+          // params are inherited exactly so the cache serves the child
+          // (pass 19, F9: a CARRY-labeled result kept full credit).
           return {
-            ...carry('CARRY', `Operator '${operatorName}' returned the parent prompt unchanged — carried forward`, validated.cost),
+            prompt: parent.prompt,
+            changeLog: validated.changeLog,
+            lineageParents: [parent.id],
+            params: { ...parent.params },
+            operatorType: null as string | null,
+            cost: validated.cost,
           };
         }
 
@@ -648,6 +690,8 @@ export async function createNextGeneration(
       }
     })();
     childResults[i] = { index: i, parent, parentFitness, result: outcome };
+    // Settle THIS child's spend now, so the next child's budget gate sees it.
+    budget?.accrueChild?.(outcome.cost);
   };
 
   await Promise.all(Array.from({ length: childPoolSize }, async () => {

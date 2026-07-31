@@ -10,7 +10,7 @@ vi.mock('../../src/store.js', () => ({
 
 import { registerProvider, resetRegistry } from '../../src/registry.js';
 import { initializeDatabase, closeDatabase, getDatabase } from '../../src/database/init.js';
-import { setSendUpdate, startEvaluation } from '../../src/engine/evaluator_v2.js';
+import { setSendUpdate, startEvaluation, stopEvaluation } from '../../src/engine/evaluator_v2.js';
 
 /**
  * A mutation sweep proved eight defects in evaluator_v2 survive a green suite
@@ -187,6 +187,65 @@ describe('a budget stop does not fund the end-of-run phases', () => {
     expect(final.holdout?.champion).toBeUndefined();
 
     fs.rmSync(db, { force: true });
+  }, 120000);
+});
+
+describe('a Stop arriving mid-holdout still reports the holdout (pass 19)', () => {
+  it('emits holdout_result with skipped:manual instead of silence', async () => {
+    // The stop-check between the two holdout halves used to `return` early,
+    // skipping the tail sendUpdate+persistRun: the champion half was billed,
+    // the DB eventually said skipped:'manual', and the live UI showed NOTHING
+    // — indistinguishable from "no holdout configured" while money had just
+    // been spent on half of one.
+    let stopped = false;
+    registerProvider({ adapter: {
+      name: 'priced',
+      estimateTokens: () => ({ prompt: 10 }),
+      call: async (opts: any) => {
+        const isJudge = /Rubric|score/i.test(opts.prompt);
+        // The holdout champion half evaluates test prompt 'H' — trigger a
+        // user Stop the moment it starts, exactly between the two halves.
+        if (!isJudge && opts.prompt === 'H' && !stopped) {
+          stopped = true;
+          stopEvaluation('stop-mid-holdout');
+        }
+        return {
+          output: isJudge ? '{"score": 7, "justification": "ok"}' : 'ANSWER',
+          promptTokens: 10, completionTokens: 10, latencyMs: 1, usd: USD,
+        };
+      },
+    } as any });
+
+    const db = tmp();
+    await initializeDatabase(db);
+    const dbh = getDatabase();
+    const config = makeConfig({
+      population: { initialSize: 1, generationSize: 1, seedPrompt: 'SEED', fill: 'auto' },
+      operators: { mutationShare: 0, crossoverShare: 0 },
+    });
+    dbh.prepare('INSERT INTO evaluation_configs (id, name, config_json, created_at) VALUES (?, ?, ?, ?)')
+      .run(config.id, config.name, JSON.stringify(config), Date.now());
+    const runRow: any = { id: 'stop-mid-holdout', configId: config.id, startedAt: Date.now(),
+      totals: { tokensPrompt: 0, tokensCompletion: 0, usd: 0, calls: 0 }, generations: [], cacheHits: 0, version: '1.0' };
+    dbh.prepare('INSERT INTO evaluation_runs (id, config_id, started_at, run_json, version) VALUES (?, ?, ?, ?, ?)')
+      .run(runRow.id, runRow.configId, runRow.startedAt, JSON.stringify(runRow), runRow.version);
+
+    const events: any[] = [];
+    const done = new Promise<void>(res => setSendUpdate((_id, d: any) => {
+      events.push(JSON.parse(JSON.stringify(d)));
+      if (d.type === 'status' && d.status === 'finished') res();
+    }));
+    await startEvaluation(runRow.id, config, runRow);
+    await done;
+
+    // The event the live UI needs, with the reason on it.
+    const holdoutEvents = events.filter(e => e.type === 'holdout_result');
+    expect(holdoutEvents.length).toBeGreaterThan(0);
+    expect(holdoutEvents[holdoutEvents.length - 1].holdout.skipped).toBe('manual');
+
+    closeDatabase();
+    fs.rmSync(db, { force: true });
+    setSendUpdate(() => {});
   }, 120000);
 });
 

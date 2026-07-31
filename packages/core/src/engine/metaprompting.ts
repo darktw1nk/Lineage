@@ -171,7 +171,10 @@ function getMetapromptTemplates(): { withFailures: string; withoutFailures: stri
 export async function metaPromptNode(
   parent: CandidateNode,
   config: EvaluationConfig,
-  _generation: CandidateNode[]
+  _generation: CandidateNode[],
+  // Checked between billed calls with this operator's unsettled spend — the
+  // caller's budget gate only runs before the first call (pass 19).
+  shouldAbort?: (spentSoFarUSD?: number) => boolean,
 ): Promise<{ prompt: string; changeLog: ChangeLogLine[]; cost: { promptTokens: number; completionTokens: number; usd: number; calls: number } }> {
   const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
@@ -244,6 +247,24 @@ export async function metaPromptNode(
 
   let lastProblem: AppliedPromptProblem | null = null;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // Every apply attempt is checked: the proposal call's spend precedes this
+    // loop and may already have crossed the cap.
+    if (shouldAbort?.(totalUsd)) {
+      console.warn('[MetaPrompt] Budget exhausted before the apply step — carrying the parent');
+      return {
+        prompt: parent.prompt,
+        changeLog: [{
+          label: 'CARRY' as const,
+          text: 'Budget exhausted during meta-prompting — carried the parent unchanged',
+        }],
+        cost: {
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
+          usd: totalUsd,
+          calls: totalCalls,
+        },
+      };
+    }
     const applyPrompt = attempt === 0
       ? applyPromptBase
       : `${applyPromptBase}\n\nIMPORTANT: Your previous reply was rejected because it ` +

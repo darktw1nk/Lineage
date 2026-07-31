@@ -43,11 +43,14 @@ function getCrossoverPromptTemplate(): string {
 export async function crossoverNodes(
   parentA: CandidateNode,
   parentB: CandidateNode,
-  config: EvaluationConfig
-): Promise<{ 
-  prompt: string; 
-  changeLog: ChangeLogLine[]; 
-  cost: { promptTokens: number; completionTokens: number; usd: number; calls: number } 
+  config: EvaluationConfig,
+  // Checked between billed merge attempts with this operator's unsettled
+  // spend — the caller's budget gate only runs before the first call (pass 19).
+  shouldAbort?: (spentSoFarUSD?: number) => boolean,
+): Promise<{
+  prompt: string;
+  changeLog: ChangeLogLine[];
+  cost: { promptTokens: number; completionTokens: number; usd: number; calls: number }
 }> {
   const serviceAdapter = getProviderAdapter(config.serviceModel.provider);
   const maxTokens = (config as any).serviceModelMaxTokens || 20000;
@@ -81,6 +84,22 @@ export async function crossoverNodes(
   let lastProblem: AppliedPromptProblem | null = null;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0 && shouldAbort?.(totalUsd)) {
+      console.warn('[Crossover] Budget exhausted mid-retry — carrying parent A');
+      return {
+        prompt: parentA.prompt,
+        changeLog: [{
+          label: 'CARRY' as const,
+          text: `Budget exhausted during crossover retries — carried ${parentA.id.slice(0, 8)} unchanged`,
+        }],
+        cost: {
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
+          usd: totalUsd,
+          calls: totalCalls,
+        },
+      };
+    }
     const crossoverPrompt = attempt === 0
       ? crossoverPromptBase
       : `${crossoverPromptBase}\n\nIMPORTANT: Your previous reply was rejected because it ` +

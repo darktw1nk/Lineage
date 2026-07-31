@@ -101,6 +101,49 @@ describe('the cost_breakdown event is actually consumed', () => {
   });
 });
 
+describe('holdout state reaches a LIVE session, not only a reloaded one (pass 19)', () => {
+  it('holdoutSkippedReason rides the cost_breakdown event to the run', async () => {
+    // Pass 19, hunter C F1: the engine persisted the field but no IPC event
+    // carried it, so the "holdout share rounded to zero" warning could only
+    // ever appear after an app restart — never in the session where the user
+    // could act on it.
+    const store = useEvaluationStore.getState();
+    store.subscribe(RUN);
+    useEvaluationStore.getState().hydrate(RUN, snapshot());
+
+    handler!(null, { type: 'cost_breakdown', breakdown: {}, holdoutSkippedReason: 'share-rounds-to-zero' });
+
+    const after = useEvaluationStore.getState().evaluations.get(RUN)! as any;
+    expect(after.holdoutSkippedReason).toBe('share-rounds-to-zero');
+
+    const { holdoutTile } = await import('../../src/utils/holdoutTile');
+    const tile = holdoutTile(after.holdout, after.holdoutSkippedReason)!;
+    expect(tile).not.toBeNull();
+    expect(tile.warn).toBe(true);
+    expect(tile.value).toMatch(/not run/i);
+  });
+
+  it('a SKIPPED holdout_result renders its reason live', async () => {
+    // Pass 19, hunter C F2 companion: a Stop mid-holdout now emits
+    // holdout_result with skipped:'manual' instead of returning early —
+    // the store and tile must show it in the same session.
+    const store = useEvaluationStore.getState();
+    store.subscribe(RUN);
+    useEvaluationStore.getState().hydrate(RUN, snapshot());
+
+    handler!(null, {
+      type: 'holdout_result',
+      holdout: { testIds: ['h1'], samplesPerTest: 1, champion: { score: 7.5, perTest: [{ testId: 'h1', score: 7.5 }] }, skipped: 'manual' },
+    });
+
+    const after = useEvaluationStore.getState().evaluations.get(RUN)! as any;
+    const { holdoutTile } = await import('../../src/utils/holdoutTile');
+    const tile = holdoutTile(after.holdout, after.holdoutSkippedReason)!;
+    expect(tile.value).toContain('manual');
+    expect(tile.warn).toBe(true);
+  });
+});
+
 describe('hydrate keeps the LIVE node when both sides have the same id', () => {
   it('a DB snapshot does not rewind a node the live stream already advanced', () => {
     // The merge comment says "live wins: the snapshot is by definition the older

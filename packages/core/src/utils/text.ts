@@ -218,9 +218,45 @@ export interface AppliedPromptCheck {
   instructions?: string[];
 }
 
-/** Case- and whitespace-insensitive form for containment comparisons. */
+/**
+ * Case-, whitespace- AND hiding-character-insensitive form for containment
+ * comparisons. Pass 19: a ZWSP inside an otherwise verbatim echo defeated the
+ * check because \s does not match U+200B.
+ */
 function normalizeForEcho(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().toLowerCase();
+  return stripHidingChars(text).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** Whitespace-collapsed equality — a "mutation" that only reflows whitespace
+ * is still the paid no-op of open-bugs #1 (pass 19: exact trim equality let
+ * a collapsed double-space count as a change and re-bill the node). */
+function sameCollapsed(a: string, b: string): boolean {
+  return a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Is this instruction EDIT-language (an imperative about the prompt) rather
+ * than replacement text? "Rewrite the role/identity statement…" is an
+ * instruction; "Extract key information from the ticket…" is a prompt. The
+ * distinction matters because a FAITHFUL application of a full-rewrite edit is
+ * byte-equal to the edit text — pass 18 rejected that as an echo, observed
+ * live: three deterministic retries, all rejected, a legitimate rewrite
+ * discarded (pass-19 hunter A, F1).
+ */
+function isEditLanguage(instruction: string): boolean {
+  return /\b(rewrite|replace|reword|rephrase|remove|delete|prune|add|insert|append|convert|reorder|restructure|tighten|adjust|switch|merge|change)\b[^.!?]{0,60}\b(prompt|instruction|statement|section|line|sentence|paragraph|wording|phrasing|role|identity|constraint|rule|example)s?\b/i
+    .test(instruction);
+}
+
+/** A line that reproduces the operator template's fence shape: a line that is
+ * only `>>>` (closes a block) or ends in `<<<` (opens one). Substring matching
+ * rejected real content — a bash herestring (`tr a-z A-Z <<< "x"`) is mid-line
+ * and can never escape or open a block (pass-19 hunter A, F8). */
+function hasScaffoldLine(text: string): boolean {
+  return text.split(/\r?\n/).some(line => {
+    const l = line.trim();
+    return /^>{3,}$/.test(l) || /<{3,}$/.test(l);
+  });
 }
 
 /** Parse `text` as JSON after unwrapping a ```fence```, or return undefined. */
@@ -267,51 +303,91 @@ export function appliedPromptProblem(
 ): AppliedPromptProblem | null {
   const trimmed = candidate.trim();
   const parents = (check.parents ?? []).filter((p): p is string => typeof p === 'string');
+  const instructions = (check.instructions ?? []).filter((i): i is string => typeof i === 'string');
 
   if (trimmed === '') {
     return { code: 'empty', reason: 'is empty' };
   }
 
-  // Scaffolding the operator template introduced. The apply template fences the
-  // parent in <<< >>>; a reply that still contains those markers reproduced the
-  // template rather than filling it — unless the parent prompt already uses
-  // fence markers as part of its own style.
-  const hasFence = (t: string) => t.includes('<<<') || t.includes('>>>');
-  if (hasFence(trimmed) && !parents.some(hasFence)) {
+  // Scaffolding the operator template introduced: LINE-shaped fences only —
+  // the template's own shapes are a line ending in <<< and a line that is only
+  // >>>. (A reply keeping fence lines reproduced the template rather than
+  // filling it; a parent that already uses fence lines keeps that right.)
+  if (hasScaffoldLine(trimmed) && !parents.some(hasScaffoldLine)) {
     return { code: 'scaffolding', reason: 'contains the <<< >>> operator scaffolding' };
   }
 
+  // JSON checks. Order matters (pass-19 hunter A, F2): the parent exemptions
+  // are computed FIRST, because a parent that is itself edit-list-shaped JSON
+  // (a labeled-taxonomy prompt: [{"label":"positive"},…]) makes JSON — even
+  // edit-shaped JSON — the legitimate genre for its children; rejecting it
+  // made such prompts permanently un-operable.
+  const parentValues = parents.map(parseJsonValue);
+  const parentIsJson = parentValues.some(v => v !== undefined && v !== null && typeof v === 'object');
+  const parentIsEditShaped = parentValues.some(isEditListShape);
+
+  // The one JSON reply that is ALWAYS an echo, whatever the parent's genre:
+  // the operator's own edits payload handed back — every item's edit text
+  // appears among the instructions we actually sent.
+  const isActualEditsEcho = (v: unknown): boolean =>
+    Array.isArray(v) && v.length > 0 && instructions.length > 0 &&
+    v.every(e => e && typeof e === 'object' && typeof (e as any).edit === 'string' &&
+      instructions.some(i => normalizeForEcho(i).includes(normalizeForEcho((e as any).edit))));
+
   const parsed = parseJsonValue(trimmed);
   if (parsed !== undefined && parsed !== null && typeof parsed === 'object') {
-    if (isEditListShape(parsed)) {
+    if (isActualEditsEcho(parsed)) {
       return { code: 'json', reason: 'is the operator edit list echoed back as JSON' };
     }
-    const parentIsJson = parents.some(p => {
-      const pj = parseJsonValue(p);
-      return pj !== undefined && pj !== null && typeof pj === 'object';
-    });
+    if (isEditListShape(parsed) && !parentIsEditShaped) {
+      return { code: 'json', reason: 'is the operator edit list echoed back as JSON' };
+    }
     if (!parentIsJson) {
       return { code: 'json', reason: 'is JSON, not a prompt' };
+    }
+  } else if (!parentIsEditShaped) {
+    // Not whole-text JSON — but the observed open-bugs #2 artifact returns
+    // behind one line of prose ("Here is the new prompt:\n[{…}]"). An
+    // edit-shaped array that constitutes the bulk of the reply is the payload,
+    // not a prompt (pass-19 hunter A, F5).
+    for (const span of balancedSpans(trimmed, '[', ']')) {
+      if (span.length < trimmed.length * 0.6) continue;
+      try {
+        const v = JSON.parse(span);
+        if (isEditListShape(v) || isActualEditsEcho(v)) {
+          return { code: 'json', reason: 'is the operator edit list echoed back behind a preamble' };
+        }
+      } catch { /* not JSON — keep looking */ }
     }
   }
 
   const norm = normalizeForEcho(trimmed);
-  for (const instruction of check.instructions ?? []) {
-    if (typeof instruction !== 'string') continue;
+  for (const instruction of instructions) {
     // Drop the "[Category] " prefix the strategy catalog adds — the echo we
     // observed reproduced the instruction body without it.
-    const body = normalizeForEcho(instruction.replace(/^\s*\[[^\]]{1,40}\]\s*/, ''));
+    const rawBody = instruction.replace(/^\s*\[[^\]]{1,40}\]\s*/, '');
+    const body = normalizeForEcho(rawBody);
     if (body.length < 20) continue; // too short to be evidence either way
-    const startsWithIt = norm.startsWith(body) ||
+    // An echo is only evidence when the instruction is EDIT-language. A
+    // full-rewrite edit's text IS the intended prompt, so a faithful
+    // application is byte-equal to it — rejecting that burned every retry on
+    // an unwinnable demand and discarded legitimate rewrites (observed live;
+    // pass-19 hunter A, F1).
+    if (!isEditLanguage(rawBody)) continue;
+    const idx = norm.indexOf(body);
+    const echoed = norm.startsWith(body) ||
       // tolerate a short preamble ("Sure! …") before the echoed instruction
-      (norm.includes(body) && norm.indexOf(body) <= 30 && norm.length <= body.length * 1.5);
-    if (startsWithIt) {
+      (idx !== -1 && idx <= 30 && norm.length <= body.length * 1.5);
+    if (echoed) {
       return { code: 'echo', reason: 'reproduces the edit instruction instead of applying it' };
     }
   }
 
   for (const parent of parents) {
-    if (trimmed === parent.trim()) {
+    // Collapsed comparison: a whitespace-reflow "mutation" is still a paid
+    // no-op — same prompt, re-measured at full price under a changelog
+    // claiming a change (pass-19 hunter A, F4).
+    if (sameCollapsed(trimmed, parent)) {
       return { code: 'noop', reason: 'is identical to the parent prompt' };
     }
   }

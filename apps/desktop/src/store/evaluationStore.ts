@@ -442,10 +442,14 @@ export const useEvaluationStore = create<EvaluationStore>((set, get) => ({
           // Fabricated placeholder scores were shown as measurements with no
           // disclosure at all, while the CLI report warns loudly on the very
           // same data. The Footer now surfaces ungradedTests.
+          // holdoutSkippedReason rides this terminal event too — it was
+          // persisted but never crossed IPC, so the "share rounded to zero"
+          // tile could only appear after an app restart (pass 19).
           store.setRunFields(evalId, {
             costBreakdown: data.breakdown ?? undefined,
             estimate: data.estimate ?? undefined,
             ungradedTests: data.ungradedTests ?? undefined,
+            holdoutSkippedReason: data.holdoutSkippedReason ?? undefined,
           });
           break;
           

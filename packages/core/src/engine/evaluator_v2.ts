@@ -656,15 +656,25 @@ async function mutatePopulationInBackground(
 
       // Stable label: the node's index in generation 0 — identical streams across resume
       const gen0Index = shellNodes.indexOf(node);
-      // A mutation is 2+ service calls. Reserve them against the cap for the
-      // duration: the gate above only sees SETTLED spend, so `parallelLimit`
-      // workers starting at once all read the same total and all proceed.
+      // HONESTY NOTE (pass 19, hunter B F4): reserveCall is a settled-spend
+      // CHECK, not a reservation — its sizing arguments are ignored. The
+      // between-calls protection comes from the shouldAbort gate passed to
+      // mutateNode below, which sees the operator's own unsettled spend.
       const fillMaxTokens = (state.config as any).serviceModelMaxTokens || 20000;
       const fillReserved = await reserveCall(
         state, state.config.serviceModel, shellNodes[0].prompt, fillMaxTokens * 2);
       let result;
       try {
-        result = await mutateNode(shellNodes[0].prompt, state.config, rngFor(state.config.seed, 'fill', gen0Index));
+        result = await mutateNode(
+          shellNodes[0].prompt,
+          state.config,
+          rngFor(state.config.seed, 'fill', gen0Index),
+          // Between its own billed calls the operator asks whether its
+          // unsettled spend has crossed the cap — the gate above only ran once.
+          (spentSoFarUSD = 0) =>
+            budgetExhausted(state, spentSoFarUSD) ||
+            state.status === 'stopped' || state.status === 'pausing',
+        );
       } finally {
         releaseCall(state, fillReserved);
       }
@@ -1842,19 +1852,25 @@ async function moveToNextGeneration(
       release: (reserved: number) => releaseCall(state, reserved),
       // Stop as well as budget: the operator batch ran on after a manual Stop
       // for the same reason the playoff did.
-      exhausted: () => budgetExhausted(state) || state.stopRequested || state.status === 'stopped',
+      exhausted: (extraUSD = 0) =>
+        budgetExhausted(state, extraUSD) || state.stopRequested || state.status === 'stopped',
+      // Settle each child's spend AS IT COMPLETES. Accruing the whole batch
+      // after createNextGeneration returned froze the gate for the entire
+      // transition: measured 24 ungated calls and 4.6x the cap (pass 19,
+      // hunter B F2). This callback replaces the post-hoc lump accrual.
+      accrueChild: (cost) => {
+        accrueCost(state, COST_LABELS.operators, state.config.serviceModel, {
+          usd: cost.usd, promptTokens: cost.promptTokens,
+          completionTokens: cost.completionTokens, calls: cost.calls,
+        });
+        sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+      },
     },
   );
-  
+
   const newGenNodes = result.newNodes;
-  
-  // Track costs
-  accrueCost(state, COST_LABELS.operators, state.config.serviceModel, {
-    usd: result.costTracking.usd, promptTokens: result.costTracking.promptTokens,
-    completionTokens: result.costTracking.completionTokens, calls: result.costTracking.calls,
-  });
-  
-  sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
+  // Costs were settled per child via accrueChild — do NOT accrue
+  // result.costTracking again here, that would double-count the batch.
   
   // Add to generation and queue (elite nodes are already finished, don't re-queue them)
   state.run.generations[state.currentGeneration] = newGenNodes;
@@ -1966,16 +1982,21 @@ async function runHoldoutEvaluation(runId: UUID, state: EvaluationState): Promis
     // A Stop arriving mid-holdout used to keep paying: finishEvaluation had
     // already latched, so stopEvaluation returned immediately from the latch
     // while the remaining holdout calls ran on. Re-check between the two halves.
+    // NOT an early `return` — that skipped the tail sendUpdate+persistRun, so
+    // the champion half was billed, the DB (eventually) said skipped:'manual',
+    // and the live UI showed NOTHING: indistinguishable from "no holdout
+    // configured" while money had just been spent on half of one (pass 19,
+    // hunter C F2).
     if (state.stopRequested) {
       console.warn('[Evaluator] Stop requested during holdout — skipping the seed baseline');
       holdout.skipped = 'manual';
-      return;
+    } else {
+      if (!holdout.seed) {
+        const seedResults = await evaluatePromptOnTests(state.config.population.seedPrompt, champion.params, state.holdoutTests, state, runId);
+        holdout.seed = { score: meanScore(seedResults), perTest: perTest(seedResults) };
+      }
+      console.log(`[Evaluator] Generalization (unseen tests): seed ${holdout.seed.score.toFixed(2)} → champion ${holdout.champion.score.toFixed(2)}`);
     }
-    if (!holdout.seed) {
-      const seedResults = await evaluatePromptOnTests(state.config.population.seedPrompt, champion.params, state.holdoutTests, state, runId);
-      holdout.seed = { score: meanScore(seedResults), perTest: perTest(seedResults) };
-    }
-    console.log(`[Evaluator] Generalization (unseen tests): seed ${holdout.seed.score.toFixed(2)} → champion ${holdout.champion.score.toFixed(2)}`);
   } catch (error) {
     console.error('[Evaluator] Holdout evaluation failed:', error);
   } finally {
@@ -2067,7 +2088,17 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   // checkpoint — the resume path takes the larger of the two either way.
   try { clearSpend(getDatabase().dbPath, state.run.id); } catch { /* best effort */ }
 
-  sendUpdate(runId, { type: 'cost_breakdown', breakdown: state.run.costBreakdown, estimate: state.run.estimate, ungradedTests: state.run.ungradedTests });
+  sendUpdate(runId, {
+    type: 'cost_breakdown',
+    breakdown: state.run.costBreakdown,
+    estimate: state.run.estimate,
+    ungradedTests: state.run.ungradedTests,
+    // Pass 19 (hunter C F1): this field was persisted but never crossed IPC,
+    // so the desktop's "holdout share rounded to zero" warning could only ever
+    // appear after an app restart re-read run_json — never in the session
+    // where the user could act on it. This terminal event is its carriage.
+    ...(state.run.holdoutSkippedReason ? { holdoutSkippedReason: state.run.holdoutSkippedReason } : {}),
+  });
 
   // Send final updates
   if (state.run.stopReason) {
@@ -2155,9 +2186,12 @@ function sniffImageMimeType(buf: Buffer): string | null {
   return null;
 }
 
-function budgetExhausted(state: EvaluationState): boolean {
+function budgetExhausted(state: EvaluationState, extraUSD = 0): boolean {
   const budget = state.config.targets.budgetUSD;
-  return budget !== undefined && state.run.totals.usd >= budget;
+  // `extraUSD`: spend a multi-call operator has already billed but not yet
+  // settled into totals — without it, an operator's own retries can never
+  // trip the gate they are being checked against (pass 19, hunter B F1).
+  return budget !== undefined && state.run.totals.usd + extraUSD >= budget;
 }
 
 /**

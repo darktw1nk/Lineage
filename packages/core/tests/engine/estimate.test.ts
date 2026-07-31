@@ -207,10 +207,10 @@ describe('estimateRunCost dollar band', () => {
   });
 
   it('discloses that mutation call counts are nominal, not a ceiling', async () => {
-    // mutations.ts re-proposes up to `retries` times when the service model
-    // returns something unusable, so fill/operator calls can run higher than
-    // the flat 2-per-child the estimate quotes.
+    // Since pass 18 BOTH steps retry (proposal and apply/merge), so the
+    // per-child ceiling is 2×retries calls — the warning must name that bound
+    // (pass 19, hunter B F3: the old wording covered only proposal retries).
     const e = await estimateRunCost(base({ retries: 3 }), flatCost);
-    expect(e.warnings.some(w => w.includes('nominal') && w.includes('re-proposes'))).toBe(true);
+    expect(e.warnings.some(w => w.includes('nominal') && w.includes('retries BOTH') && w.includes('6 per child'))).toBe(true);
   });
 });

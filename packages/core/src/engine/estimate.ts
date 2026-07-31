@@ -122,12 +122,16 @@ export async function estimateRunCost(
   const judgePromptLow = candPromptLow + 400 + 30;
   const judgePromptHigh = (out: number) => candPromptHigh(out) + 400 + out;
 
-  // A mutation/meta child costs 1 proposal + 1 apply call nominally, but the
-  // proposal loop retries up to `config.retries` times when the service model
-  // returns something unusable (mutations.ts). Nominal calls stay nominal; the
-  // high side has to cover the retry ceiling.
+  // A mutation/meta child costs 1 proposal + 1 apply call nominally, but BOTH
+  // steps retry up to `config.retries` times when the service model returns
+  // something unusable (pass 18 added apply/merge validation+retry), so the
+  // per-child ceiling is 2×retries calls for mutation, retries for crossover,
+  // 1+retries for meta. Nominal calls stay nominal; the high side must cover
+  // the worst of those ceilings — retries× the nominal count covers all three
+  // (pass 19, hunter B F3: the old (retries+1)/2 factor understated the
+  // mutation and crossover ceilings by 1.5x).
   const maxProposalAttempts = Math.max(1, config.retries ?? 3);
-  const retryFactor = (maxProposalAttempts + 1) / 2;
+  const retryFactor = maxProposalAttempts;
 
   // Clamp like the accrual path does. A catalog row can still carry a negative
   // price — an OpenRouter "-1" sentinel synced before that filter existed — and
@@ -260,8 +264,9 @@ export async function estimateRunCost(
   }
   if (maxProposalAttempts > 1 && (config.population.fill !== 'manual' || operatorCalls > 0)) {
     warnings.push(
-      `call counts are nominal: each mutation/meta child re-proposes up to retries (${maxProposalAttempts}) ` +
-      `times when the service model returns something unusable, so fill and operator calls can run higher`,
+      `call counts are nominal: each mutation/meta/crossover child retries BOTH its proposal and its ` +
+      `apply/merge step up to retries (${maxProposalAttempts}) times when the service model returns ` +
+      `something unusable, so fill and operator calls can run up to ${2 * maxProposalAttempts} per child`,
     );
   }
   // Uncatalogued models are the single most consequential thing this preflight

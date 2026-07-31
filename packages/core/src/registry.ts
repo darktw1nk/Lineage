@@ -178,24 +178,24 @@ function builtinOperators(): OperatorPlugin[] {
     {
       name: 'mutation', label: 'Mutation', parents: 1,
       description: 'Strategy-guided LLM rewrite of the prompt',
-      async apply({ parent, config, rng }) {
-        const r = await mutateNode(parent.prompt, config, rng ?? Math.random);
+      async apply({ parent, config, rng, shouldAbort }) {
+        const r = await mutateNode(parent.prompt, config, rng ?? Math.random, shouldAbort);
         return { prompt: r.prompt, changeLog: r.changeLog, cost: r.cost };
       },
     },
     {
       name: 'crossover', label: 'Crossover', parents: 2,
       description: 'LLM merge of two parent prompts',
-      async apply({ parent, parentB, config }) {
-        const r = await crossoverNodes(parent, parentB!, config);
+      async apply({ parent, parentB, config, shouldAbort }) {
+        const r = await crossoverNodes(parent, parentB!, config, shouldAbort);
         return { prompt: r.prompt, changeLog: r.changeLog, cost: r.cost };
       },
     },
     {
       name: 'meta', label: 'Meta-prompting', parents: 1,
       description: 'Failure-aware surgical edits from test results',
-      async apply({ parent, config, generation }) {
-        const r = await metaPromptNode(parent, config, generation);
+      async apply({ parent, config, generation, shouldAbort }) {
+        const r = await metaPromptNode(parent, config, generation, shouldAbort);
         return { prompt: r.prompt, changeLog: r.changeLog, cost: r.cost };
       },
     },

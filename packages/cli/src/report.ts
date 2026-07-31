@@ -136,7 +136,12 @@ function escapeMarkdown(text: string): string {
     .replace(/\r?\n/g, ' ')
     .replace(/\[/g, '\\[')
     .replace(/\]/g, '\\]')
-    .replace(/</g, '&lt;');
+    .replace(/</g, '&lt;')
+    // GFM autolinks BARE urls — no brackets needed — so escaping brackets
+    // alone still let model text place a live external link in the artifact.
+    // A zero-width space after the scheme breaks the autolink pattern without
+    // visibly altering the quoted text (pass 19, hunter D F6).
+    .replace(/\b(https?|ftp):\/\//gi, (_m: string, s: string) => s + ':' + String.fromCharCode(0x200B) + '//');
 }
 
 /**
@@ -161,7 +166,9 @@ function escapeMarkdownProse(text: string): string {
     .replace(/\[/g, '\\[')      // no links
     .replace(/\]/g, '\\]')
     .replace(/</g, '&lt;')      // no raw HTML
-    .replace(/\|/g, '\\|');     // no table rows
+    .replace(/\|/g, '\\|')      // no table rows
+    // no bare-URL autolinks either — GFM links them without any brackets
+    .replace(/\b(https?|ftp):\/\//gi, (_m: string, s: string) => s + ':' + String.fromCharCode(0x200B) + '//');
 }
 
 /**
@@ -376,6 +383,33 @@ export function generateReport(
     lines.push(`| ${prefix}${gen.generation}${suffix} | ${prefix}${cell(stats.avg)}${suffix} | ${prefix}${cell(stats.best)}${suffix} | ${prefix}${cell(stats.worst)}${suffix}${note} |`);
   }
   lines.push('');
+
+  // ---- Carried children disclosure ----
+  // A broken (always-echoing) service model now produces HONEST per-node
+  // carries instead of fake candidates — but nothing aggregated them, so a run
+  // in which evolution silently did nothing looked identical to a healthy one
+  // at every level a user reads (pass 19, hunter A F6). Count them.
+  {
+    let carried = 0;
+    let children = 0;
+    for (let g = 0; g < result.generations.length; g++) {
+      for (let n = 0; n < result.generations[g].nodes.length; n++) {
+        if (g === 0 && n === 0) continue; // the seed baseline is not a child
+        const node = result.generations[g].nodes[n];
+        const firstLabel = node.changeLog?.[0]?.label;
+        children++;
+        if (firstLabel === 'CARRY' || firstLabel === 'ERROR') carried++;
+      }
+    }
+    if (children > 0 && carried / children >= 0.5) {
+      lines.push(
+        `> ⚠️ **${carried} of ${children} children were carried forward unchanged** — their operator output was ` +
+        'rejected (echo/JSON/no-op), the operator failed, or the budget ran out first. Evolution explored far ' +
+        'less than the generation count suggests; check the service model before trusting this run\'s coverage.',
+      );
+      lines.push('');
+    }
+  }
 
   // ---- Seed Prompt (Baseline) ----
   const seedNode = result.generations[0]?.nodes[0] ?? null;
@@ -734,8 +768,15 @@ export function generateReport(
     for (let t = 0; t < seedNode.tests.length; t++) {
       const seedTest = seedNode.tests[t];
       const bestTest = bestNode.tests.find(x => x.testId === seedTest.testId);
-      if (!bestTest) continue;
-      const testName = findTestDef(config, seedTest.testId)?.name ?? `Test ${t + 1}`;
+      const soloName = findTestDef(config, seedTest.testId)?.name ?? `Test ${t + 1}`;
+      if (!bestTest) {
+        // A silent `continue` made a test with a result on only ONE side
+        // vanish from Analysis entirely — while Seed Test Results still showed
+        // it scoring, sections apart (pass 19, hunter D F5).
+        notGraded.push(`- **${escapeMarkdown(soloName)}**: only the seed has a result for this test — not comparable.`);
+        continue;
+      }
+      const testName = soloName;
       // The SAME rule as the Improvement table above: an ungraded leaf is a
       // placeholder 5.0, not a measurement. Reading raw `.score` here made one
       // document print `| TRAIN | 0.0 ⚠️ | 0.0 | 0.0 |` in the table and
@@ -744,8 +785,14 @@ export function generateReport(
       const seedUngraded = !!(seedTest as any).ungraded;
       const bestUngraded = !!(bestTest as any).ungraded;
       if (seedUngraded || bestUngraded) {
-        const side = seedUngraded && bestUngraded ? 'neither side' : seedUngraded ? 'the seed' : 'the best prompt';
-        notGraded.push(`- **${testName}**: ${side} could not be graded, so there is no verdict for this pair.`);
+        // Whole clauses, not a substituted subject: composing "${side} could
+        // not be graded" printed "neither side could not be graded" — a double
+        // negative asserting the opposite of the truth, in the honesty section
+        // (pass 19, hunter D F3).
+        const clause = seedUngraded && bestUngraded
+          ? 'neither side was graded'
+          : seedUngraded ? 'the seed could not be graded' : 'the best prompt could not be graded';
+        notGraded.push(`- **${escapeMarkdown(testName)}**: ${clause}, so there is no verdict for this pair.`);
         continue;
       }
       const seedScore = seedTest.score ?? 0;
@@ -756,12 +803,21 @@ export function generateReport(
       const bestReason = escapeMarkdownProse(extractJustification(bestTest.llmGradeReasoning));
 
       if (delta > 0) {
-        wins.push(`- **${testName}** (+${delta.toFixed(0)}): Seed scored ${seedScore}${seedReason ? ` — ${seedReason}` : ''}. Best scored ${bestScore}${bestReason ? ` — ${bestReason}` : ''}.`);
+        // escapeMarkdown on the NAME too: a config-authored test name could
+        // forge a fake "### Wins" heading inside the Analysis (pass 19, D F4).
+        wins.push(`- **${escapeMarkdown(testName)}** (+${delta.toFixed(0)}): Seed scored ${seedScore}${seedReason ? ` — ${seedReason}` : ''}. Best scored ${bestScore}${bestReason ? ` — ${bestReason}` : ''}.`);
       } else if (delta < 0) {
-        losses.push(`- **${testName}** (${delta.toFixed(0)}): Seed scored ${seedScore}${seedReason ? ` — ${seedReason}` : ''}. Best scored ${bestScore}${bestReason ? ` — ${bestReason}` : ''}.`);
+        losses.push(`- **${escapeMarkdown(testName)}** (${delta.toFixed(0)}): Seed scored ${seedScore}${seedReason ? ` — ${seedReason}` : ''}. Best scored ${bestScore}${bestReason ? ` — ${bestReason}` : ''}.`);
       } else {
-        unchanged.push(`- **${testName}** (=${seedScore})`);
+        unchanged.push(`- **${escapeMarkdown(testName)}** (=${seedScore})`);
       }
+    }
+
+    // The mirror case: a test the CHAMPION has that the seed does not.
+    for (const bestOnly of bestNode.tests) {
+      if (seedNode.tests.some(s => s.testId === bestOnly.testId)) continue;
+      const name = findTestDef(config, bestOnly.testId)?.name ?? bestOnly.testId ?? 'unnamed test';
+      notGraded.push(`- **${escapeMarkdown(String(name))}**: only the best prompt has a result for this test — not comparable.`);
     }
 
     if (wins.length > 0) {
@@ -794,7 +850,17 @@ export function generateReport(
   }
 
   // ---- Prompt Changelog ----
-  if (bestNode && bestNode.changeLog && bestNode.changeLog.length > 0) {
+  // The seed-is-champion check comes FIRST: the engine always stamps the seed
+  // with a "[MUTATION] Seed prompt (baseline)" changelog line, so the
+  // changeLog.length branch shadowed this one and the honest sentence was
+  // unreachable — a 1-node run's report listed a fabricated MUTATION entry
+  // instead (pass 19, hunter D F1; shipped in a real report today).
+  if (bestNode && seedNode && bestNode.id === seedNode.id) {
+    lines.push('## Prompt Changes (Seed → Best)');
+    lines.push('');
+    lines.push('*Best prompt is the seed — no mutations applied.*');
+    lines.push('');
+  } else if (bestNode && bestNode.changeLog && bestNode.changeLog.length > 0) {
     lines.push('## Prompt Changes (Seed → Best)');
     lines.push('');
 
@@ -816,11 +882,6 @@ export function generateReport(
         lines.push(`- **[${escapeMarkdownProse(change.label)}]**: ${escapeMarkdownProse(change.text)}`);
       }
     }
-    lines.push('');
-  } else if (bestNode && seedNode && bestNode.id === seedNode.id) {
-    lines.push('## Prompt Changes (Seed → Best)');
-    lines.push('');
-    lines.push('*Best prompt is the seed — no mutations applied.*');
     lines.push('');
   }
 
@@ -864,7 +925,15 @@ function extractJustification(reasoning: string | undefined): string {
       json = json.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
     }
     const parsed = JSON.parse(json);
-    return parsed.justification || '';
+    // Pass 19 (hunter D F2): the judge is a model — `justification` can come
+    // back as an array or object, and `escapeMarkdownProse(array)` threw
+    // `text.replace is not a function` AFTER the run was paid for, silently
+    // destroying the report. Strings only.
+    if (typeof parsed.justification !== 'string') return '';
+    // Trailing period stripped: the templates add their own sentence-final
+    // punctuation, and "…of the reference.. Best scored 7" shipped in a real
+    // report today.
+    return parsed.justification.trim().replace(/\.+$/, '');
   } catch {
     return '';
   }
@@ -886,11 +955,18 @@ function traceLineage(
     }
   }
 
-  // Walk backwards from target to seed, following first parent
+  // Walk backwards from target to seed, following first parent.
+  // Visited-set guarded: engine lineage is a DAG, but this walks whatever
+  // run_json contains — a corrupt checkpoint with a parent cycle hung the CLI
+  // FOREVER after the run was paid for, and a hang (unlike a throw) is not
+  // caught by the report try/catch (pass 19, hunter D F7).
   const path: Array<{ generation: number; changeLog: EvolutionResultNode['changeLog'] }> = [];
+  const visited = new Set<string>();
   let current: (EvolutionResultNode & { generation: number }) | undefined = nodeMap.get(target.id);
 
   while (current && current.changeLog && current.changeLog.length > 0) {
+    if (visited.has(current.id)) break;
+    visited.add(current.id);
     path.push({ generation: current.generation, changeLog: current.changeLog });
     const parentId = current.lineageParents[0];
     if (!parentId) break;
