@@ -70,10 +70,24 @@ describe('every adapter reads its own wire the same way', () => {
   });
 
   it.each(WIRE)('%s reports latency it actually measured', async (_n, adapter, ok) => {
-    respond(ok);
-    const r = await call(adapter);
-    expect(typeof r.latencyMs).toBe('number');
-    expect(r.latencyMs).toBeGreaterThanOrEqual(0);
-    expect(Number.isFinite(r.latencyMs)).toBe(true);
+    // `typeof number` + `>= 0` + isFinite are ALL satisfied by the constant 0,
+    // so hardcoding `latencyMs: 0` in an adapter passed. latencyMs feeds the
+    // latency fitness dimension, and a 0 hands every candidate a perfect score
+    // — the free-value class this project keeps rediscovering. Make the
+    // provider take real time and require the adapter to have seen it.
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      await new Promise(r => setTimeout(r, 40));
+      return {
+        ok: true, status: 200, statusText: 'OK',
+        headers: { get: () => null }, json: async () => ok, text: async () => '',
+      } as any;
+    }) as any;
+    try {
+      const r = await call(adapter);
+      expect(r.latencyMs).toBeGreaterThanOrEqual(30);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

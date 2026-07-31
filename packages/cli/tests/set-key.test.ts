@@ -2,7 +2,10 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { __setStoreDirForTests, saveApiKey, resolveApiKey, readElectronStore } from '../src/store.js';
+import {
+  __setStoreDirForTests, saveApiKey, resolveApiKey, readElectronStore,
+  writeElectronStore, getElectronStorePath,
+} from '../src/store.js';
 
 /**
  * `--set-key` has never been tested end to end, deliberately: it writes the
@@ -39,15 +42,20 @@ describe('--set-key round-trips through the shared encrypted store', () => {
   });
 
   it('the store keeps every other setting when a key is written', () => {
-    // The historical failure: writing a key replaced the whole document, so a
-    // single --set-key wiped the desktop's service model and limits.
+    // The historical failure: writing a key replaced the WHOLE document, so a
+    // single --set-key wiped the desktop's service model and limits. The first
+    // version of this test put only an apiKey in the store, so the loop
+    // iterated one key that saveApiKey writes to anyway — it could not
+    // reproduce the failure it names. Seed the settings that were actually lost.
+    writeElectronStore('serviceModel', { provider: 'openai', model: 'gpt-4o' });
+    writeElectronStore('globalParallelLimit', 7);
     saveApiKey('openai', 'sk-one-abcdefghijklmnop');
-    const before = readElectronStore();
     saveApiKey('gemini', 'sk-two-abcdefghijklmnop');
+
     const after = readElectronStore();
-    for (const key of Object.keys(before)) {
-      expect(after).toHaveProperty(key);
-    }
+    expect(after.serviceModel).toEqual({ provider: 'openai', model: 'gpt-4o' });
+    expect(after.globalParallelLimit).toBe(7);
+    expect(resolveApiKey('openai', undefined)).toBe('sk-one-abcdefghijklmnop');
   });
 
   it('an env var still wins over the stored key', () => {
@@ -63,8 +71,21 @@ describe('--set-key round-trips through the shared encrypted store', () => {
   });
 
   it('writes only inside the scratch directory', () => {
+    // `expect(readdirSync(dir).length).toBeGreaterThan(0)` can detect NOTHING
+    // about where else a write landed — a mutant that also wrote the plaintext
+    // key to %TEMP% passed it. Snapshot the real store path instead: that is
+    // the file this test exists to protect.
+    __setStoreDirForTests(null);
+    const realPath = getElectronStorePath();
+    const before = fs.existsSync(realPath) ? fs.statSync(realPath).mtimeMs : null;
+    __setStoreDirForTests(dir);
+
     saveApiKey('openai', 'sk-test-abcdefghijklmnop');
-    const written = fs.readdirSync(dir);
-    expect(written.length).toBeGreaterThan(0);
+
+    __setStoreDirForTests(null);
+    const after = fs.existsSync(realPath) ? fs.statSync(realPath).mtimeMs : null;
+    __setStoreDirForTests(dir);
+    expect(after).toBe(before);
+    expect(fs.readdirSync(dir).length).toBeGreaterThan(0);
   });
 });

@@ -123,7 +123,15 @@ describe('an interrupted run resumes without repeating settled work', () => {
   it('carries forward the spend it had already paid', async () => {
     registerPricedAdapter();
     const db = tmp();
-    const first = await runOnce(makeConfig(), db, 'res-2');
+    // No holdout in this scenario on purpose: with every node already finished,
+    // a correct resume has NOTHING left to do, so the honest assertion is ZERO
+    // new calls. `resumeCalls < firstLegCalls` was too loose — a mutant that
+    // re-evaluates every finished node still made fewer calls than the whole
+    // first leg and passed.
+    const noHoldout = makeConfig({
+      testSet: [{ id: 't1', name: 'train', mode: 'llm_grade', prompt: 'A' }],
+    });
+    const first = await runOnce(noHoldout, db, 'res-2');
     const spentFirst = first.totals.usd;
     expect(spentFirst).toBeGreaterThan(0);
 
@@ -137,13 +145,20 @@ describe('an interrupted run resumes without repeating settled work', () => {
       holdout: undefined,
     };
     candidateCalls = judgeCalls = 0;
-    const second = await runOnce(makeConfig(), db, 'res-2', interrupted);
+    const second = await runOnce(noHoldout, db, 'res-2', interrupted);
 
     // Spend only ever grows: a resume must not reset the meter, which is what
     // re-arms budgetUSD and lets a restart loop spend without limit.
     expect(second.totals.usd).toBeGreaterThanOrEqual(spentFirst);
-    // And the nodes it already finished are not re-evaluated from scratch.
-    expect(second.generations.flat().length).toBeGreaterThanOrEqual(first.generations.flat().length);
+
+    // The nodes it already finished are not re-evaluated. `generations.length
+    // >= previous` CANNOT detect this — the count never decreases, so a mutant
+    // that re-evaluates and re-bills every finished node passed (measured: the
+    // resume leg went 4 -> 7 paid calls and spend $0.011 -> $0.014). Count the
+    // calls the resume actually made instead; the counters were reset above and
+    // then never asserted, which is the same dead-counter family as the
+    // `while (done < issued)` bug.
+    expect(candidateCalls + judgeCalls).toBe(0);
 
     fs.rmSync(db, { force: true });
   }, 120000);
