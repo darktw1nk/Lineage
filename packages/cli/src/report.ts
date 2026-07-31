@@ -501,15 +501,14 @@ export function generateReport(
       // ungraded row 0 now, so the banner described behaviour that had been
       // removed — the report contradicting itself on the point it exists to
       // disclose.
-      // Do NOT promise marks that are not there. Only the Improvement table and
-      // the holdout table mark and zero; every other ungraded row counted in N —
-      // the majority, since N ranges over popSize × generations nodes — is
-      // printed raw in the per-node sections below. The previous wording was
-      // wrong about the averages; claiming the evidence is marked is worse,
-      // because it sends the reader looking for something not on the page.
-      'was unreadable, so those scores are placeholders rather than measurements. Rows in the ' +
-      'Improvement and Generalization tables are marked ⚠️ and counted as 0; the per-test sections ' +
-      'print the raw placeholder. Treat any delta of similar size as noise.',
+      // THIRD wording, and the first two were both false. The report renders
+      // per-test leaves for exactly TWO nodes — the seed and the champion — so
+      // there are no "per-node sections below" for the rest, and any row on a
+      // mid-generation node is not in the document at all. Say only what is
+      // verifiable on the page.
+      'was unreadable, so those scores are placeholders rather than measurements. Where such a row ' +
+      'appears below it is marked ⚠️ and counted as 0; rows on candidates other than the seed and ' +
+      'the champion are not shown individually. Treat any delta of similar size as noise.',
     );
     lines.push('');
   }

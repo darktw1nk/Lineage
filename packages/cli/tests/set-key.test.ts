@@ -70,7 +70,7 @@ describe('--set-key round-trips through the shared encrypted store', () => {
     }
   });
 
-  it('writes only inside the scratch directory', () => {
+  it('leaves the real shared store untouched', () => {
     // `expect(readdirSync(dir).length).toBeGreaterThan(0)` can detect NOTHING
     // about where else a write landed — a mutant that also wrote the plaintext
     // key to %TEMP% passed it. Snapshot the real store path instead: that is

@@ -1,9 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
-
-vi.mock('../../src/store.js', () => ({
-  store: { get: () => null, set: () => {}, store: {} },
-  setStore: vi.fn(),
-}));
+import { describe, it, expect } from 'vitest';
 
 import { reconcileUngradedCount } from '../../src/engine/evaluator_v2.js';
 
@@ -24,7 +19,7 @@ import { reconcileUngradedCount } from '../../src/engine/evaluator_v2.js';
  */
 const run = (over: any = {}) => ({
   ungradedTests: 0,
-  generations: [[{ tests: [{ testId: 't1', score: 8 }] }]],
+  generations: [[{ id: 'n1', tests: [{ testId: 't1', score: 8 }] }]],
   ...over,
 } as any);
 
@@ -47,14 +42,32 @@ describe('the ungraded count reconciles every source', () => {
     expect(reconcileUngradedCount(r)).toBe(2);
   });
 
-  it('NEVER lowers a count the per-call counter already earned', () => {
-    // A node that failed mid-evaluation has no `tests` array, so a leaf sweep
-    // finds zero — while a sibling test already recorded a real grading
-    // failure. Assigning the sweep result erased it, and after the recount
-    // moved above persistRun that erasure was written to the database. Worst
-    // case: a run aborted BY the grading circuit breaker reported 0.
-    const crashed = run({ ungradedTests: 3, generations: [[{ status: 'failed' }]] });
-    expect(reconcileUngradedCount(crashed)).toBe(3);
+  it('counts a FAILED node that never produced a tests array', () => {
+    // A node that fails mid-evaluation has no `tests`, so a pure leaf sweep
+    // finds zero while its siblings already recorded real grading failures.
+    // The per-node tally is what keeps that visible.
+    const crashed = run({ generations: [[{ id: 'n1', status: 'failed' }]] });
+    expect(reconcileUngradedCount(crashed, new Map([['n1', 3]]))).toBe(3);
+  });
+
+  it('does NOT mix sample counts with test-result counts', () => {
+    // The per-call counter increments once per SAMPLE; the sweep counts once
+    // per TEST RESULT. Maxing them meant one failure at samplesPerTest 3
+    // reported 3, and the report printed '3 test result(s) could not be graded'
+    // over exactly one marked row.
+    const r = run({ ungradedTests: 3, generations: [[{ id: 'n1', tests: [{ testId: 't1', score: 5, ungraded: true }] }]] });
+    expect(reconcileUngradedCount(r, new Map([['n1', 3]]))).toBe(1);
+  });
+
+  it('does not double-count a node replayed by a resume', () => {
+    // `state.run = { ...run }` carries the counter in from the checkpoint, and
+    // the resume re-evaluates replayed nodes — so maxing against it inflated on
+    // every restart, compounding. The sweep is per-node and idempotent.
+    const r = run({ ungradedTests: 5, generations: [[
+      { id: 'n1', tests: [{ testId: 't1', score: 5, ungraded: true }] },
+      { id: 'n2', tests: [{ testId: 't1', score: 5, ungraded: true }] },
+    ]] });
+    expect(reconcileUngradedCount(r, new Map([['n1', 4], ['n2', 4]]))).toBe(2);
   });
 
   it('still raises a count the per-call counter missed', () => {

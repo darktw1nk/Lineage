@@ -39,6 +39,16 @@ import { recordSpend, readSpend, clearSpend } from './spendledger.js';
 import { getDatabase } from '../database/init.js';
 
 interface EvaluationState {
+  /**
+   * Ungraded SAMPLES seen per node, keyed by node id.
+   *
+   * A node that fails mid-evaluation never gets a `tests` array, so its
+   * grading failures are invisible to a leaf sweep. Keeping the tally here
+   * lets the sweep stay authoritative — the alternative, maxing against a
+   * process-lifetime counter, mixes SAMPLES with TEST RESULTS and double-counts
+   * every replayed node on a resume.
+   */
+  ungradedByNode: Map<UUID, number>;
   run: EvaluationRun;
   config: EvaluationConfig;
   status: 'running' | 'pausing' | 'paused' | 'stopped';
@@ -433,6 +443,7 @@ async function startEvaluationInner(
     // have of when the process actually stopped.
     totalPausedMs: adjustedPausedMs,
     gradingTotal: 0,
+    ungradedByNode: new Map(),
     gradingFailures: 0,
   };
 
@@ -1341,6 +1352,7 @@ async function runSingleSample(
   runId: UUID,
   adapter: ProviderAdapter,
   maxTokens: number,
+  nodeId?: UUID,
 ): Promise<{ score: number; exact: boolean; passed: boolean; output: string; reasoning?: string;
              promptTokens: number; completionTokens: number; latencyMs: number }> {
     const system = state.promptMode === 'system' ? candidatePrompt : undefined;
@@ -1497,6 +1509,7 @@ async function runSingleSample(
         // Surface the fabricated 5.0s. The circuit breaker only fires past 8%;
         // below that the invented scores reached the report unannounced.
         state.run.ungradedTests = (state.run.ungradedTests ?? 0) + 1;
+        if (nodeId) state.ungradedByNode.set(nodeId, (state.ungradedByNode.get(nodeId) ?? 0) + 1);
       }
       if ((gradingResult as any)._parseError) {
         state.gradingFailures++;
@@ -2021,7 +2034,7 @@ async function finishEvaluation(runId: UUID, state: EvaluationState): Promise<vo
   state.run.status = 'finished';
   state.run.finishedAt = Date.now();
 
-  state.run.ungradedTests = reconcileUngradedCount(state.run);
+  state.run.ungradedTests = reconcileUngradedCount(state.run, state.ungradedByNode);
   persistRun(state);
 
   // The checkpoint is now authoritative and the run cannot be resumed, so the
@@ -2205,35 +2218,33 @@ const STICKY_STOP_REASONS = new Set(['error', 'manual']);
  * this pasted a copy of it into the test file and asserted against the copy,
  * so reverting the whole fix left the suite green.
  */
-export function reconcileUngradedCount(run: EvaluationRun): number {
-  // Counts generations AND both holdout halves.
+export function reconcileUngradedCount(
+  run: EvaluationRun,
+  ungradedByNode: ReadonlyMap<UUID, number> = new Map(),
+): number {
+  // The SWEEP is authoritative, plus the tally for nodes that never produced a
+  // `tests` array. Two wrong versions preceded this:
   //
-  // The first version walked only `generations`, but holdout rows live in
-  // `run.holdout.{seed,champion}.perTest` and are graded through the same path
-  // that sets the flag — so a run whose ONLY ungraded rows were in the holdout
-  // reported 0 and the report's warning banner disappeared entirely, having
-  // fired before the recount existed. It also ran AFTER persistRun, so the
-  // corrected number never reached the database the resume and desktop read.
-  // Three numbers in one artefact, and the one the user sees was the wrong one.
+  //   assign(sweep)  - right unit, resume-safe, but ERASED a count earned by a
+  //                    failed node whose siblings had already recorded failures.
+  //   max(counter, sweep) - fixed that and broke both others: the counter counts
+  //                    SAMPLES while the sweep counts TEST RESULTS, so at
+  //                    samplesPerTest 3 one failure reported 3; and a resume
+  //                    re-evaluates replayed nodes, inflating the counter again
+  //                    on every restart.
+  //
+  // Counting failed nodes explicitly keeps the sweep's unit AND stays correct
+  // across a resume, because the tally is per-process and only consulted for
+  // nodes with no leaves of their own.
   const holdoutLeaves = [run.holdout?.seed, run.holdout?.champion]
     .flatMap(half => (half?.perTest ?? []) as any[])
     .filter(row => row?.ungraded).length;
-  const ungradedLeaves = run.generations
-    .flat()
-    .reduce((n, node) => n + (node.tests ?? []).filter(t => (t as any).ungraded).length, 0)
-    + holdoutLeaves;
-  // MAX, never assign. The recount is a floor, not an authority: a node that
-  // FAILED mid-evaluation has no `tests` array at all (processNode assigns it
-  // only on success), yet its sibling tests may already have incremented the
-  // per-call counter — so a leaf sweep finds zero rows and CLOBBERED a count
-  // earned by a real grading failure. Moving it above persistRun then wrote the
-  // clobbered value into the durable record, which the pre-change ordering had
-  // kept honest. The change made FOR the database made the database worse.
-  //
-  // Worst case that produced: a run aborted BY the grading circuit breaker —
-  // aborted precisely because >8% of judge replies were unparseable — ends with
-  // its in-flight nodes failed and no tests, and reported ungradedTests 0.
-  return Math.max(run.ungradedTests ?? 0, ungradedLeaves);
+  let total = holdoutLeaves;
+  for (const node of run.generations.flat()) {
+    const leaves = (node.tests ?? []).filter(t => (t as any).ungraded).length;
+    total += node.tests ? leaves : (ungradedByNode.get(node.id) ?? 0);
+  }
+  return total;
 }
 
 export function setStopReason(state: EvaluationState, reason: NonNullable<EvaluationRun['stopReason']>): void {
