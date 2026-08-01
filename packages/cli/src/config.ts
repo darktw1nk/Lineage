@@ -73,6 +73,8 @@ export interface CliConfig {
   operators?: {
     mutationShare?: number;
     crossoverShare?: number;
+    /** 'auto' (default) | 'structural' | 'llm' */
+    crossoverMode?: 'llm' | 'structural' | 'auto';
     adaptivity?: number;
     metaPrompting?: { enabled: boolean; share: number };
     modelVariation?: { enabled: boolean; share: number };
@@ -316,6 +318,15 @@ export function validateCliConfig(config: CliConfig): void {
   fraction(config.selection?.eliteShare, 'selection.eliteShare');
   fraction(config.selection?.topP, 'selection.topP');
   fraction(config.selection?.diversity, 'selection.diversity');
+  const CROSSOVER_MODES = ['auto', 'structural', 'llm'];
+  if (config.operators?.crossoverMode !== undefined
+      && !CROSSOVER_MODES.includes(config.operators.crossoverMode)) {
+    // A typo here would fall through to 'auto' and look like it worked.
+    throw new Error(
+      `"operators.crossoverMode" must be one of ${CROSSOVER_MODES.join(', ')} `
+      + `(got ${JSON.stringify(config.operators.crossoverMode)})`,
+    );
+  }
   positiveInt(config.selection?.restartAfter, 'selection.restartAfter');
   fraction(config.selection?.novelty, 'selection.novelty');
   fraction(config.operators?.adaptivity, 'operators.adaptivity');
@@ -413,7 +424,7 @@ export function validateCliConfig(config: CliConfig): void {
     }
   };
   warnUnknown(config.operators, [
-    'mutationShare', 'crossoverShare', 'metaPrompting', 'paramVariation', 'modelVariation', 'custom', 'adaptivity',
+    'mutationShare', 'crossoverShare', 'crossoverMode', 'metaPrompting', 'paramVariation', 'modelVariation', 'custom', 'adaptivity',
   ], 'operators');
   warnUnknown(config.selection, ['policy', 'topK', 'topP', 'eliteShare', 'diversity', 'restartAfter', 'novelty'], 'selection');
   warnUnknown(config.fitnessWeights, ['quality', 'safety', 'cost', 'latency', 'stability'], 'fitnessWeights');
@@ -519,6 +530,7 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
     operators: {
       mutationShare: config.operators?.mutationShare ?? 0.5,
       crossoverShare: config.operators?.crossoverShare ?? 0.2,
+      ...(config.operators?.crossoverMode ? { crossoverMode: config.operators.crossoverMode } : {}),
       metaPrompting: config.operators?.metaPrompting ?? { enabled: true, share: 0.2 },
       modelVariation: config.operators?.modelVariation ?? { enabled: enabledModels.length > 1, share: 0.1 },
       paramVariation: config.operators?.paramVariation ?? { enabled: true, share: 0.1, temperature: { enabled: true, min: 0.3, max: 1.5 } },

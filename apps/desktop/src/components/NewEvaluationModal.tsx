@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import type { EvaluationConfig, TestCase, ModelRef, ModelCostEntry } from '../types';
 import { nextPopulationRange, adaptiveRangeHint } from '@/utils/adaptiveRange';
+import { crossoverModeHint } from '@/utils/crossoverMode';
 
 type SortColumn = 'provider' | 'model' | 'prompt' | 'completion';
 type SortDirection = 'asc' | 'desc';
@@ -1626,6 +1627,38 @@ function VariationsTab({ config, setConfig }: TabProps) {
           Fraction of children created by combining two parents
         </div>
       </div>
+
+      {/* How crossover recombines */}
+      {(config.operators?.crossoverShare || 0) > 0 && (
+        <div>
+          <LabelWithTooltip
+            htmlFor="crossoverMode"
+            label="Crossover Method"
+            tooltip="How two parents are combined. Splicing recombines the parents' own sections, so their wording is inherited exactly and the child costs no LLM call. The LLM merge hands both parents to the service model to rewrite, which bills one call per crossover child and keeps a parent's wording only if that model chooses to."
+          />
+          <select
+            id="crossoverMode"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={config.operators?.crossoverMode ?? 'auto'}
+            onChange={(e) =>
+              setConfig({
+                ...config,
+                operators: {
+                  ...config.operators!,
+                  crossoverMode: e.target.value as 'auto' | 'structural' | 'llm',
+                },
+              })
+            }
+          >
+            <option value="auto">Splice, fall back to LLM merge (recommended)</option>
+            <option value="structural">Splice only (never calls the LLM)</option>
+            <option value="llm">LLM merge only</option>
+          </select>
+          <div className="text-xs text-muted-foreground mt-1">
+            {crossoverModeHint(config.operators?.crossoverMode ?? 'auto')}
+          </div>
+        </div>
+      )}
 
       {/* Meta-prompting */}
       <div className="space-y-3">

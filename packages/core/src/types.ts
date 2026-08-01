@@ -121,6 +121,19 @@ export interface EvaluationConfig {
   operators: {
     mutationShare: number; // 0..1, renamed from mutationFactor
     crossoverShare: number; // 0..1, renamed from crossoverFactor
+    /**
+     * How crossover combines two parents.
+     *
+     * `llm` — a service model rewrites both parents into a merge. One billed
+     *   call per child, and the parents' actual wording survives only if the
+     *   merging model chooses to keep it.
+     * `structural` — splice the parents at their section boundaries, so
+     *   building blocks are inherited verbatim. Free, but returns nothing when
+     *   the parents have no structure to splice.
+     * `auto` (default) — try structural, fall back to the LLM merge when the
+     *   parents are structureless or every splice reproduces a parent.
+     */
+    crossoverMode?: 'llm' | 'structural' | 'auto';
     metaPrompting?: { enabled: boolean; share: number }; // default 0.2
     modelVariation?: { enabled: boolean; share: number }; // random model selection
     paramVariation?: {

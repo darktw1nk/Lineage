@@ -185,9 +185,9 @@ function builtinOperators(): OperatorPlugin[] {
     },
     {
       name: 'crossover', label: 'Crossover', parents: 2,
-      description: 'LLM merge of two parent prompts',
-      async apply({ parent, parentB, config, shouldAbort }) {
-        const r = await crossoverNodes(parent, parentB!, config, shouldAbort);
+      description: 'Recombine two parent prompts (section splice, LLM merge fallback)',
+      async apply({ parent, parentB, config, rng, shouldAbort }) {
+        const r = await crossoverNodes(parent, parentB!, config, shouldAbort, rng ?? Math.random);
         return { prompt: r.prompt, changeLog: r.changeLog, cost: r.cost };
       },
     },
