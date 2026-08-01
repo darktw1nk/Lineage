@@ -1,13 +1,23 @@
 <div align="center">
 
-# Lineage
+# 🧬 Lineage
 
-**Stop hand-tuning prompts. Breed them.**
+### Stop hand-tuning prompts. Breed them.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1%2C269%20passing-brightgreen.svg)](#project-layout)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)](#project-layout)
-[![Desktop + CLI](https://img.shields.io/badge/desktop-%2B%20CLI-8b5cf6.svg)](#quick-start)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-1%2C274%20passing-brightgreen?style=flat-square)](#project-layout)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square)](#project-layout)
+[![Desktop + CLI](https://img.shields.io/badge/desktop-%2B%20CLI-8b5cf6?style=flat-square)](#quick-start)
+[![Providers](https://img.shields.io/badge/OpenAI%20·%20Anthropic%20·%20Gemini%20·%20Groq%20·%20OpenRouter-000?style=flat-square)](#providers)
+
+Lineage treats a prompt like a genome: it spawns a population of variants, scores every one<br>
+against *your* test set on real models, kills the weak, breeds the strong, and repeats.
+
+**quality · safety · cost · latency · stability** — weighted however you like
+
+<br>
+
+<img src="docs/assets/evolution-run.gif" alt="An evolution run in the desktop app" width="880">
 
 </div>
 
@@ -15,14 +25,27 @@
 > *"Maximize accuracy — but punish anything slower than 2 seconds."*<br>
 > *"Highest quality that never violates my safety rules, on the cheapest model that can deliver it."*
 >
-> These are questions you can literally type into a config and get answered — with measurements, not vibes.
+> These are questions you can type into a config and get answered — with measurements, not vibes.
 
-Lineage treats a prompt like a genome: it spawns a population of variants, scores every one of them against *your* test set on real models, kills the weak, breeds the strong, and repeats — until it finds a prompt that is measurably better on the parameters you care about: **quality, safety, cost, latency, stability**, weighted however you like ([details ↓](#fitness-five-dimensions-your-weights)).
+### What the run above did
 
-![Evolution run](docs/assets/evolution-run.gif)
+The task: turn a support ticket into one line — `order=4821 | issue=cracked jar | request=replacement`.
 
-**Task:** turn a support ticket into one line — `order=4821 | issue=cracked jar | request=replacement`.<br>
-*"Summarize the customer ticket."* scores **2.25/10**. Four generations later, the engine has written the output format itself: **6.25/10** — and **3 → 8/10** on tickets held back from training. 2m43s, $0.20.
+```diff
+- Summarize the customer ticket.
++ Extract the order number, the customer's core issue, and their specific
++ request from the ticket. Format the output as:
++ order=<order_number> | issue=<core_issue> | request=<specific_request>
+```
+
+|  | On the training tests | On tickets held back from training |
+|---|:---:|:---:|
+| Hand-written seed | 2.25 / 10 | 3 / 10 |
+| **Evolved champion** | **6.25** / 10 | **8** / 10 |
+
+Nobody wrote that format instruction — by generation 2 the engine had read its own graded failures and added it. The right-hand column is the one that counts.
+
+<sub>4 generations · 24 candidates · 3 models · 2m43s · $0.20</sub>
 
 <details>
 <summary><b>Why this beats prompt engineering by hand</b></summary>
@@ -65,13 +88,13 @@ Keys, model discovery, installers and troubleshooting: **[docs/install.md](docs/
 
 ## How it works
 
-Each generation follows the same measurable loop:
+Every generation runs the same loop:
 
-**Evaluate** — every candidate runs against the test set in parallel. Outputs, scores, latency, tokens and cost are all recorded.
+**1 · Evaluate** — every candidate runs against the test set in parallel. Outputs, scores, latency, tokens and cost are all recorded.
 
-**Select** — strong candidates become parents (Top-K, or Top-P for more diversity). Elitism carries the best through unchanged, so fitness never regresses. Stronger parents get more children.
+**2 · Select** — strong candidates become parents (Top-K, or Top-P for more diversity). Elitism carries the best through unchanged, so fitness never regresses. Stronger parents get more children.
 
-**Breed** — the next generation is created by five operators, mixed by configurable shares:
+**3 · Breed** — the next generation is created by five operators, mixed by configurable shares:
 
 | Operator | What it does | Why it's interesting |
 |---|---|---|
@@ -81,11 +104,11 @@ Each generation follows the same measurable loop:
 | **Param variation** | Same prompt, different temperature/seed | Sometimes the prompt is fine and the sampling is wrong |
 | **Model variation** | Same prompt, different model from your enabled set | Turns model choice into a searchable dimension |
 
-**Compare** *(optional)* — a pairwise playoff ranks the top contenders head-to-head, in both presentation orders, for when absolute scores cluster at 9.8-vs-9.9 and stop meaning anything.
+**4 · Compare** *(optional)* — a pairwise playoff ranks the top contenders head-to-head, in both presentation orders, for when absolute scores cluster at 9.8-vs-9.9 and stop meaning anything.
 
-**Repeat** — until a generation limit, target fitness, spending cap, time limit, or your Stop button.
+**5 · Repeat** — until a generation limit, target fitness, spending cap, time limit, or your Stop button.
 
-**Validate** — the seed and the final champion are both scored on holdout tests evolution was never allowed to see.
+**6 · Validate** — the seed and the final champion are both scored on holdout tests evolution was never allowed to see.
 
 Every candidate keeps its full ancestry and a changelog of what created it (`[MUTATION] Removed vague instruction…`, `[CROSSOVER] Merged a1b2 + c3d4`). Operators are plugins, too: a ~20-line JS file dropped in a folder joins the breeding mix on equal footing with the built-ins ([docs/plugins.md](docs/plugins.md)).
 
@@ -167,17 +190,24 @@ Everything is tracked: token counts, per-node cost, cache hits (identical prompt
 
 ## Inside the desktop app
 
-Models load from the catalog with live pricing, and the footer prices your run as you configure it:
+<div align="center">
 
-![New evaluation](docs/assets/new-evaluation.png)
+<img src="docs/assets/new-evaluation.png" alt="Model selection with live pricing" width="820"><br>
+<sub><b>Configure.</b> Models load from the catalog with live pricing, and the footer quotes your run before you spend a cent.</sub>
 
-Generations appear with full lineage — the champion in gold, the footer carrying spend, cache hits and the holdout number as they change:
+<br><br>
 
-![Evolution graph](docs/assets/evolution-graph.png)
+<img src="docs/assets/evolution-graph.png" alt="The lineage graph mid-run" width="820"><br>
+<sub><b>Watch.</b> Generations appear with full lineage — champion in gold, spend, cache hits and the holdout number moving in the footer.</sub>
 
-Click any node for its evolved prompt, the changelog of exactly what created it, and per-test scores with the graded output:
+<br><br>
 
-![Node details](docs/assets/node-details.png)
+<img src="docs/assets/node-details.png" alt="Node details panel" width="820"><br>
+<sub><b>Inspect.</b> Any node: its evolved prompt, the changelog of exactly what created it, per-test scores and the graded output.</sub>
+
+</div>
+
+---
 
 ---
 
@@ -195,8 +225,12 @@ examples/plugins  drop-in operator/provider examples (section-shuffle, Ollama)
 docs/             cli.md · plugins.md · install.md · analysis/ (bug-hunt logs)
 ```
 
-Architecture notes in [CLAUDE.md](CLAUDE.md). `npm test` runs 1,269 tests across all packages — including end-to-end evolutions driven entirely by plugins, and the regression pins left behind by twenty adversarial bug-hunt passes ([docs/analysis/](docs/analysis/)).
+Architecture notes in [CLAUDE.md](CLAUDE.md), contributor guide in [CONTRIBUTING.md](CONTRIBUTING.md), and [AGENTS.md](AGENTS.md) if a coding agent is doing the work. `npm test` runs 1,274 tests across all packages — including end-to-end evolutions driven entirely by plugins, and the regression pins left behind by twenty adversarial bug-hunt passes ([docs/analysis/](docs/analysis/)).
 
-## License
+<div align="center">
 
-[MIT](LICENSE)
+<br>
+
+**[MIT](LICENSE)** licensed · built with TypeScript, Electron and sql.js
+
+</div>
