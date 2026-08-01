@@ -1,6 +1,15 @@
+<div align="center">
+
 # Lineage
 
 **Stop hand-tuning prompts. Breed them.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-1%2C269%20passing-brightgreen.svg)](#project-layout)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)](#project-layout)
+[![Desktop + CLI](https://img.shields.io/badge/desktop-%2B%20CLI-8b5cf6.svg)](#quick-start)
+
+</div>
 
 > *"What's the best prompt that stays under 1 cent per call?"*<br>
 > *"Maximize accuracy — but punish anything slower than 2 seconds."*<br>
@@ -14,8 +23,6 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 
 **Task:** turn a support ticket into one line — `order=4821 | issue=cracked jar | request=replacement`.<br>
 *"Summarize the customer ticket."* scores **2.25/10**. Four generations later, the engine has written the output format itself: **6.25/10** — and **3 → 8/10** on tickets held back from training. 2m43s, $0.20.
-
-Set a run up in the desktop app, in a CLI config, or hand it to your coding agent with the bundled [skill](.claude/skills/evolving-prompts/SKILL.md).
 
 <details>
 <summary><b>Why this beats prompt engineering by hand</b></summary>
@@ -34,7 +41,29 @@ Set a run up in the desktop app, in a CLI config, or hand it to your coding agen
 
 </details>
 
-## The genetics
+---
+
+## Quick start
+
+```bash
+npm install
+npm run cli -- --init                                      # writes a runnable evolve.json
+npm run cli -- --config evolve.json --output results.json  # run it
+npm run electron:dev                                       # or watch it in the desktop app
+```
+
+|  | For | What you get |
+|---|---|---|
+| **Desktop app** | Humans | A live lineage graph — watch selection happen |
+| **`lineage` CLI** | Agents, CI, scripts | JSON in → JSON out, exit codes, budget caps |
+
+Both drive the same engine. A small run costs **under a cent**, and `--estimate` prices one before you spend anything. Using a coding agent? The repo ships an [`evolving-prompts` skill](.claude/skills/evolving-prompts/SKILL.md) that teaches it the whole workflow.
+
+Keys, model discovery, installers and troubleshooting: **[docs/install.md](docs/install.md)** · Full config reference: **[docs/cli.md](docs/cli.md)**
+
+---
+
+## How it works
 
 Each generation follows the same measurable loop:
 
@@ -46,10 +75,10 @@ Each generation follows the same measurable loop:
 
 | Operator | What it does | Why it's interesting |
 |---|---|---|
-| **Mutation** | Rewrites guided by a strategy catalog: restructuring, compression, tightening constraints, adding anti-patterns, injecting thinking scaffolds — and *removal* of harmful lines | Strategies are sampled per mutation, so the search explores different editing philosophies, not one style |
-| **Crossover** | LLM-merges two strong parents into one prompt without redundancy | Traits from two lineages combine — the merge is validated, and a "merge" that just returns a parent is recorded as a carry, not a change |
-| **Meta-prompting** | Reads the worst-scoring tests (inputs, outputs, judge justifications) and proposes targeted edits | The only *failure-aware* operator — this is directed evolution, not random walk |
-| **Param variation** | Same prompt, different temperature/seed within a configured range | Sometimes the prompt is fine and the sampling is wrong |
+| **Mutation** | Rewrites guided by a strategy catalog: restructuring, compression, tightening constraints, adding anti-patterns — and *removal* of harmful lines | Strategies are sampled per mutation, so the search explores different editing philosophies, not one style |
+| **Crossover** | LLM-merges two strong parents into one prompt without redundancy | Traits from two lineages combine; a "merge" that just returns a parent is recorded as a carry, not a change |
+| **Meta-prompting** | Reads the worst-scoring tests — inputs, outputs, judge justifications — and proposes targeted edits | The only *failure-aware* operator: directed evolution, not a random walk |
+| **Param variation** | Same prompt, different temperature/seed | Sometimes the prompt is fine and the sampling is wrong |
 | **Model variation** | Same prompt, different model from your enabled set | Turns model choice into a searchable dimension |
 
 **Compare** *(optional)* — a pairwise playoff ranks the top contenders head-to-head, in both presentation orders, for when absolute scores cluster at 9.8-vs-9.9 and stop meaning anything.
@@ -58,9 +87,9 @@ Each generation follows the same measurable loop:
 
 **Validate** — the seed and the final champion are both scored on holdout tests evolution was never allowed to see.
 
-Every candidate keeps its full ancestry and a changelog of what created it (`[MUTATION] Removed vague instruction…`, `[CROSSOVER] Merged a1b2 + c3d4`).
+Every candidate keeps its full ancestry and a changelog of what created it (`[MUTATION] Removed vague instruction…`, `[CROSSOVER] Merged a1b2 + c3d4`). Operators are plugins, too: a ~20-line JS file dropped in a folder joins the breeding mix on equal footing with the built-ins ([docs/plugins.md](docs/plugins.md)).
 
-**And the gene pool is open.** Operators are plugins — a ~20-line JS file dropped in a folder joins the breeding mix on equal footing with the built-ins. Author guide: [docs/plugins.md](docs/plugins.md).
+---
 
 ## Fitness: five dimensions, your weights
 
@@ -76,16 +105,16 @@ Every candidate keeps its full ancestry and a changelog of what created it (`[MU
 | Dimension | Measured as | The interesting part |
 |---|---|---|
 | **Quality** | 0–10 average across your tests | Exact-match with partial credit, or LLM-judged against your reference answers |
-| **Safety** | 0–10 across **guardrails** — natural-language rules checked by an LLM per output | Write policies in plain English; violations drag fitness down |
-| **Cost** | Real USD per candidate, from a maintained per-model price catalog | `relative` mode normalizes against the current population's worst — the bar rises as evolution gets cheaper |
+| **Safety** | 0–10 across **guardrails** — natural-language rules checked per output | Write policies in plain English; violations drag fitness down |
+| **Cost** | Real USD per candidate, from a maintained price catalog | `relative` mode normalizes against the population's worst — the bar rises as evolution gets cheaper |
 | **Latency** | Measured ms per call | `absolute` (hard ceiling) or `relative` (beat your siblings) |
-| **Stability** | Same prompt re-run across different seeds; consistency scored 0–10 | Selects against prompts that only win by luck |
+| **Stability** | Same prompt re-run across seeds, consistency scored 0–10 | Selects against prompts that only win by luck |
 
-Weights are normalized automatically — only the ratios matter. Set a weight to 0 and that dimension is ignored; crank cost to 1.0 and watch the population race to the bottom of the price list without giving up your quality floor.
+Weights are normalized automatically — only the ratios matter. Set one to 0 and that dimension is ignored.
+
+---
 
 ## Tests are the spec
-
-Four grading modes, mixable in one test set:
 
 ```json
 "testSet": [
@@ -97,9 +126,6 @@ Four grading modes, mixable in one test set:
   { "name": "Refund summary", "mode": "llm_grade",
     "prompt": "<a realistic customer email>",
     "expected": "Refund request: order #4821, cracked jar, wants replacement." },
-
-  { "name": "Chart reading", "mode": "llm_grade",
-    "prompt": "What was Q3 revenue?", "image": "charts/q3.png" },
 
   { "name": "Unseen case", "mode": "llm_grade",
     "prompt": "<held-back input>", "expected": "<reference>", "holdout": true }
@@ -113,9 +139,12 @@ Four grading modes, mixable in one test set:
 | **`tool_call`** | Right function + right arguments, 0/2/6/10 — no judge, no noise, no grading cost | Agent prompts |
 | **`json_schema`** | Conformance to a JSON Schema, deterministically | Structured output |
 
-Add `"image": "chart.png"` to any test for vision. Mark tests `"holdout": true` (or set `"holdoutShare": 0.2`) to keep them away from evolution — the seed and champion are scored on them at the end, and the report flags it when that number is unreliable. Every meta-level prompt — the judge's rubric, the mutation catalog, the crossover and meta-prompting instructions — is overridable via `systemPrompts`: **the evolution itself is promptable**. Full reference: [docs/cli.md](docs/cli.md).
+Add `"image": "chart.png"` to any test for vision. Mark tests `"holdout": true` (or set `"holdoutShare": 0.2`) to keep them away from evolution — the seed and champion are scored on them at the end, and the report flags it when that number is unreliable. Every meta-level prompt — the judge's rubric, the mutation catalog, the crossover and meta-prompting instructions — is overridable via `systemPrompts`: **the evolution itself is promptable**.
 
-## Dials worth knowing
+<details>
+<summary><b>Dials worth knowing</b></summary>
+
+<br>
 
 | Knob | What it changes |
 |---|---|
@@ -123,60 +152,50 @@ Add `"image": "chart.png"` to any test for vision. Mark tests `"holdout": true` 
 | `eliteShare` | How much of each generation is guaranteed survivors |
 | `operators.*.share` | The breeding mix — crank `metaPrompting` when you have failing tests to learn from, `modelVariation` when hunting cheaper models |
 | `paramVariation.temperature.{min,max}` | The temperature range evolution may explore |
-| `pairwise.enabled` | Head-to-head playoff among each generation's top contenders — the champion is picked by "which output is better?" comparisons (both orders, position bias cancels), not by a noisy 9.87-vs-9.89 absolute score. Judge-limited: pair it with a strong `serviceModel` |
-| `seed` | Reruns become reproducible — same seed, same evolution decisions (operator plan, parents, temperatures, splits). `--seed 42` on the CLI |
-| `targets` | Four independent stop conditions: `maxGenerations`, `budgetUSD` (hard spend cap), `targetFitness` (stop early on success), `timeLimitMs` |
+| `pairwise.enabled` | Head-to-head playoff among the top contenders — the champion is picked by "which output is better?", not by a noisy 9.87-vs-9.89. Judge-limited: pair it with a strong `serviceModel` |
+| `seed` | Reruns become reproducible — same seed, same evolution decisions. `--seed 42` on the CLI |
+| `targets` | Four independent stop conditions: `maxGenerations`, `budgetUSD`, `targetFitness`, `timeLimitMs` |
 | `serviceModel` | The model that powers mutation/crossover/judging — cheap models work remarkably well here |
 | `providerOptions` | Passed through to candidate calls (e.g. `reasoning_effort`) |
 | `parallelLimit` | Global concurrency across all API calls |
-| **Plugins** | Drop a JS file in the plugins folder to add operators or providers — even the five built-in operators run through the same registry ([docs/plugins.md](docs/plugins.md)) |
 
-Everything is tracked: token counts, per-node cost, cache hits (identical prompt+params are never evaluated twice), and a per-purpose cost breakdown the report reconciles against the preflight estimate ("Where the money went"). And everything is **estimated before you spend**: the desktop modal shows a live `≈ $low – $high · ~N calls` band as you configure, and `--estimate` prints the same preflight breakdown from the CLI without running anything.
+Everything is tracked: token counts, per-node cost, cache hits (identical prompt+params are never evaluated twice), and a per-purpose cost breakdown the report reconciles against the preflight estimate. Everything is **estimated before you spend**: the desktop modal shows a live `≈ $low – $high · ~N calls` band as you configure, and `--estimate` prints the same from the CLI without running anything.
 
-## Two ways to run it
+</details>
 
-| | For | Interface |
-|---|---|---|
-| **Desktop app** | Humans | Live React Flow lineage graph — watch selection happen |
-| **`lineage` CLI** | AI agents, CI, scripts | JSON in → JSON out, exit codes, budget caps |
+---
 
-Both drive the same engine (`@lineage/core`).
+## Inside the desktop app
 
-```bash
-npm install
-npm run cli -- --init                                       # writes a runnable evolve.json to start from
-npm run cli -- --config evolve.json --output results.json   # agents: JSON in, JSON out
-npm run electron:dev                                         # humans: watch it evolve
-```
-
-That's the whole idea — everything else (keys, model discovery, installers, packages, troubleshooting) lives in **[docs/install.md](docs/install.md)**, and the full config reference in **[docs/cli.md](docs/cli.md)**. A small run costs **under a cent**. Using Claude Code? The repo ships an [`evolving-prompts` skill](.claude/skills/evolving-prompts/SKILL.md) that teaches agents the whole workflow.
-
-In the desktop app, models load from the catalog with live pricing:
+Models load from the catalog with live pricing, and the footer prices your run as you configure it:
 
 ![New evaluation](docs/assets/new-evaluation.png)
 
-Watch generations appear with full lineage — the champion in gold, the footer carrying spend, cache hits and the holdout number as they change:
+Generations appear with full lineage — the champion in gold, the footer carrying spend, cache hits and the holdout number as they change:
 
 ![Evolution graph](docs/assets/evolution-graph.png)
 
-Click any node for its evolved prompt, the changelog of exactly what created it (here: the `[META]` edit that invented the output contract), and per-test scores with the graded output:
+Click any node for its evolved prompt, the changelog of exactly what created it, and per-test scores with the graded output:
 
 ![Node details](docs/assets/node-details.png)
 
-## Providers & repository layout
+---
 
-**Providers**: OpenAI, Anthropic, Google Gemini, Groq directly — any model via OpenRouter (one key, synced catalog with pricing) — or bring your own via a provider plugin (the shipped [Ollama example](examples/plugins/ollama/index.mjs) runs evolution on free local models).
+## Providers
+
+OpenAI, Anthropic, Google Gemini and Groq directly — any model via OpenRouter (one key, synced catalog with pricing) — or bring your own with a provider plugin: the shipped [Ollama example](examples/plugins/ollama/index.mjs) runs evolution on free local models.
+
+## Project layout
 
 ```
 packages/core     @lineage/core — engine, operators, providers, sql.js persistence
 packages/cli      @lineage/cli  — the lineage command
 apps/desktop      Electron app (React + React Flow)
 examples/plugins  drop-in operator/provider examples (section-shuffle, Ollama)
-docs/cli.md       Full CLI + config reference
-docs/plugins.md   Plugin author guide
+docs/             cli.md · plugins.md · install.md · analysis/ (bug-hunt logs)
 ```
 
-Architecture details in [CLAUDE.md](CLAUDE.md). Tests: `npm test` (1,269 across all packages — including end-to-end evolutions driven entirely by plugins, and twenty adversarial bug-hunt passes' worth of regression pins; the hunt logs live in [docs/analysis/](docs/analysis/)).
+Architecture notes in [CLAUDE.md](CLAUDE.md). `npm test` runs 1,269 tests across all packages — including end-to-end evolutions driven entirely by plugins, and the regression pins left behind by twenty adversarial bug-hunt passes ([docs/analysis/](docs/analysis/)).
 
 ## License
 

@@ -55,4 +55,6 @@ npx vitest run packages/core/tests/engine/fitness.test.ts   # single file
 
 ## Good first contributions
 
-The active roadmap item is the **plugin system** ([ROADMAP.md](ROADMAP.md) Phase 5): operator and provider plugin interfaces with file-based discovery. Smaller ideas: new mutation strategies for the catalog in `packages/core/src/engine/mutations.ts`, additional distance metrics in `packages/core/src/utils/distance.ts`, or provider adapters (Ollama, Mistral, Bedrock) following the pattern in `packages/core/src/providers/`.
+New mutation strategies for the catalog in `packages/core/src/engine/mutations.ts`, additional distance metrics in `packages/core/src/utils/distance.ts`, provider adapters (Mistral, Bedrock) following the pattern in `packages/core/src/providers/`, or operator plugins — the plugin surface is documented in [docs/plugins.md](docs/plugins.md) and the built-in operators run through the same registry.
+
+Working with an AI coding agent? [AGENTS.md](AGENTS.md) is written for it.
