@@ -17,6 +17,8 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 
 Set a run up in the desktop app, in a CLI config, or hand it to your coding agent with the bundled [skill](.claude/skills/evolving-prompts/SKILL.md).
 
+**"Better" is whatever you define it as.** Every candidate is scored on five dimensions you weight yourself — **quality**, **safety**, **cost**, **latency**, **stability** — so the questions at the top of this page are configs, not wishes. Weight only quality and it chases accuracy; add cost and it hunts for the cheapest model that still clears your bar. [How the weights work ↓](#fitness-five-dimensions-your-weights)
+
 ## Why this beats prompt engineering by hand
 
 **Prompting is empirical, but nobody treats it that way.** You tweak a word, eyeball three outputs, and ship. Lineage replaces that loop with selection pressure: every candidate is scored on every test, every generation, and only measured improvement survives. The lineage graph shows you exactly which edit earned its place.
