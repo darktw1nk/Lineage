@@ -8,7 +8,7 @@
 >
 > These are questions you can literally type into a config and get answered — with measurements, not vibes.
 
-Lineage treats a prompt like a genome: it spawns a population of variants, scores every one of them against *your* test set on real models, kills the weak, breeds the strong, and repeats — until it finds a prompt that is measurably better than anything you'd write by hand. Not "feels better" — better on a fitness function you define.
+Lineage treats a prompt like a genome: it spawns a population of variants, scores every one of them against *your* test set on real models, kills the weak, breeds the strong, and repeats — until it finds a prompt that is measurably better on the parameters you care about: **quality, safety, cost, latency, stability**, weighted however you like ([details ↓](#fitness-five-dimensions-your-weights)).
 
 ![Evolution run](docs/assets/evolution-run.gif)
 
@@ -16,8 +16,6 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 *"Summarize the customer ticket."* scores **2.25/10**. Four generations later, the engine has written the output format itself: **6.25/10** — and **3 → 8/10** on tickets held back from training. 2m43s, $0.20.
 
 Set a run up in the desktop app, in a CLI config, or hand it to your coding agent with the bundled [skill](.claude/skills/evolving-prompts/SKILL.md).
-
-You define what "better" means. Each candidate is scored on five dimensions — **quality, safety, cost, latency, stability** — and you set how much each one counts. Weight cost at zero and it optimizes purely for accuracy; give cost weight and cheaper prompts start winning. [How the weights work ↓](#fitness-five-dimensions-your-weights)
 
 ## Why this beats prompt engineering by hand
 
