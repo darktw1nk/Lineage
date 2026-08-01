@@ -61,7 +61,9 @@ We benchmarked evolution against the obvious cheaper alternative — **asking a 
 
 Evolution won 4 of 5 and never lost — but the honest lesson is in the arrows: **the one-shot rewrite made two tasks worse**, and nothing about that workflow tells you so. Evolution costs 20–90× more per run and its edge over a good rewrite is often under a point. What you're buying is a measured answer instead of a hopeful one. Where the seed prompt is already decent, expect small gains; where it fails an output contract, expect large ones.
 
-<sub>*that task is a poor test and the numbers show it — full method, per-task analysis and caveats in **[benchmarks/](benchmarks/)**</sub>
+We also ran **DSPy 3.2.1** on the two exact-match tasks with the same models and metric: its few-shot path essentially ties evolution (7.91 vs 8.00, 10.00 vs 10.00), while MIPROv2 itself degenerated to the baseline program — it bootstraps from successful traces, and with four examples there were none. Different tools, and not really substitutes: Lineage hands you a portable prompt string, DSPy hands you a Python program with demos re-sent on every call.
+
+<sub>*that task is a poor test and the numbers show it — full method, DSPy comparison, per-task analysis and caveats in **[benchmarks/](benchmarks/)**</sub>
 
 <details>
 <summary><b>Why this beats prompt engineering by hand</b></summary>
