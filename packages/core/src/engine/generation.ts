@@ -234,6 +234,50 @@ function diversifyPool(pool: CandidateNode[], diversity: number, take: number): 
   return picked;
 }
 
+/**
+ * How many fresh immigrants the next generation should carry, given the run's
+ * best-fitness history.
+ *
+ * Elitism guarantees best fitness never regresses, so a run stuck in a local
+ * optimum is indistinguishable from a finished one: the same number posts
+ * every generation while every child still costs full price. Diversity in
+ * selection delays that but cannot escape it — once the whole population
+ * descends from one prompt there is nothing diverse left to select.
+ *
+ * When the best fitness has not improved for `restartAfter` generations, a
+ * slice of the next generation is re-seeded from the ORIGINAL seed prompt.
+ * The champion is untouched (elitism still carries it), so this can only cost
+ * exploration budget, never the best answer already found.
+ */
+export function stagnationRestartCount(
+  bestPerGeneration: readonly number[],
+  restartAfter: number | undefined,
+  generationSize: number,
+): number {
+  if (!Number.isFinite(restartAfter) || (restartAfter as number) <= 0) return 0;
+  const threshold = Math.floor(restartAfter as number);
+  if (bestPerGeneration.length < threshold + 1) return 0;
+
+  // Count generations since the last strict improvement. Fitness cannot fall
+  // under elitism, so "not greater than the running best" is the only
+  // available signal — and any improvement at all, however small, resets it.
+  let flat = 0;
+  let best = bestPerGeneration[0];
+  for (let i = 1; i < bestPerGeneration.length; i++) {
+    if (bestPerGeneration[i] > best) {
+      best = bestPerGeneration[i];
+      flat = 0;
+    } else {
+      flat++;
+    }
+  }
+  if (flat < threshold) return 0;
+
+  // A quarter of the generation, at least one, never the whole thing: this is
+  // an injection of new blood, not a reset of the run.
+  return Math.max(1, Math.min(generationSize - 1, Math.round(generationSize * 0.25)));
+}
+
 /** What the engine has measured about one operator so far this run. */
 export interface OperatorStats {
   totalDelta: number;
@@ -602,6 +646,58 @@ export async function createNextGeneration(
   // Subtract the elites ACTUALLY added, not the number requested: when the
   // previous generation had fewer finished nodes than eliteShare asks for,
   // subtracting the request silently shrinks the generation.
+  // Stagnation restart: when the best fitness has not moved for
+  // `restartAfter` generations, spend a slice of this generation on fresh
+  // immigrants from the ORIGINAL seed prompt instead of yet more descendants
+  // of a converged population. Elitism still carries the champion, so this can
+  // only cost exploration budget, never the best answer already found.
+  const bestPerGeneration = allGenerations.map(gen => {
+    const scored = gen.filter(n => n.metrics?.fitness !== undefined);
+    return scored.length ? Math.max(...scored.map(n => n.metrics!.fitness!)) : -Infinity;
+  }).filter(v => v !== -Infinity);
+  const immigrantCount = stagnationRestartCount(
+    bestPerGeneration,
+    (config.selection as any).restartAfter,
+    targetPopSize - newGenNodes.length,
+  );
+  if (immigrantCount > 0) {
+    const seedPrompt = config.population.seedPrompt;
+    if (seedPrompt) {
+      console.log(
+        `[Generation] Best fitness flat for ${(config.selection as any).restartAfter} generation(s) — ` +
+        `injecting ${immigrantCount} fresh candidate(s) from the seed prompt to escape the local optimum`,
+      );
+      const template = topPerformers[0] ?? currentGeneration[0];
+      for (let i = 0; i < immigrantCount; i++) {
+        const immigrant: CandidateNode = {
+          id: uuidv4(),
+          generation: nextGenerationNumber,
+          lineageParents: [],
+          status: 'awaiting',
+          prompt: seedPrompt,
+          params: {
+            ...(template?.params ?? {}),
+            temperature: template?.params?.temperature ?? 0.7,
+          } as CandidateNode['params'],
+          changeLog: [{
+            label: 'CARRY',
+            text: `Restart: best fitness flat for ${(config.selection as any).restartAfter} generations — reseeded from the original prompt`,
+          }],
+        };
+        if (config.seed !== undefined) {
+          immigrant.params.seed = Math.floor(
+            rngFor(config.seed, 'restart-seed', nextGenerationNumber, i)() * 2 ** 31,
+          );
+        }
+        newGenNodes.push(immigrant);
+        (immigrant as any)._operatorType = null;
+        (immigrant as any)._parentFitness = 0;
+      }
+    } else {
+      console.warn('[Generation] Stagnation detected but no seed prompt to restart from — continuing normally');
+    }
+  }
+
   const remainingChildren = targetPopSize - newGenNodes.length;
   console.log(`[Generation] Creating ${remainingChildren} new children via genetic operators (${newGenNodes.length} elites already added)`);
   

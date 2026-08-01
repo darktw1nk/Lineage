@@ -68,6 +68,7 @@ function NewEvaluationModalContent({
         topK: 4,
         eliteShare: 0.05,
         diversity: 0,
+        restartAfter: 0,
       },
       operators: {
         adaptivity: 0,
@@ -621,6 +622,36 @@ function MainTab({ config, setConfig, isSimpleMode }: TabProps) {
                 ? `A near-duplicate must be ~${(1 / Math.max(0.01, 1 - config.selection.diversity)).toFixed(1)}x better than a distinct rival to keep its parent slot`
                 : 'Off — parents are ranked by fitness alone. Raise this if generations start looking alike'
               }
+            </div>
+          </div>
+
+          <div>
+            <LabelWithTooltip
+              htmlFor="restartAfter"
+              label="Restart After (generations)"
+              tooltip="If the best fitness has not improved for this many generations, reseed a quarter of the next generation from the original prompt to look somewhere else. The champion is carried by elitism regardless, so this can only cost exploration budget. Blank or 0 = off."
+            />
+            <Input
+              id="restartAfter"
+              type="number"
+              min="0"
+              step="1"
+              value={(config.selection as any)?.restartAfter ?? 0}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  selection: {
+                    ...config.selection!,
+                    restartAfter: parseInt(e.target.value, 10) || 0,
+                  } as any,
+                })
+              }
+              placeholder="0"
+            />
+            <div className="text-xs text-muted-foreground mt-1">
+              {(config.selection as any)?.restartAfter > 0
+                ? `After ${(config.selection as any).restartAfter} generation(s) with no improvement, fresh candidates are injected from the seed prompt`
+                : 'Off — a run that stops improving keeps breeding from the same converged population'}
             </div>
           </div>
         </>

@@ -88,3 +88,18 @@ describe('operators.adaptivity survives the CLI config boundary', () => {
     warn.mockRestore();
   });
 });
+
+describe('selection.restartAfter survives the CLI config boundary', () => {
+  it('passes a valid value through', () => {
+    expect((toEvaluationConfig({ ...base, selection: { restartAfter: 3 } }).selection as any).restartAfter).toBe(3);
+  });
+
+  it('is absent by default, so runs never restart unasked', () => {
+    expect((toEvaluationConfig({ ...base }).selection as any).restartAfter).toBeUndefined();
+  });
+
+  it('rejects a fractional or negative value', () => {
+    expect(() => validateCliConfig({ ...base, selection: { restartAfter: 2.5 } })).toThrow(/restartAfter/);
+    expect(() => validateCliConfig({ ...base, selection: { restartAfter: -1 } })).toThrow(/restartAfter/);
+  });
+});

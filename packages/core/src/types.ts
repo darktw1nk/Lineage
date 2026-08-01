@@ -100,6 +100,15 @@ export interface EvaluationConfig {
      * best candidate is always kept first.
      */
     diversity?: number;
+    /**
+     * Restart after this many generations with no improvement in best fitness
+     * (default: off). Elitism means a run stuck in a local optimum posts the
+     * same number forever while every child still costs full price; above 0, a
+     * quarter of the generation is reseeded from the original prompt to look
+     * elsewhere. The champion is carried by elitism regardless, so this can
+     * only cost exploration budget.
+     */
+    restartAfter?: number;
   };
   operators: {
     mutationShare: number; // 0..1, renamed from mutationFactor
