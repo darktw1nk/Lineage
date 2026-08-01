@@ -1,0 +1,82 @@
+{
+  "name": "bench-04-tool-call",
+  "seedPrompt": "Help the user.",
+  "models": ["gemini/gemini-2.5-flash-lite"],
+  "serviceModel": "gemini/gemini-2.5-flash",
+  "populationSize": 6,
+  "generationSize": 6,
+  "maxGenerations": 4,
+  "budget": 1.0,
+  "parallelLimit": 6,
+  "seed": 104,
+  "samplesPerTest": 1,
+  "serviceModelMaxTokens": 4096,
+  "retries": 3,
+  "operators": {
+    "mutationShare": 0.4,
+    "crossoverShare": 0.15,
+    "metaPrompting": { "enabled": true, "share": 0.45 },
+    "paramVariation": { "enabled": false, "share": 0 },
+    "modelVariation": { "enabled": false, "share": 0 }
+  },
+  "fitnessWeights": { "quality": 1.0 },
+  "testSet": [
+    { "name": "refund", "mode": "tool_call",
+      "prompt": "Customer says order 4821 arrived broken and wants their money back.",
+      "tools": [
+        { "name": "issue_refund", "description": "Refund an order", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "ship_replacement", "description": "Ship a replacement", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "escalate_to_human", "description": "Escalate", "parameters": { "type": "object", "properties": { "reason": { "type": "string" } }, "required": ["reason"] } }
+      ],
+      "expectedTool": { "name": "issue_refund", "args": { "order_id": "4821" } } },
+    { "name": "replacement", "mode": "tool_call",
+      "prompt": "Order 5510 came with a cracked lid. The customer explicitly does not want a refund, just a new one.",
+      "tools": [
+        { "name": "issue_refund", "description": "Refund an order", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "ship_replacement", "description": "Ship a replacement", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "escalate_to_human", "description": "Escalate", "parameters": { "type": "object", "properties": { "reason": { "type": "string" } }, "required": ["reason"] } }
+      ],
+      "expectedTool": { "name": "ship_replacement", "args": { "order_id": "5510" } } },
+    { "name": "escalate", "mode": "tool_call",
+      "prompt": "Customer is threatening legal action over a data breach notice they received. Order 7712.",
+      "tools": [
+        { "name": "issue_refund", "description": "Refund an order", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "ship_replacement", "description": "Ship a replacement", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "escalate_to_human", "description": "Escalate", "parameters": { "type": "object", "properties": { "reason": { "type": "string" } }, "required": ["reason"] } }
+      ],
+      "expectedTool": { "name": "escalate_to_human" } },
+    { "name": "refund again", "mode": "tool_call",
+      "prompt": "Order 9917 was charged twice. Customer wants the duplicate charge returned.",
+      "tools": [
+        { "name": "issue_refund", "description": "Refund an order", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "ship_replacement", "description": "Ship a replacement", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "escalate_to_human", "description": "Escalate", "parameters": { "type": "object", "properties": { "reason": { "type": "string" } }, "required": ["reason"] } }
+      ],
+      "expectedTool": { "name": "issue_refund", "args": { "order_id": "9917" } } },
+
+    { "name": "replacement (unseen)", "mode": "tool_call", "holdout": true,
+      "prompt": "The lavender candle from order 3302 never made it into the box. Customer would like the missing item sent, not money back.",
+      "tools": [
+        { "name": "issue_refund", "description": "Refund an order", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "ship_replacement", "description": "Ship a replacement", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "escalate_to_human", "description": "Escalate", "parameters": { "type": "object", "properties": { "reason": { "type": "string" } }, "required": ["reason"] } }
+      ],
+      "expectedTool": { "name": "ship_replacement", "args": { "order_id": "3302" } } },
+    { "name": "escalate (unseen)", "mode": "tool_call", "holdout": true,
+      "prompt": "This customer says our product caused a small fire in their kitchen. Order 8843.",
+      "tools": [
+        { "name": "issue_refund", "description": "Refund an order", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "ship_replacement", "description": "Ship a replacement", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "escalate_to_human", "description": "Escalate", "parameters": { "type": "object", "properties": { "reason": { "type": "string" } }, "required": ["reason"] } }
+      ],
+      "expectedTool": { "name": "escalate_to_human" } },
+    { "name": "refund (unseen)", "mode": "tool_call", "holdout": true,
+      "prompt": "Order 6690 shipped a completely different product than ordered and the customer has lost patience — they want the money returned.",
+      "tools": [
+        { "name": "issue_refund", "description": "Refund an order", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "ship_replacement", "description": "Ship a replacement", "parameters": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] } },
+        { "name": "escalate_to_human", "description": "Escalate", "parameters": { "type": "object", "properties": { "reason": { "type": "string" } }, "required": ["reason"] } }
+      ],
+      "expectedTool": { "name": "issue_refund", "args": { "order_id": "6690" } } }
+  ]
+}

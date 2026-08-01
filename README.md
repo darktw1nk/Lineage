@@ -47,6 +47,22 @@ Nobody wrote that format instruction — by generation 2 the engine had read its
 
 <sub>4 generations · 24 candidates · 3 models · 2m43s · $0.20</sub>
 
+### Is it worth it, though?
+
+We benchmarked evolution against the obvious cheaper alternative — **asking a good model to rewrite the prompt once**, given the same training examples. Five tasks, three arms each, all scored on the same held-out tests:
+
+| Task | Seed | One-shot rewrite | Evolution |
+|---|:---:|:---:|:---:|
+| Format contract | 3.00 | 7.00 | **8.00** |
+| Classification | 0.00 | **10.00** | **10.00** |
+| Open-ended summary | 8.50 | 7.00 ↓ | **9.00** |
+| Tool call | 7.33 | 6.67 ↓ | **7.33** |
+| JSON schema* | 0.00 | 1.67 | **2.67** |
+
+Evolution won 4 of 5 and never lost — but the honest lesson is in the arrows: **the one-shot rewrite made two tasks worse**, and nothing about that workflow tells you so. Evolution costs 20–90× more per run and its edge over a good rewrite is often under a point. What you're buying is a measured answer instead of a hopeful one. Where the seed prompt is already decent, expect small gains; where it fails an output contract, expect large ones.
+
+<sub>*that task is a poor test and the numbers show it — full method, per-task analysis and caveats in **[benchmarks/](benchmarks/)**</sub>
+
 <details>
 <summary><b>Why this beats prompt engineering by hand</b></summary>
 

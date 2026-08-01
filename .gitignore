@@ -37,3 +37,7 @@ out/
 
 # Local run artifacts (CLI reports/results scratch)
 /testoutputs/
+
+# Benchmark scratch database (raw per-run JSON is committed, the db is not)
+/benchmarks/out/*.db
+/benchmarks/out/*.db-*

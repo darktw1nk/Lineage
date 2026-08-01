@@ -1,0 +1,47 @@
+{
+  "name": "bench-02-classification",
+  "seedPrompt": "Classify the support ticket.",
+  "models": ["gemini/gemini-2.5-flash-lite"],
+  "serviceModel": "gemini/gemini-2.5-flash",
+  "populationSize": 6,
+  "generationSize": 6,
+  "maxGenerations": 4,
+  "budget": 1.0,
+  "parallelLimit": 6,
+  "seed": 102,
+  "samplesPerTest": 1,
+  "serviceModelMaxTokens": 4096,
+  "retries": 3,
+  "operators": {
+    "mutationShare": 0.4,
+    "crossoverShare": 0.15,
+    "metaPrompting": { "enabled": true, "share": 0.45 },
+    "paramVariation": { "enabled": false, "share": 0 },
+    "modelVariation": { "enabled": false, "share": 0 }
+  },
+  "fitnessWeights": { "quality": 1.0 },
+  "testSet": [
+    { "name": "billing", "mode": "exact_match",
+      "prompt": "I was charged twice for my subscription this month. Can you refund the extra one?",
+      "expected": "BILLING", "grading": { "strictZeroOnDeviation": true } },
+    { "name": "shipping", "mode": "exact_match",
+      "prompt": "My package says delivered but there is nothing at my door. Tracking number is 9J882.",
+      "expected": "SHIPPING", "grading": { "strictZeroOnDeviation": true } },
+    { "name": "technical", "mode": "exact_match",
+      "prompt": "The app crashes every time I open the settings screen on Android 14. Reinstalling did not help.",
+      "expected": "TECHNICAL", "grading": { "strictZeroOnDeviation": true } },
+    { "name": "account", "mode": "exact_match",
+      "prompt": "I can't log in anymore — the reset email never arrives, and I've checked spam. Email is lee@example.com.",
+      "expected": "ACCOUNT", "grading": { "strictZeroOnDeviation": true } },
+
+    { "name": "billing (unseen)", "mode": "exact_match", "holdout": true,
+      "prompt": "You upgraded me to the annual plan without asking. I want to go back to monthly and get the difference back.",
+      "expected": "BILLING", "grading": { "strictZeroOnDeviation": true } },
+    { "name": "shipping (unseen)", "mode": "exact_match", "holdout": true,
+      "prompt": "Order went out three weeks ago and the tracking has not moved since it left the warehouse.",
+      "expected": "SHIPPING", "grading": { "strictZeroOnDeviation": true } },
+    { "name": "technical (unseen)", "mode": "exact_match", "holdout": true,
+      "prompt": "CSV export produces an empty file when the report has more than 5000 rows. Smaller reports are fine.",
+      "expected": "TECHNICAL", "grading": { "strictZeroOnDeviation": true } }
+  ]
+}
