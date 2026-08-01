@@ -65,7 +65,15 @@ export async function estimateRunCost(
 
   const perGeneration = config.targets.maxGenerations === undefined;
   const G = perGeneration ? 1 : config.targets.maxGenerations!;
-  const N = config.population.generationSize;
+  // With adaptive sizing the engine may run generations WIDER than
+  // `generationSize` — up to `populationRange.max`. The estimate is a spending
+  // commitment, so it must quote the widest generation the engine is allowed
+  // to run, not the nominal one. Quoting `generationSize` here would under-bill
+  // every adaptive run by the growth factor.
+  const range = config.population.populationRange;
+  const N = range && Number.isFinite(range.max) && range.max >= range.min
+    ? Math.max(config.population.generationSize, Math.floor(range.max))
+    : config.population.generationSize;
   const N0 = config.population.initialSize;
   const eliteShare = config.selection.eliteShare ?? 0;
   // Clamp exactly like generation.ts does. Without the `N - 1` cap, eliteShare

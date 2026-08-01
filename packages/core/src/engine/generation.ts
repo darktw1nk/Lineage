@@ -235,6 +235,52 @@ function diversifyPool(pool: CandidateNode[], diversity: number, take: number): 
 }
 
 /**
+ * How wide the next generation should be, given how fast the run is improving.
+ *
+ * `generationSize` is otherwise fixed for the whole run: a search that is
+ * still paying off explores at the same width as one that stalled three
+ * generations ago, and both cost the same per generation. Sizing to the
+ * progress rate puts the budget where the returns are.
+ *
+ * Bounded on both sides on purpose. The ceiling is a spend control — a run
+ * must never cost more per generation than the user allowed — and the floor
+ * keeps a "generation" large enough to actually breed (and to leave room for
+ * a stagnation immigrant beside an elite).
+ */
+export function adaptiveGenerationSize(
+  bestPerGeneration: readonly number[],
+  configuredSize: number,
+  range: { min: number; max: number } | undefined,
+): number {
+  if (!range || !Number.isFinite(range.min) || !Number.isFinite(range.max) || range.max < range.min) {
+    return configuredSize;
+  }
+  // Two data points are the minimum that can show a trend; with less, use what
+  // the user configured rather than guessing.
+  if (bestPerGeneration.length < 2) return configuredSize;
+
+  const last = bestPerGeneration[bestPerGeneration.length - 1];
+  const prev = bestPerGeneration[bestPerGeneration.length - 2];
+  const improvement = last - prev;
+
+  // Scale relative to the run's own progress so far, not an absolute fitness
+  // scale that varies per config. The first generation's jump is the natural
+  // yardstick for "a good generation" on this task.
+  const span = Math.max(...bestPerGeneration) - Math.min(...bestPerGeneration);
+  const rate = span > 0 ? improvement / span : 0;
+
+  // rate 1 (this generation delivered the whole run's progress) -> ceiling;
+  // rate 0 (flat) -> shrink toward the floor.
+  const floor = Math.max(2, Math.floor(range.min));
+  const ceiling = Math.max(floor, Math.floor(range.max));
+  const target = rate > 0
+    ? configuredSize + (ceiling - configuredSize) * Math.min(1, rate)
+    : configuredSize - (configuredSize - floor) * 0.5;
+
+  return Math.max(floor, Math.min(ceiling, Math.round(target)));
+}
+
+/**
  * How many fresh immigrants the next generation should carry, given the run's
  * best-fitness history.
  *
@@ -609,7 +655,30 @@ export async function createNextGeneration(
   // Determine target population size
   // Gen 0 → N+1: use config.population.generationSize
   // Gen 0 has config.population.initialSize (but we're never called for gen 0)
-  const targetPopSize = config.population.generationSize;
+  // The best fitness of each generation so far — the run's progress curve.
+  // Two features read it: adaptive sizing (below) and the stagnation restart
+  // (further down), so it is computed once, before anything depends on the
+  // size it produces.
+  const bestPerGeneration = allGenerations.map(gen => {
+    const scored = gen.filter(n => n.metrics?.fitness !== undefined);
+    return scored.length ? Math.max(...scored.map(n => n.metrics!.fitness!)) : -Infinity;
+  }).filter(v => v !== -Infinity);
+
+  // Size this generation to how fast the run is actually improving, when the
+  // user configured a range to move inside. Without one this is exactly
+  // `config.population.generationSize`, as it has always been.
+  const targetPopSize = adaptiveGenerationSize(
+    bestPerGeneration,
+    config.population.generationSize,
+    config.population.populationRange,
+  );
+  if (targetPopSize !== config.population.generationSize) {
+    console.log(
+      `[Generation] Adaptive size: ${config.population.generationSize} -> ${targetPopSize} ` +
+      `(range ${config.population.populationRange!.min}-${config.population.populationRange!.max}, ` +
+      `best/gen ${bestPerGeneration.map(v => v.toFixed(2)).join(' -> ')})`,
+    );
+  }
   console.log(`[Generation] Creating ${targetPopSize} children from ${topPerformers.length} parents`);
   
   // Elitism: carry over best nodes from LAST generation
@@ -682,10 +751,6 @@ export async function createNextGeneration(
   // immigrants from the ORIGINAL seed prompt instead of yet more descendants
   // of a converged population. Elitism still carries the champion, so this can
   // only cost exploration budget, never the best answer already found.
-  const bestPerGeneration = allGenerations.map(gen => {
-    const scored = gen.filter(n => n.metrics?.fitness !== undefined);
-    return scored.length ? Math.max(...scored.map(n => n.metrics!.fitness!)) : -Infinity;
-  }).filter(v => v !== -Infinity);
   const immigrantCount = stagnationRestartCount(
     bestPerGeneration,
     (config.selection as any).restartAfter,

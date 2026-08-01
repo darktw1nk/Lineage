@@ -145,6 +145,16 @@ export interface EvaluationConfig {
     generationSize: number; // size of subsequent generations (default 10)
     seedPrompt: string;
     fill: 'auto' | 'manual';
+    /**
+     * Let the engine size each generation to how fast the run is improving,
+     * within these bounds: wider while progress is real, narrower once it
+     * flattens, so the budget follows the returns instead of spending the same
+     * amount per generation whether or not anything is being found.
+     *
+     * Omit to keep `generationSize` fixed for the whole run (the default).
+     * `max` is a hard spend ceiling — a generation never exceeds it.
+     */
+    populationRange?: { min: number; max: number };
   };
   enabledModels: ModelRef[];
   testSet: TestCase[];

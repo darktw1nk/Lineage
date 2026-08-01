@@ -12,6 +12,7 @@ import { HelpCircle, ArrowUpDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import type { EvaluationConfig, TestCase, ModelRef, ModelCostEntry } from '../types';
+import { nextPopulationRange, adaptiveRangeHint } from '@/utils/adaptiveRange';
 
 type SortColumn = 'provider' | 'model' | 'prompt' | 'completion';
 type SortDirection = 'asc' | 'desc';
@@ -689,6 +690,23 @@ function MainTab({ config, setConfig, isSimpleMode }: TabProps) {
   );
 }
 
+/**
+ * One field of the adaptive-size range changed. The reducer lives in
+ * `@/utils/adaptiveRange` so the half-typed cases are testable without a DOM.
+ */
+function setAdaptiveRange(
+  config: any,
+  setConfig: (c: any) => void,
+  field: 'min' | 'max',
+  raw: string,
+) {
+  const populationRange = nextPopulationRange((config.population as any)?.populationRange, field, raw);
+  const population = { ...config.population! } as any;
+  if (populationRange === undefined) delete population.populationRange;
+  else population.populationRange = populationRange;
+  setConfig({ ...config, population });
+}
+
 // Population Tab
 function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
   const { data: costs = [] } = useQuery<ModelCostEntry[]>({
@@ -842,6 +860,41 @@ function PopulationTab({ config, setConfig, isSimpleMode }: TabProps) {
             />
             <div className="text-xs text-muted-foreground mt-1">
               Number of candidates in each subsequent generation
+            </div>
+          </div>
+
+          <div>
+            <LabelWithTooltip
+              htmlFor="adaptiveSize"
+              label="Adaptive Size Range (min–max)"
+              tooltip="Let the engine widen each generation while the run is still improving and narrow it once progress flattens, instead of spending the same amount per generation either way. Max is a hard ceiling — a generation never exceeds it, and the cost estimate quotes that widest case. Blank = off, generation size stays fixed."
+            />
+            <div className="flex items-center gap-2">
+              <Input
+                id="adaptiveSize"
+                type="number"
+                min="2"
+                step="1"
+                placeholder="off"
+                value={(config.population as any)?.populationRange?.min ?? ''}
+                onChange={(e) => setAdaptiveRange(config, setConfig, 'min', e.target.value)}
+              />
+              <span className="text-muted-foreground text-sm">to</span>
+              <Input
+                id="adaptiveSizeMax"
+                type="number"
+                min="2"
+                step="1"
+                placeholder="off"
+                value={(config.population as any)?.populationRange?.max ?? ''}
+                onChange={(e) => setAdaptiveRange(config, setConfig, 'max', e.target.value)}
+              />
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {adaptiveRangeHint(
+                (config.population as any)?.populationRange,
+                config.population?.generationSize || 10,
+              )}
             </div>
           </div>
 

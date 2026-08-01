@@ -241,6 +241,7 @@ Valid providers: `openai`, `anthropic`, `gemini`, `openrouter`, `groq` (plus any
 | `name` | string | `"CLI Evolution"` | Run name (stored in DB). |
 | `populationSize` | number | `6` | Generation 0 size. Ignored if `initialPrompts` set. |
 | `generationSize` | number | `populationSize` | Size of subsequent generations. |
+| `populationRange` | `{min,max}` | off | Size each generation to how fast the run is improving, inside these bounds: wider while the best fitness keeps climbing, narrower once it flattens, so the budget follows the returns instead of costing the same per generation either way. Omit to keep `generationSize` fixed. `max` is a hard ceiling the engine never crosses, and `--estimate` quotes that widest case — so an adaptive run is quoted higher than the same run with a fixed `generationSize`. `min` must be at least 2 (a generation of 1 cannot breed). |
 
 ### Stop Conditions
 

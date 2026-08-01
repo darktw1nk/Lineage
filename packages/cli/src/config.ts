@@ -42,6 +42,8 @@ export interface CliConfig {
   callTimeoutMs?: number;     // per-attempt LLM call timeout in ms (default 120000)
   populationSize?: number;
   generationSize?: number;
+  /** Let the engine widen/narrow each generation with the progress rate. */
+  populationRange?: { min: number; max: number };
   maxGenerations?: number;
   budget?: number;
   targetFitness?: number;
@@ -253,6 +255,22 @@ export function validateCliConfig(config: CliConfig): void {
   };
   positiveInt(config.populationSize, 'populationSize');
   positiveInt(config.generationSize, 'generationSize');
+  if (config.populationRange !== undefined) {
+    const r = config.populationRange as any;
+    if (typeof r !== 'object' || r === null || Array.isArray(r)) {
+      throw new Error(`"populationRange" must be an object { min, max } (got ${JSON.stringify(r)})`);
+    }
+    positiveInt(r.min, 'populationRange.min', 2);
+    positiveInt(r.max, 'populationRange.max', 2);
+    if (r.min === undefined || r.max === undefined) {
+      throw new Error('"populationRange" needs both "min" and "max"');
+    }
+    // A range that cannot be satisfied is a config error, not something to
+    // silently ignore at run time: max is the spend ceiling and min the floor.
+    if (r.max < r.min) {
+      throw new Error(`"populationRange.max" (${r.max}) must be >= "populationRange.min" (${r.min})`);
+    }
+  }
   positiveInt(config.maxGenerations, 'maxGenerations');
   positiveInt(config.parallelLimit, 'parallelLimit');
   positiveInt(config.serviceModelMaxTokens, 'serviceModelMaxTokens');
@@ -361,6 +379,7 @@ export function validateCliConfig(config: CliConfig): void {
     'name', 'seedPrompt', 'initialPrompts', 'testSet', 'models', 'serviceModel',
     'plugins', 'promptMode', 'samplesPerTest', 'holdoutShare', 'holdoutSeed',
     'pairwise', 'seed', 'callTimeoutMs', 'populationSize', 'generationSize',
+    'populationRange',
     'maxGenerations', 'budget', 'targetFitness', 'timeLimitMs',
     'parallelLimit', 'serviceModelMaxTokens', 'retries', 'fitnessWeights',
     'operators', 'selection', 'systemPrompts', 'providerOptions',
@@ -471,6 +490,7 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
         generationSize,
         seedPrompt: config.seedPrompt || config.initialPrompts![0],
         fill: 'manual' as const,
+        ...(config.populationRange ? { populationRange: config.populationRange } : {}),
         manualPrompts: config.initialPrompts!.map((prompt, i) => ({
           prompt,
           model: enabledModels[i % enabledModels.length],
@@ -481,6 +501,7 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
         generationSize,
         seedPrompt: config.seedPrompt,
         fill: 'auto' as const,
+        ...(config.populationRange ? { populationRange: config.populationRange } : {}),
       };
 
   return {
