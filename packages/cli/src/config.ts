@@ -66,6 +66,7 @@ export interface CliConfig {
     eliteShare?: number;
     diversity?: number;
     restartAfter?: number;
+    novelty?: number;
   };
   operators?: {
     mutationShare?: number;
@@ -298,6 +299,7 @@ export function validateCliConfig(config: CliConfig): void {
   fraction(config.selection?.topP, 'selection.topP');
   fraction(config.selection?.diversity, 'selection.diversity');
   positiveInt(config.selection?.restartAfter, 'selection.restartAfter');
+  fraction(config.selection?.novelty, 'selection.novelty');
   fraction(config.operators?.adaptivity, 'operators.adaptivity');
   positiveInt(config.selection?.topK, 'selection.topK');
   for (const [dim, w] of Object.entries(config.fitnessWeights ?? {})) {
@@ -394,7 +396,7 @@ export function validateCliConfig(config: CliConfig): void {
   warnUnknown(config.operators, [
     'mutationShare', 'crossoverShare', 'metaPrompting', 'paramVariation', 'modelVariation', 'custom', 'adaptivity',
   ], 'operators');
-  warnUnknown(config.selection, ['policy', 'topK', 'topP', 'eliteShare', 'diversity', 'restartAfter'], 'selection');
+  warnUnknown(config.selection, ['policy', 'topK', 'topP', 'eliteShare', 'diversity', 'restartAfter', 'novelty'], 'selection');
   warnUnknown(config.fitnessWeights, ['quality', 'safety', 'cost', 'latency', 'stability'], 'fitnessWeights');
   warnUnknown(config.costNorm, ['mode', 'maxUSDPerCall'], 'costNorm');
   warnUnknown(config.latencyNorm, ['mode', 'maxMs'], 'latencyNorm');
@@ -490,6 +492,7 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
       topP: config.selection?.topP,
       eliteShare: config.selection?.eliteShare ?? 0.05,
       diversity: config.selection?.diversity ?? 0,
+      novelty: config.selection?.novelty ?? 0,
       ...(config.selection?.restartAfter !== undefined ? { restartAfter: config.selection.restartAfter } : {}),
     },
     operators: {

@@ -1770,7 +1770,9 @@ async function moveToNextGeneration(
 
   // Select top performers
   const currentGen = state.run.generations[state.currentGeneration];
-  const topPerformers = selectTopPerformers(currentGen, state.config);
+  const topPerformers = selectTopPerformers(
+    currentGen, state.config, noveltyArchive(state.run.generations, state.currentGeneration),
+  );
   
   if (topPerformers.length === 0) {
     // Say WHY there are none. "exhausted" was written unconditionally, so a
@@ -2213,6 +2215,26 @@ const STICKY_STOP_REASONS = new Set(['error', 'manual']);
  * this pasted a copy of it into the test file and asserted against the copy,
  * so reverting the whole fix left the suite green.
  */
+/**
+ * Prompts this run has already evaluated, for `selection.novelty`.
+ *
+ * Earlier generations only, finished nodes only: a failed node is not explored
+ * territory, and the current generation is what we are selecting FROM.
+ *
+ * Exported so a test can drive this construction instead of reproducing it —
+ * a test that rebuilds the logic it is checking passes even when the caller
+ * stops calling it, which is how untested wiring keeps shipping here.
+ */
+export function noveltyArchive(
+  generations: readonly CandidateNode[][],
+  currentGeneration: number,
+): CandidateNode[] {
+  return generations
+    .slice(0, Math.max(0, currentGeneration))
+    .flat()
+    .filter(n => n.status === 'finished');
+}
+
 export function reconcileUngradedCount(
   run: EvaluationRun,
   ungradedByNode: ReadonlyMap<UUID, number> = new Map(),

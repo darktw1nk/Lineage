@@ -68,6 +68,7 @@ function NewEvaluationModalContent({
         topK: 4,
         eliteShare: 0.05,
         diversity: 0,
+        novelty: 0,
         restartAfter: 0,
       },
       operators: {
@@ -622,6 +623,34 @@ function MainTab({ config, setConfig, isSimpleMode }: TabProps) {
                 ? `A near-duplicate must be ~${(1 / Math.max(0.01, 1 - config.selection.diversity)).toFixed(1)}x better than a distinct rival to keep its parent slot`
                 : 'Off — parents are ranked by fitness alone. Raise this if generations start looking alike'
               }
+            </div>
+          </div>
+
+          <div>
+            <LabelWithTooltip
+              htmlFor="novelty"
+              label="Novelty (0-1)"
+              tooltip="Discounts a parent for resembling prompts the run has ALREADY evaluated in earlier generations. Diversity only compares against this generation, so it cannot see a prompt being rediscovered on a loop; novelty remembers the whole run. Composes with diversity. 0 = off."
+            />
+            <Input
+              id="novelty"
+              type="number"
+              min="0"
+              max="1"
+              step="0.1"
+              value={(config.selection as any)?.novelty ?? 0}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  selection: { ...config.selection!, novelty: parseFloat(e.target.value) || 0 } as any,
+                })
+              }
+              placeholder="0"
+            />
+            <div className="text-xs text-muted-foreground mt-1">
+              {(config.selection as any)?.novelty > 0
+                ? 'Prompts resembling ones already tried this run are ranked lower, so the search keeps moving'
+                : 'Off — a prompt already explored in an earlier generation competes on fitness alone'}
             </div>
           </div>
 

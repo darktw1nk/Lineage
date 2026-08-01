@@ -103,3 +103,15 @@ describe('selection.restartAfter survives the CLI config boundary', () => {
     expect(() => validateCliConfig({ ...base, selection: { restartAfter: -1 } })).toThrow(/restartAfter/);
   });
 });
+
+describe('selection.novelty survives the CLI config boundary', () => {
+  it('passes a valid value through', () => {
+    expect((toEvaluationConfig({ ...base, selection: { novelty: 0.7 } }).selection as any).novelty).toBe(0.7);
+  });
+  it('defaults to 0', () => {
+    expect((toEvaluationConfig({ ...base }).selection as any).novelty).toBe(0);
+  });
+  it('rejects an out-of-range value', () => {
+    expect(() => validateCliConfig({ ...base, selection: { novelty: 1.5 } })).toThrow(/selection\.novelty/);
+  });
+});

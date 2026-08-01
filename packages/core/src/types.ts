@@ -109,6 +109,14 @@ export interface EvaluationConfig {
      * only cost exploration budget.
      */
     restartAfter?: number;
+    /**
+     * 0..1 (default 0): discount a parent by how much it resembles prompts the
+     * run has ALREADY evaluated. `diversity` only compares against this
+     * generation's picks, so it cannot see that a prompt won three generations
+     * ago and is being rediscovered on a loop; novelty has memory of the whole
+     * run. Composes with diversity.
+     */
+    novelty?: number;
   };
   operators: {
     mutationShare: number; // 0..1, renamed from mutationFactor

@@ -357,7 +357,13 @@ export function adaptOperatorShares(
  */
 export function selectTopPerformers(
   currentGeneration: CandidateNode[],
-  config: EvaluationConfig
+  config: EvaluationConfig,
+  /**
+   * Everything the run has already evaluated, for `selection.novelty`.
+   * `diversity` only sees this generation, so it cannot tell that a prompt
+   * won three generations ago and is being re-explored on a loop.
+   */
+  archive: readonly CandidateNode[] = [],
 ): CandidateNode[] {
   // Playoff-rank aware: pairwise playoff winners outrank raw fitness (rank 1 first,
   // unranked nodes sort after ranked ones by fitness)
@@ -398,6 +404,31 @@ export function selectTopPerformers(
     const topK = config.selection.topK || Math.ceil(sorted.length * 0.4);
     topPerformers = sorted.slice(0, topK);
     console.log(`[Generation] Selected ${topPerformers.length} top performers (Top-K=${topK})`);
+  }
+
+  // Novelty re-ranking, opt-in. Discount a candidate by how much it resembles
+  // what the run has ALREADY evaluated: territory that has been searched is
+  // worth less than territory that has not. Unlike diversity (which compares
+  // against this generation's picks) this has memory, so a prompt that keeps
+  // being rediscovered stops earning parent slots.
+  const rawNovelty = (config.selection as any).novelty;
+  const novelty = Number.isFinite(rawNovelty) ? Math.min(1, Math.max(0, rawNovelty as number)) : 0;
+  if (novelty > 0 && archive.length > 0 && topPerformers.length > 0) {
+    const scoreOf = (n: CandidateNode) => {
+      const familiarity = Math.max(
+        0, ...archive.map(seen => promptSimilarity(seen.prompt, n.prompt)),
+      );
+      return (n.metrics?.fitness ?? 0) * (1 - novelty * familiarity);
+    };
+    const rescored = [...sorted].sort((a, b) => scoreOf(b) - scoreOf(a));
+    const reordered = rescored.slice(0, topPerformers.length);
+    const changed = reordered.some((n, i) => n.id !== topPerformers[i]?.id);
+    if (changed) {
+      console.log(
+        `[Generation] Novelty ${novelty}: re-ranked parents against ${archive.length} previously evaluated prompt(s)`,
+      );
+      topPerformers = reordered;
+    }
   }
 
   // Diversity re-ranking, opt-in. Truncation selection is strongly
