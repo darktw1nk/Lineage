@@ -67,6 +67,7 @@ function NewEvaluationModalContent({
         policy: 'topk',
         topK: 4,
         eliteShare: 0.05,
+        diversity: 0,
       },
       operators: {
         mutationShare: 0.4,
@@ -586,6 +587,38 @@ function MainTab({ config, setConfig, isSimpleMode }: TabProps) {
               {config.selection?.eliteShare && config.selection.eliteShare > 0
                 ? `Will carry over ${Math.round((config.selection.eliteShare) * 100)}% best nodes from previous generation (minimum 1, currently ${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.generationSize || 10)))} elite${Math.max(1, Math.round((config.selection.eliteShare) * (config.population?.generationSize || 10))) === 1 ? '' : 's'})`
                 : 'Elitism disabled. When enabled, always carries at least 1 best node from previous generation'
+              }
+            </div>
+          </div>
+
+          <div>
+            <LabelWithTooltip
+              htmlFor="diversity"
+              label="Diversity (0-1)"
+              tooltip="Discounts a parent's fitness for resembling parents already chosen, so a converging population doesn't spend every slot on near-copies of one prompt. The best candidate is always picked first, so this never costs you the champion. 0 = off (rank by fitness alone)."
+            />
+            <Input
+              id="diversity"
+              type="number"
+              min="0"
+              max="1"
+              step="0.1"
+              value={config.selection?.diversity ?? 0}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  selection: {
+                    ...config.selection!,
+                    diversity: parseFloat(e.target.value) || 0,
+                  },
+                })
+              }
+              placeholder="0"
+            />
+            <div className="text-xs text-muted-foreground mt-1">
+              {config.selection?.diversity && config.selection.diversity > 0
+                ? `A near-duplicate must be ~${(1 / Math.max(0.01, 1 - config.selection.diversity)).toFixed(1)}x better than a distinct rival to keep its parent slot`
+                : 'Off — parents are ranked by fitness alone. Raise this if generations start looking alike'
               }
             </div>
           </div>
