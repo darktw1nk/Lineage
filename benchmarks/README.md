@@ -68,44 +68,6 @@ task is simple and your prompt is bad, one good rewrite is enough.
   at following a terse prompt and may leave evolution less headroom.
 - The costs are real API spend from the runs in RESULTS.md, not estimates.
 
-## Versus DSPy
-
-The obvious comparison. DSPy 3.2.1, same candidate model, same optimizer model, same
-training and held-out examples, scored by the same Levenshtein metric
-(`benchmarks/dspy_arm.py`, raw numbers in `out/dspy-results.json`). Only the two
-`exact_match` tasks — the metric has to be identical for the comparison to mean anything.
-
-| Task | DSPy zero-shot | **DSPy MIPROv2** *(their optimizer)* | DSPy LabeledFewShot *(demos, not optimization)* | **Lineage evolution** |
-|---|:---:|:---:|:---:|:---:|
-| Format contract | 2.14 | 2.14 | 7.91 | **8.00** |
-| Classification | 0.04 | 0.04 | 10.00 | **10.00** |
-
-**MIPROv2 — DSPy's optimizer, the actual comparable — did not improve either task.** It
-returned the untouched baseline program at both `light` and `medium` budgets: default
-instructions, zero-to-one demos, held-out score identical to zero-shot. The mechanism is
-legible rather than mysterious: MIPROv2 bootstraps demonstrations from *successful* traces,
-and a program that never succeeds produces none to bootstrap from. Lineage's meta-prompting
-reads the *failures* instead, which is exactly why it gets traction from the same four
-examples.
-
-**The arm that matched Lineage is not optimization.** `LabeledFewShot` pastes the four
-training examples into the prompt as demonstrations — in-context learning, available in any
-framework or by hand, no search involved. It is a strong baseline and worth knowing about:
-on these two tasks, showing a model four examples performs about as well as an evolved
-instruction. It also costs differently forever, because those demonstrations are re-sent on
-every single call, where the evolved instruction is two lines.
-
-**Caveat, stated because it cuts against us:** four training examples is far below the data
-regime DSPy is built for, and MIPROv2's bootstrapping needs successes to work with. With 50+
-examples and a base program that sometimes succeeds, this comparison could look very
-different. What these numbers show is small-data behaviour, which is the regime most people
-actually start in — not a general claim about DSPy.
-
-**And the outputs are not the same kind of thing.** Lineage produces a portable prompt
-string: paste it into any SDK, any language, any framework. DSPy produces a DSPy program. If
-you want a Python pipeline with retrieval and multi-stage modules, DSPy does far more than
-this project does; if you want a prompt, this does the thing DSPy doesn't.
-
 ## Honest summary
 
 Evolution scored highest on every task it was run on, and it was the only method here that
