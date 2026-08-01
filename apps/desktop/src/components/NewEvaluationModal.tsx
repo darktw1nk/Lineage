@@ -70,6 +70,7 @@ function NewEvaluationModalContent({
         diversity: 0,
       },
       operators: {
+        adaptivity: 0,
         mutationShare: 0.4,
         crossoverShare: 0.3,
         metaPrompting: {
@@ -1421,10 +1422,42 @@ function VariationsTab({ config, setConfig }: TabProps) {
         </div>
       </div>
 
+      {/* Adaptivity — let measured results steer the mix above */}
+      <div>
+        <LabelWithTooltip
+          htmlFor="adaptivity"
+          label="Adaptivity (0-1)"
+          tooltip="How strongly the shares above follow measured results. The engine tracks each operator's average fitness gain from parent to child; above 0, operators that keep producing better children take a larger share of the next generation. Confidence grows with sample count, and below 1 no operator is ever dropped entirely. 0 = fixed shares."
+        />
+        <Input
+          id="adaptivity"
+          type="number"
+          step="0.1"
+          min="0"
+          max="1"
+          value={config.operators?.adaptivity ?? 0}
+          onChange={(e) =>
+            setConfig({
+              ...config,
+              operators: {
+                ...config.operators!,
+                adaptivity: parseFloat(e.target.value) || 0,
+              },
+            })
+          }
+          placeholder="0"
+        />
+        <div className="text-xs text-muted-foreground mt-1">
+          {config.operators?.adaptivity && config.operators.adaptivity > 0
+            ? 'The shares above are a starting point — operators that produce better children will earn more of each later generation'
+            : 'Off — the shares above stay fixed for the whole run'}
+        </div>
+      </div>
+
       {/* Mutation Share */}
       <div>
-        <LabelWithTooltip 
-          htmlFor="mutationShare" 
+        <LabelWithTooltip
+          htmlFor="mutationShare"
           label="Mutation Share (0-1)"
           tooltip="Fraction of children created via random mutations. Mutations apply small, precise edits to prompts to explore variations."
         />

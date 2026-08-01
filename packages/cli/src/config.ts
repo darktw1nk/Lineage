@@ -69,6 +69,7 @@ export interface CliConfig {
   operators?: {
     mutationShare?: number;
     crossoverShare?: number;
+    adaptivity?: number;
     metaPrompting?: { enabled: boolean; share: number };
     modelVariation?: { enabled: boolean; share: number };
     paramVariation?: {
@@ -295,6 +296,7 @@ export function validateCliConfig(config: CliConfig): void {
   fraction(config.selection?.eliteShare, 'selection.eliteShare');
   fraction(config.selection?.topP, 'selection.topP');
   fraction(config.selection?.diversity, 'selection.diversity');
+  fraction(config.operators?.adaptivity, 'operators.adaptivity');
   positiveInt(config.selection?.topK, 'selection.topK');
   for (const [dim, w] of Object.entries(config.fitnessWeights ?? {})) {
     nonNegativeNumber(w, `fitnessWeights.${dim}`);
@@ -388,7 +390,7 @@ export function validateCliConfig(config: CliConfig): void {
     }
   };
   warnUnknown(config.operators, [
-    'mutationShare', 'crossoverShare', 'metaPrompting', 'paramVariation', 'modelVariation', 'custom',
+    'mutationShare', 'crossoverShare', 'metaPrompting', 'paramVariation', 'modelVariation', 'custom', 'adaptivity',
   ], 'operators');
   warnUnknown(config.selection, ['policy', 'topK', 'topP', 'eliteShare', 'diversity'], 'selection');
   warnUnknown(config.fitnessWeights, ['quality', 'safety', 'cost', 'latency', 'stability'], 'fitnessWeights');
@@ -494,6 +496,7 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
       modelVariation: config.operators?.modelVariation ?? { enabled: enabledModels.length > 1, share: 0.1 },
       paramVariation: config.operators?.paramVariation ?? { enabled: true, share: 0.1, temperature: { enabled: true, min: 0.3, max: 1.5 } },
       ...(config.operators?.custom ? { custom: config.operators.custom } : {}),
+      adaptivity: config.operators?.adaptivity ?? 0,
     },
     population,
     enabledModels,

@@ -234,6 +234,80 @@ function diversifyPool(pool: CandidateNode[], diversity: number, take: number): 
   return picked;
 }
 
+/** What the engine has measured about one operator so far this run. */
+export interface OperatorStats {
+  totalDelta: number;
+  count: number;
+}
+
+/**
+ * Re-weight operator shares by what each operator has actually been worth.
+ *
+ * The engine already measures average fitness delta from parent to child per
+ * operator; before this it went to a console line and nowhere else. An
+ * operator that keeps producing better children earns more of the next
+ * generation's budget, one that keeps producing worse children earns less.
+ *
+ * Deliberate constraints, each of which is a way this could go wrong:
+ *  - `adaptivity: 0` (default) returns the configured shares untouched.
+ *  - Confidence scales with sample count, so one lucky child moves the mix far
+ *    less than a consistent record does. Without this, the first generation's
+ *    noise would set the budget for the whole run.
+ *  - The multiplier is bounded below by `1 - adaptivity`, so below full
+ *    adaptivity no operator is ever driven to zero — a bad early sample must
+ *    not permanently remove an operator from the search.
+ *  - An operator with no samples keeps its configured weight: it cannot be
+ *    judged on evidence that does not exist.
+ *  - The total is preserved, so downstream largest-remainder child allocation
+ *    is unchanged.
+ */
+export function adaptOperatorShares(
+  shares: Map<string, number>,
+  effectiveness: Record<string, OperatorStats>,
+  adaptivity: number | undefined,
+): Map<string, number> {
+  const a = Number.isFinite(adaptivity) ? Math.min(1, Math.max(0, adaptivity as number)) : 0;
+  if (a === 0) return new Map(shares);
+
+  const deltas: number[] = [];
+  for (const [name, share] of shares) {
+    const st = effectiveness[name];
+    if (share > 0 && st && st.count > 0) deltas.push(st.totalDelta / st.count);
+  }
+  if (deltas.length < 2) return new Map(shares);
+
+  // Scale by the observed spread, so "better" is relative to this run rather
+  // than to an absolute fitness scale that varies per config.
+  const spread = Math.max(...deltas) - Math.min(...deltas);
+  if (spread <= 0) return new Map(shares);
+  const mean = deltas.reduce((x, y) => x + y, 0) / deltas.length;
+
+  const before = [...shares.values()].reduce((x, y) => x + y, 0);
+  const adapted = new Map<string, number>();
+  for (const [name, share] of shares) {
+    const st = effectiveness[name];
+    if (share <= 0 || !st || st.count === 0) {
+      adapted.set(name, share);
+      continue;
+    }
+    const avg = st.totalDelta / st.count;
+    // 0 at the worst observed operator, 1 at the best, 0.5 at the mean.
+    const relative = (avg - mean) / spread;
+    // Diminishing trust in small samples: 1 sample counts for a third of the
+    // evidence that 10 samples do.
+    const confidence = st.count / (st.count + 2);
+    const multiplier = 1 + a * relative * confidence * 2;
+    adapted.set(name, Math.max(share * (1 - a), share * multiplier));
+  }
+
+  // Renormalize to the original total: child counts downstream depend on it.
+  const after = [...adapted.values()].reduce((x, y) => x + y, 0);
+  if (after > 0 && before > 0) {
+    for (const [name, value] of adapted) adapted.set(name, (value / after) * before);
+  }
+  return adapted;
+}
+
 /**
  * Select top performers from current generation
  */
@@ -448,6 +522,12 @@ export async function createNextGeneration(
      */
     accrueChild?: (cost: OperatorCost) => void;
   },
+  /**
+   * What each operator has been worth so far this run (avg fitness delta).
+   * Supplied by the evaluator, which already tracks it; used only when
+   * `config.operators.adaptivity > 0`.
+   */
+  operatorEffectiveness?: Record<string, OperatorStats>,
 ): Promise<GenerationResult> {
   const newGenNodes: CandidateNode[] = [];
   
@@ -541,6 +621,23 @@ export async function createNextGeneration(
       continue;
     }
     shares.set(name, entry.enabled === false ? 0 : (entry.share || 0));
+  }
+
+  // Adaptive rates: reward the operators this run has measured as productive.
+  // The evaluator has been computing avg fitness delta per operator all along
+  // and logging it to the console; above 0 it now steers the breeding mix.
+  const adaptivity = (config.operators as any).adaptivity;
+  if (Number.isFinite(adaptivity) && adaptivity > 0 && operatorEffectiveness) {
+    const before = new Map(shares);
+    const adapted = adaptOperatorShares(shares, operatorEffectiveness, adaptivity);
+    const moved = [...adapted].filter(([n, v]) => Math.abs(v - (before.get(n) ?? 0)) > 1e-9);
+    if (moved.length > 0) {
+      console.log(
+        `[Generation] Adaptivity ${adaptivity}: ` +
+        moved.map(([n, v]) => `${n} ${(before.get(n) ?? 0).toFixed(2)}→${v.toFixed(2)}`).join(', '),
+      );
+      for (const [name, value] of adapted) shares.set(name, value);
+    }
   }
 
   const totalShare = [...shares.values()].reduce((a, b) => a + b, 0);

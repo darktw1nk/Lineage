@@ -1819,6 +1819,10 @@ async function moveToNextGeneration(
         sendUpdate(runId, { type: 'totals', totals: state.run.totals, cacheHits: state.run.cacheHits });
       },
     },
+    // What each operator has been worth so far. Tracked since the first
+    // generation and, until adaptivity existed, only ever printed to a log
+    // line — this is the feedback loop that makes the measurement matter.
+    state.operatorEffectiveness,
   );
 
   const newGenNodes = result.newNodes;

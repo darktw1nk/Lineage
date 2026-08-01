@@ -112,6 +112,16 @@ export interface EvaluationConfig {
       temperature?: { enabled: boolean; min: number; max: number };
     };
     custom?: Record<string, { enabled?: boolean; share: number }>; // plugin operator shares, keyed by operator name
+    /**
+     * 0..1 (default 0): how strongly the breeding mix follows measured
+     * results. The engine tracks each operator's average fitness delta from
+     * parent to child; above 0, operators that keep producing better children
+     * take a larger share of the next generation and weaker ones take less.
+     * Confidence scales with sample count, and below 1 no operator is ever
+     * driven to zero, so one unlucky early child cannot delete an operator
+     * from the search.
+     */
+    adaptivity?: number;
   };
   population: {
     initialSize: number; // size of generation 0 (default 10)

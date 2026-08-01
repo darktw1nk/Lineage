@@ -324,6 +324,7 @@ Controls how offspring are created each generation:
 | `operators.modelVariation` | `{enabled, share}` | `{auto, 0.1}` | Random model assignment. Auto-enabled when >1 model. |
 | `operators.paramVariation` | `{enabled, share, temperature?}` | `{true, 0.1}` | Temperature/seed variation. |
 | `operators.paramVariation.temperature` | `{enabled, min, max}` | `{true, 0.3, 1.5}` | Temperature range for variation. |
+| `operators.adaptivity` | number | `0` | 0–1. How strongly the breeding mix follows measured results. The engine tracks each operator's average fitness delta from parent to child; above 0, operators that keep producing better children take a larger share of each later generation and weaker ones take less. Confidence scales with sample count, so one lucky child moves the mix far less than a consistent record, and below 1 no operator is ever driven to zero — an unlucky early sample cannot delete an operator from the search. Operators with no measurements keep their configured share. `0` breeds exactly as before. |
 
 ### Execution
 

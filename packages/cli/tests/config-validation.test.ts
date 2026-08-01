@@ -64,3 +64,27 @@ describe('selection.diversity survives the CLI config boundary', () => {
     warn.mockRestore();
   });
 });
+
+describe('operators.adaptivity survives the CLI config boundary', () => {
+  it('passes a valid value through to the engine config', () => {
+    const cfg = toEvaluationConfig({ ...base, operators: { adaptivity: 0.6 } });
+    expect((cfg.operators as any).adaptivity).toBe(0.6);
+  });
+
+  it('defaults to 0 so existing configs breed exactly as before', () => {
+    expect((toEvaluationConfig({ ...base }).operators as any).adaptivity).toBe(0);
+  });
+
+  it('rejects an out-of-range value', () => {
+    expect(() => validateCliConfig({ ...base, operators: { adaptivity: 2 } })).toThrow(/operators\.adaptivity/);
+    expect(() => validateCliConfig({ ...base, operators: { adaptivity: -0.5 } })).toThrow(/operators\.adaptivity/);
+  });
+
+  it('does not warn about adaptivity as an unknown operator field', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    validateCliConfig({ ...base, operators: { adaptivity: 0.5 } });
+    const unknown = warn.mock.calls.map(c => c.join(' ')).filter(m => /unknown/i.test(m) && /adaptivity/i.test(m));
+    expect(unknown).toEqual([]);
+    warn.mockRestore();
+  });
+});
