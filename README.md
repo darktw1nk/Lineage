@@ -36,12 +36,13 @@ Set a run up in the desktop app, in a CLI config, or hand it to your coding agen
 
 ## The genetics
 
-Each generation, the engine:
+Each generation follows the same measurable loop:
 
-1. **Evaluates** every candidate against the full test set, in parallel, with per-call cost tracking.
-2. **Selects** parents — **Top-K** (take the best K) or **Top-P** (sample by cumulative fitness probability, keeps more diversity), with **elitism** (`eliteShare`): champions survive unchanged, so fitness never regresses. Optionally, a **pairwise playoff** re-ranks the top contenders head-to-head (both presentation orders, position bias cancelled) — decisive exactly where absolute scores cluster at 9.8-vs-9.9.
-3. **Distributes offspring** fitness-proportionally: stronger parents get more children.
-4. **Breeds** the next generation with five operators, mixed by configurable shares:
+**Evaluate** — every candidate runs against the test set in parallel. Outputs, scores, latency, tokens and cost are all recorded.
+
+**Select** — strong candidates become parents (Top-K, or Top-P for more diversity). Elitism carries the best through unchanged, so fitness never regresses. Stronger parents get more children.
+
+**Breed** — the next generation is created by five operators, mixed by configurable shares:
 
 | Operator | What it does | Why it's interesting |
 |---|---|---|
@@ -51,9 +52,15 @@ Each generation, the engine:
 | **Param variation** | Same prompt, different temperature/seed within a configured range | Sometimes the prompt is fine and the sampling is wrong |
 | **Model variation** | Same prompt, different model from your enabled set | Turns model choice into a searchable dimension |
 
-Every node carries a **changelog** of what created it (`[MUTATION] Removed vague instruction…`, `[CROSSOVER] Merged a1b2 + c3d4`), and the engine tracks **per-operator effectiveness** (average fitness delta) as the run progresses.
+**Compare** *(optional)* — a pairwise playoff ranks the top contenders head-to-head, in both presentation orders, for when absolute scores cluster at 9.8-vs-9.9 and stop meaning anything.
 
-**And the gene pool is open.** Operators are plugins — a ~20-line JS file dropped in a folder joins the breeding mix on equal footing with the built-ins (which run through the same registry). In our first live test, a deterministic section-rotation plugin bred the run's champion (fitness 9.89) while the LLM-powered operators watched. Author guide: [docs/plugins.md](docs/plugins.md).
+**Repeat** — until a generation limit, target fitness, spending cap, time limit, or your Stop button.
+
+**Validate** — the seed and the final champion are both scored on holdout tests evolution was never allowed to see.
+
+Every candidate keeps its full ancestry and a changelog of what created it (`[MUTATION] Removed vague instruction…`, `[CROSSOVER] Merged a1b2 + c3d4`).
+
+**And the gene pool is open.** Operators are plugins — a ~20-line JS file dropped in a folder joins the breeding mix on equal footing with the built-ins. Author guide: [docs/plugins.md](docs/plugins.md).
 
 ## Fitness: five dimensions, your weights
 
