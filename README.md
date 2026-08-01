@@ -12,17 +12,10 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 
 ![Evolution run](docs/assets/evolution-run.gif)
 
-**The task:** turn a support ticket into one structured line — `order=4821 | issue=cracked jar | request=replacement`.
+**Task:** turn a support ticket into one line — `order=4821 | issue=cracked jar | request=replacement`.<br>
+*"Summarize the customer ticket."* scores **2.25/10**. Four generations later, the engine has written the output format itself: **6.25/10** — and **3 → 8/10** on tickets held back from training. 2m43s, $0.20.
 
-**The starting prompt** was *"Summarize the customer ticket."* It writes a paragraph when the answer is a record, so it scores **2.25/10**.
-
-**What you're watching:** each row is one generation of 6 competing prompts. By generation 2 the engine had read its own graded failures and rewritten the prompt to specify the exact output format — **6.25/10** (gold).
-
-**The honest check:** two tickets were held back from training entirely. The starting prompt scores **3/10** on them, the evolved prompt **8/10**. It learned the task, not the test set.
-
-*One real run: 4 generations, 24 candidates, 3 models, 2m43s, $0.20.*
-
-**Set it up whichever way you work:** click it together in the desktop app, write a JSON config for the `lineage` CLI — or describe the job to your coding agent and let it run the whole thing, using the [`evolving-prompts` skill](.claude/skills/evolving-prompts/SKILL.md) this repo ships.
+Set a run up in the desktop app, in a CLI config, or hand it to your coding agent with the bundled [skill](.claude/skills/evolving-prompts/SKILL.md).
 
 ## Why this beats prompt engineering by hand
 
