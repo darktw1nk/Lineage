@@ -179,6 +179,62 @@ function withOperatorTimeout<T>(
 }
 
 /**
+ * Similarity of two prompts, 0 (nothing in common) to 1 (identical).
+ *
+ * Token-level Jaccard, deliberately cheap and order-insensitive: the shape it
+ * has to detect is "these two prompts are the same text with a word changed",
+ * which is what a converged population looks like. An edit distance would be
+ * more precise and quadratic in prompt length — this runs once per candidate
+ * pair per generation and prompts reach thousands of characters.
+ */
+function promptSimilarity(a: string, b: string): number {
+  const tokens = (t: string) => new Set(
+    t.toLowerCase().split(/[^a-z0-9]+/i).filter(w => w.length > 0),
+  );
+  const ta = tokens(a);
+  const tb = tokens(b);
+  if (ta.size === 0 && tb.size === 0) return 1;
+  if (ta.size === 0 || tb.size === 0) return 0;
+  let shared = 0;
+  for (const w of ta) if (tb.has(w)) shared++;
+  return shared / (ta.size + tb.size - shared);
+}
+
+/**
+ * Re-rank an already fitness-sorted pool, discounting each candidate by how
+ * similar it is to those already picked.
+ *
+ * Greedy, and the first pick is always the fittest — diversity must never cost
+ * you the champion. After that a candidate's score is
+ * `fitness × (1 - diversity × maxSimilarityToPicked)`, so at `diversity: 0.5`
+ * a near-duplicate has to be twice as good as a distinct rival to keep its
+ * slot, and at 0 the discount vanishes and the order is unchanged.
+ */
+function diversifyPool(pool: CandidateNode[], diversity: number, take: number): CandidateNode[] {
+  const picked: CandidateNode[] = [];
+  const remaining = [...pool];
+  while (picked.length < take && remaining.length > 0) {
+    let bestIndex = 0;
+    if (picked.length > 0) {
+      let bestScore = -Infinity;
+      for (let i = 0; i < remaining.length; i++) {
+        const similarity = Math.max(
+          ...picked.map(p => promptSimilarity(p.prompt, remaining[i].prompt)),
+        );
+        const score = (remaining[i].metrics?.fitness ?? 0) * (1 - diversity * similarity);
+        if (score > bestScore) {
+          bestScore = score;
+          bestIndex = i;
+        }
+      }
+    }
+    picked.push(remaining[bestIndex]);
+    remaining.splice(bestIndex, 1);
+  }
+  return picked;
+}
+
+/**
  * Select top performers from current generation
  */
 export function selectTopPerformers(
@@ -224,6 +280,26 @@ export function selectTopPerformers(
     const topK = config.selection.topK || Math.ceil(sorted.length * 0.4);
     topPerformers = sorted.slice(0, topK);
     console.log(`[Generation] Selected ${topPerformers.length} top performers (Top-K=${topK})`);
+  }
+
+  // Diversity re-ranking, opt-in. Truncation selection is strongly
+  // exploitative: once one lineage leads it takes every parent slot and the
+  // population converges on near-copies, so later generations pay full price
+  // to re-measure the same prompt. Discounting by similarity to the parents
+  // already chosen buys coverage back. `diversity: 0` (the default) is a
+  // no-op, byte for byte — clamped, so a NaN or out-of-range value cannot
+  // silently change selection.
+  const raw = config.selection.diversity;
+  const diversity = Number.isFinite(raw) ? Math.min(1, Math.max(0, raw as number)) : 0;
+  if (diversity > 0 && topPerformers.length > 1) {
+    const diversified = diversifyPool(sorted, diversity, topPerformers.length);
+    const swapped = diversified.filter(n => !topPerformers.some(p => p.id === n.id)).length;
+    if (swapped > 0) {
+      console.log(
+        `[Generation] Diversity ${diversity}: swapped ${swapped} near-duplicate parent(s) for more distinct prompts`,
+      );
+    }
+    topPerformers = diversified;
   }
 
   return topPerformers;

@@ -64,6 +64,7 @@ export interface CliConfig {
     topK?: number;
     topP?: number;
     eliteShare?: number;
+    diversity?: number;
   };
   operators?: {
     mutationShare?: number;
@@ -293,6 +294,7 @@ export function validateCliConfig(config: CliConfig): void {
   };
   fraction(config.selection?.eliteShare, 'selection.eliteShare');
   fraction(config.selection?.topP, 'selection.topP');
+  fraction(config.selection?.diversity, 'selection.diversity');
   positiveInt(config.selection?.topK, 'selection.topK');
   for (const [dim, w] of Object.entries(config.fitnessWeights ?? {})) {
     nonNegativeNumber(w, `fitnessWeights.${dim}`);
@@ -388,7 +390,7 @@ export function validateCliConfig(config: CliConfig): void {
   warnUnknown(config.operators, [
     'mutationShare', 'crossoverShare', 'metaPrompting', 'paramVariation', 'modelVariation', 'custom',
   ], 'operators');
-  warnUnknown(config.selection, ['policy', 'topK', 'topP', 'eliteShare'], 'selection');
+  warnUnknown(config.selection, ['policy', 'topK', 'topP', 'eliteShare', 'diversity'], 'selection');
   warnUnknown(config.fitnessWeights, ['quality', 'safety', 'cost', 'latency', 'stability'], 'fitnessWeights');
   warnUnknown(config.costNorm, ['mode', 'maxUSDPerCall'], 'costNorm');
   warnUnknown(config.latencyNorm, ['mode', 'maxMs'], 'latencyNorm');
@@ -483,6 +485,7 @@ export function toEvaluationConfig(config: CliConfig, configDir?: string): Evalu
       topK: config.selection?.topK ?? 3,
       topP: config.selection?.topP,
       eliteShare: config.selection?.eliteShare ?? 0.05,
+      diversity: config.selection?.diversity ?? 0,
     },
     operators: {
       mutationShare: config.operators?.mutationShare ?? 0.5,

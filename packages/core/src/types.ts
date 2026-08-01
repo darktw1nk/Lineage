@@ -91,6 +91,15 @@ export interface EvaluationConfig {
     topK?: number;        // when policy = 'topk': fixed number (e.g., 4)
     topP?: number;        // when policy = 'topp': cumulative probability (0..1, e.g., 0.8)
     eliteShare?: number;  // 0..1: fraction of generation to preserve from previous generation (default 0.05 = 5%)
+    /**
+     * 0..1 (default 0): how much a parent's fitness is discounted for being
+     * similar to parents already chosen. Truncation selection ranks by fitness
+     * alone, so a converged population fills every slot with near-copies of one
+     * prompt and the run keeps paying to re-measure the same text. Above 0, a
+     * slightly worse but genuinely different candidate can take a slot. The
+     * best candidate is always kept first.
+     */
+    diversity?: number;
   };
   operators: {
     mutationShare: number; // 0..1, renamed from mutationFactor

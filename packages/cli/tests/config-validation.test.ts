@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { validateCliConfig } from '../src/config.js';
+import { describe, it, expect, vi } from 'vitest';
+import { validateCliConfig, toEvaluationConfig } from '../src/config.js';
 
 const base = { seedPrompt: 'x', testSet: [{ prompt: 'p', mode: 'llm_grade' }] } as any;
 const rejects = (label: string, cfg: any) =>
@@ -37,5 +37,30 @@ describe('config validation rejects configs that would burn a budget for nothing
     }
     expect(written.join('')).toMatch(/operators\.mutationshare/);
     expect(written.join('')).toMatch(/selection\.topk/);
+  });
+});
+
+describe('selection.diversity survives the CLI config boundary', () => {
+  it('passes a valid value through to the engine config', () => {
+    const cfg = toEvaluationConfig({ ...base, selection: { policy: 'topk', topK: 3, diversity: 0.4 } });
+    expect(cfg.selection.diversity).toBe(0.4);
+  });
+
+  it('defaults to 0 when omitted, so existing configs are unchanged', () => {
+    const cfg = toEvaluationConfig({ ...base });
+    expect(cfg.selection.diversity).toBe(0);
+  });
+
+  it('rejects an out-of-range value rather than passing nonsense to the engine', () => {
+    expect(() => validateCliConfig({ ...base, selection: { diversity: 1.5 } })).toThrow(/selection\.diversity/);
+    expect(() => validateCliConfig({ ...base, selection: { diversity: -1 } })).toThrow(/selection\.diversity/);
+  });
+
+  it('does not warn about diversity as an unknown selection field', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    validateCliConfig({ ...base, selection: { diversity: 0.5 } });
+    const unknownWarnings = warn.mock.calls.map(c => c.join(' ')).filter(m => /unknown/i.test(m) && /diversity/i.test(m));
+    expect(unknownWarnings).toEqual([]);
+    warn.mockRestore();
   });
 });
