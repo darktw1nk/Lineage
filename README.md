@@ -17,17 +17,22 @@ Lineage treats a prompt like a genome: it spawns a population of variants, score
 
 Set a run up in the desktop app, in a CLI config, or hand it to your coding agent with the bundled [skill](.claude/skills/evolving-prompts/SKILL.md).
 
-## Why this beats prompt engineering by hand
+<details>
+<summary><b>Why this beats prompt engineering by hand</b></summary>
+
+<br>
 
 **Prompting is empirical, but nobody treats it that way.** You tweak a word, eyeball three outputs, and ship. Lineage replaces that loop with selection pressure: every candidate is scored on every test, every generation, and only measured improvement survives. The lineage graph shows you exactly which edit earned its place.
 
-**It optimizes trade-offs, not just quality.** Fitness is a weighted blend of five dimensions — quality, safety, cost, latency, stability — so the questions in the header aren't marketing: they're just weight configurations. The population converges toward *your* trade-off, not toward generic eloquence.
+**It optimizes trade-offs, not just quality.** Fitness is a weighted blend of five dimensions, so "highest quality under 1¢ per call" is a weight configuration rather than a wish. The population converges toward *your* trade-off, not toward generic eloquence.
 
-**It searches model choice, not just wording.** With several models in the gene pool, the model-variation operator keeps re-dealing prompts to different models, and the per-model comparison falls out of the same run — in the demo above the champion landed on `gemini-2.5-flash-lite`, the cheapest model in the pool, because by then the prompt was carrying the work. Evolution routinely finds that a tuned prompt on a cheap model beats a mediocre prompt on an expensive one, and you get that as measured evidence instead of a hunch.
+**It searches model choice, not just wording.** With several models in the gene pool, the model-variation operator keeps re-dealing prompts to different models, and the per-model comparison falls out of the same run — in the demo above the champion landed on the cheapest model in the pool, because by then the prompt was carrying the work.
 
-**It learns from its own failures.** The meta-prompting operator reads the judge's actual feedback on failing tests ("added a preamble", "wrong date format") and performs surgical fixes — not blind rewrites. It's the closest thing to a prompt engineer in the loop, except it reads every test result, every time.
+**It learns from its own failures.** The meta-prompting operator reads the judge's actual feedback on failing tests ("added a preamble", "wrong date format") and makes targeted edits rather than blind rewrites — as the demo run did when it wrote the output format itself.
 
 **Your test set becomes an executable spec.** When a provider ships a new model version, rerun the evolution: you'll know in minutes whether your prompt regressed and what to replace it with.
+
+</details>
 
 ## The genetics
 
