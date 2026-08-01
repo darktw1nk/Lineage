@@ -106,12 +106,14 @@ Four grading modes, mixable in one test set:
 ]
 ```
 
-- **`exact_match`** scores with distance metrics — `levenshtein` (text), `json_diff` (structure-aware for JSON outputs), `numeric_abs` (numbers) — as partial credit on 0–10, or `strictZeroOnDeviation` for all-or-nothing.
-- **`llm_grade`** uses a judge model with a rubric (task completion, format compliance, hallucination avoidance, brevity) plus your `expected` as a reference answer — content *and* format consistency are graded. The judge's one-sentence justification is stored per test, per node, so you can read *why* a candidate lost points.
-- **`image`** attaches a file for vision-enabled tests — evolve prompts for chart reading, document extraction, UI screenshots.
-- **Tool-call & schema tests** — evolve prompts whose success is *"calls the right function with the right arguments"* (`mode: "tool_call"`: tools offered to the model, scored 0/2/6/10 on function + argument match) or *"conforms to this JSON Schema"* (`mode: "json_schema"`). Scored deterministically — no judge, no noise, no grading cost. The dominant prompt genre for agent builders, now evolvable.
-- **`holdout` tests are invisible to evolution** — the run ends by scoring both the seed and the champion on them, a generalization number that *can't* be overfit. Instead of flagging tests one by one, `"holdoutShare": 0.2` holds out a seeded fraction of the un-flagged tests (both forms combine; `holdoutSeed` pins the split). Two caveats the report will call out when they happen: the holdout can be **skipped** entirely (budget/time exhausted, manual stop, no champion, or an aborted judge — the report records which), and it can be **contaminated** when a holdout row itself fails to grade (those rows are marked ⚠️ and the delta is not trusted). Add `samplesPerTest` to average away judge noise, and prompts evaluate as real **system messages** by default (the way you'll actually deploy them).
-- Every meta-level prompt is overridable via `systemPrompts` — the judge's rubric, the mutation strategy catalog, the crossover and meta-prompting instructions. **The evolution itself is promptable.**
+| Mode | Scored by | Good for |
+|---|---|---|
+| **`exact_match`** | Distance metrics (`levenshtein`, `json_diff`, `numeric_abs`) as partial credit, or all-or-nothing | Extraction, formats, numbers |
+| **`llm_grade`** | A judge model with a rubric, against your `expected` — its justification is saved per test | Open-ended answers, tone, summaries |
+| **`tool_call`** | Right function + right arguments, 0/2/6/10 — no judge, no noise, no grading cost | Agent prompts |
+| **`json_schema`** | Conformance to a JSON Schema, deterministically | Structured output |
+
+Add `"image": "chart.png"` to any test for vision. Mark tests `"holdout": true` (or set `"holdoutShare": 0.2`) to keep them away from evolution — the seed and champion are scored on them at the end, and the report flags it when that number is unreliable. Every meta-level prompt — the judge's rubric, the mutation catalog, the crossover and meta-prompting instructions — is overridable via `systemPrompts`: **the evolution itself is promptable**. Full reference: [docs/cli.md](docs/cli.md).
 
 ## Dials worth knowing
 
