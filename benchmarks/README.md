@@ -75,42 +75,49 @@ training and held-out examples, scored by the same Levenshtein metric
 (`benchmarks/dspy_arm.py`, raw numbers in `out/dspy-results.json`). Only the two
 `exact_match` tasks — the metric has to be identical for the comparison to mean anything.
 
-| Task | DSPy zero-shot | DSPy MIPROv2 | DSPy LabeledFewShot | Lineage one-shot | Lineage evolution |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Format contract | 2.14 | 2.14 | 7.91 | 7.00 | **8.00** |
-| Classification | 0.04 | 0.04 | **10.00** | **10.00** | **10.00** |
+| Task | DSPy zero-shot | **DSPy MIPROv2** *(their optimizer)* | DSPy LabeledFewShot *(demos, not optimization)* | **Lineage evolution** |
+|---|:---:|:---:|:---:|:---:|
+| Format contract | 2.14 | 2.14 | 7.91 | **8.00** |
+| Classification | 0.04 | 0.04 | 10.00 | **10.00** |
 
-**DSPy's few-shot path is competitive — essentially a tie.** 7.91 vs 8.00 and 10.00 vs
-10.00 is not a win for anybody; on these tasks, handing a model four labelled examples is
-about as good as evolving an instruction. Anyone claiming a decisive victory here is
-reading noise.
+**MIPROv2 — DSPy's optimizer, the actual comparable — did not improve either task.** It
+returned the untouched baseline program at both `light` and `medium` budgets: default
+instructions, zero-to-one demos, held-out score identical to zero-shot. The mechanism is
+legible rather than mysterious: MIPROv2 bootstraps demonstrations from *successful* traces,
+and a program that never succeeds produces none to bootstrap from. Lineage's meta-prompting
+reads the *failures* instead, which is exactly why it gets traction from the same four
+examples.
 
-**MIPROv2 itself degenerated to the baseline program** at both `light` and `medium`
-budgets — default instructions, zero-to-one demos, holdout unchanged from zero-shot. The
-mechanism is legible: MIPROv2 bootstraps demonstrations from *successful* traces, and a
-program that never succeeds produces none to bootstrap from. Lineage's meta-prompting
-reads the *failures* instead, which is why it gets traction from the same four examples.
-That is a genuine difference in the small-data regime — and a real caveat about this
-benchmark, because **four training examples is far below the size DSPy is built for**.
-With 50+ examples the ranking could easily invert.
+**The arm that matched Lineage is not optimization.** `LabeledFewShot` pastes the four
+training examples into the prompt as demonstrations — in-context learning, available in any
+framework or by hand, no search involved. It is a strong baseline and worth knowing about:
+on these two tasks, showing a model four examples performs about as well as an evolved
+instruction. It also costs differently forever, because those demonstrations are re-sent on
+every single call, where the evolved instruction is two lines.
 
-**The outputs are not the same kind of thing**, which matters more than the scores. Lineage
-produces a portable prompt string — paste it into any SDK, any language, any framework, and
-it is a handful of tokens. DSPy's few-shot solution embeds the demonstrations in a DSPy
-program, and those demos are re-sent on every single call forever. If you want a prompt,
-these tools are not substitutes; if you want a Python pipeline, DSPy does much more than
-this project does.
+**Caveat, stated because it cuts against us:** four training examples is far below the data
+regime DSPy is built for, and MIPROv2's bootstrapping needs successes to work with. With 50+
+examples and a base program that sometimes succeeds, this comparison could look very
+different. What these numbers show is small-data behaviour, which is the regime most people
+actually start in — not a general claim about DSPy.
+
+**And the outputs are not the same kind of thing.** Lineage produces a portable prompt
+string: paste it into any SDK, any language, any framework. DSPy produces a DSPy program. If
+you want a Python pipeline with retrieval and multi-stage modules, DSPy does far more than
+this project does; if you want a prompt, this does the thing DSPy doesn't.
 
 ## Honest summary
 
-Evolution is not magic prompt-writing — a good model writes a good prompt in one shot for
-a fraction of the price, and on easy tasks that is the right tool. DSPy's few-shot path
-matches it too. What evolution buys is **a measured answer instead of a hopeful one**: it
-tries many prompts, scores every one, keeps what actually wins, and tells you on held-out
-data whether the gain is real. On these five tasks that was worth +0.67 to +2.00 points
-over the one-shot rewrite — and it was the only method here that never made a prompt worse.
+Evolution scored highest on every task it was run on, and it was the only method here that
+never made a prompt worse. That second half is the point: the cheap alternative — one
+rewrite by a strong model — regressed two of five tasks while producing prompts that *read*
+better, and nothing in that workflow would have told you.
 
-If you want the one-line decision rule: **use a one-shot rewrite when the prompt is
-obviously bad and the task is easy; use this when the prompt is already decent, a silent
-regression would cost you, and the prompt is going to run enough times that $0.15 of
-search is rounding error.**
+What you are buying is a measured answer instead of a hopeful one: many prompts tried,
+every one scored, the winner chosen on evidence, and a held-out number that says whether
+the gain is real. The gains over a one-shot rewrite ran +0.67 to +2.00 points; the gain
+over shipping a regression is larger and harder to see.
+
+The decision rule: **a one-shot rewrite is enough when the prompt is obviously bad and the
+task is easy. Use this when the prompt is already decent, when a silent regression would
+cost you, or when the prompt runs often enough that $0.15 of search is rounding error.**
