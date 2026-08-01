@@ -424,6 +424,8 @@ These are desktop-app-only convenience features with no impact on evolution:
 
 The CLI writes a full JSON result to stdout on completion. Structure:
 
+`paretoFront` lists the candidates nothing else in the run beat outright — at least as good on every measured dimension (quality, safety, stability higher-is-better; cost, latency lower-is-better) and strictly better on one. Fitness is a weighted sum, which cannot select points in a concave region of the trade-off surface, so this is where you see what your weighting passed over. When more than one *competitive* candidate is on the front, the report adds a "Trade-offs your weights passed over" table; when the champion dominates everything, both are silent.
+
 ```json
 {
   "runId": "uuid",

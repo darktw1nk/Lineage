@@ -777,6 +777,55 @@ export function generateReport(
     }
   }
 
+  // ---- Trade-offs the weighting passed over ----
+  // Fitness is a weighted SUM, which provably cannot select points in a
+  // concave region of the trade-off surface. Rather than pretend that is not
+  // a limitation, name the candidates nothing else beat outright: if the
+  // champion stands alone the scalarization cost nothing, and if it does not,
+  // the reader can see exactly what their weights traded away.
+  const front = (result as any).paretoFront as
+    | Array<{ nodeId: string; generation: number; metrics: Record<string, number> }>
+    | undefined;
+  if (front && front.length > 1 && result.best) {
+    // A candidate that merely costs a hair less while scoring far worse on
+    // quality is technically non-dominated and completely uninteresting — a
+    // real run put a quality-0.00 node on the front for being 3 microdollars
+    // cheaper. Half the champion's quality is the cutoff: a genuine
+    // cheap-but-decent alternative survives it, a broken one does not.
+    const championQuality = result.best!.quality ?? 0;
+    const competitive = front.filter(f =>
+      f.nodeId === result.best!.nodeId ||
+      (typeof f.metrics?.quality !== 'number') ||
+      f.metrics.quality >= championQuality * 0.5);
+    const others = competitive.filter(f => f.nodeId !== result.best!.nodeId);
+    if (others.length > 0) {
+      lines.push('## Trade-offs your weights passed over');
+      lines.push('');
+      lines.push(
+        `${competitive.length} candidates were **non-dominated** and scored competitively — nothing else in the run was at least as good ` +
+        'on every measured dimension and better on one. Fitness is a weighted sum, so only one of them ' +
+        'could win; these are the alternatives your weighting ranked below it.',
+      );
+      lines.push('');
+      lines.push('| Node | Gen | Quality | Cost | Latency |');
+      lines.push('|---|---|---|---|---|');
+      const row = (f: { nodeId: string; generation: number; metrics: Record<string, number> }, champion: boolean) => {
+        const m = f.metrics ?? {};
+        const num = (v: number | undefined, digits: number, suffix = '') =>
+          typeof v === 'number' ? `${v.toFixed(digits)}${suffix}` : '—';
+        return `| \`${f.nodeId.slice(0, 8)}\`${champion ? ' **(champion)**' : ''} | ${f.generation} | ` +
+          `${num(m.quality, 2)} | ${num(m.costUSD, 6, ' USD')} | ${num(m.latencyMs, 0, ' ms')} |`;
+      };
+      for (const f of competitive) lines.push(row(f, f.nodeId === result.best!.nodeId));
+      lines.push('');
+      lines.push(
+        '*Each row is genuinely better than the champion at something. If one of them is what you actually ' +
+        'wanted, adjust `fitness.weights` and rerun — the run already contains the candidate.*',
+      );
+      lines.push('');
+    }
+  }
+
   // ---- Analysis: Wins, Losses & Why ----
   if (seedNode?.tests && bestNode?.tests && seedNode.tests.length > 0) {
     lines.push('## Analysis');

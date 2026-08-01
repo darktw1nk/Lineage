@@ -46,6 +46,7 @@ export { withPartialCost, partialCostOf, ZERO_OPERATOR_COST } from './engine/ope
 export type { OperatorCost } from './engine/operator-cost.js';
 export type { CostEstimate } from './engine/estimate.js';
 export { selectChampion } from './engine/champion.js';
+export { paretoFront } from './engine/pareto.js';
 export { runPairwisePlayoff } from './engine/pairwise.js';
 export type { PlayoffOptions, PlayoffResult } from './engine/pairwise.js';
 export type { LoadPluginsOptions } from './pluginLoader.js';

@@ -19,7 +19,7 @@ import type {
 
 type HoldoutResult = NonNullable<EvaluationRun['holdout']>;
 import { createCliStore } from './store.js';
-import { setStore, selectChampion, readSpend, getDatabase } from '@lineage/core';
+import { setStore, selectChampion, readSpend, getDatabase, paretoFront } from '@lineage/core';
 import * as display from './display.js';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +69,14 @@ export interface EvolutionResult {
     generation: number;
   } | null;
   holdout?: HoldoutResult;
+  /**
+   * Candidates no other candidate beat outright — at least as good on every
+   * measured dimension and strictly better on one. Fitness is a weighted sum,
+   * which cannot reach concave regions of the trade-off surface, so this says
+   * what the weighting passed over. One entry means the champion dominated
+   * everything and the scalarization cost nothing.
+   */
+  paretoFront?: Array<{ nodeId: UUID; generation: number; metrics: Record<string, number> }>;
   seed?: number;
   playoffs?: Array<{ generation: number; ranking: string[]; decisive?: boolean }>;
   costBreakdown?: EvaluationRun['costBreakdown'];
@@ -166,6 +174,19 @@ function buildResult(
     })),
   }));
 
+  // Non-dominated set across every scored candidate in the run.
+  const allScored = generations.flatMap(g =>
+    g.nodes.filter(n => n.status === 'finished' && n.metrics)
+      .map(n => ({ id: n.id, generation: g.generation, metrics: n.metrics as any })));
+  const paretoNodes = paretoFront(allScored).map(n => ({
+    nodeId: n.id as UUID,
+    generation: (n as any).generation as number,
+    metrics: Object.fromEntries(
+      Object.entries(n.metrics as Record<string, unknown>)
+        .filter(([, v]) => typeof v === 'number'),
+    ) as Record<string, number>,
+  }));
+
   // Champion: same rule the engine's holdout pass uses — a playoff winner only
   // counts when its playoff covers the newest evaluated generation.
   const finishedNodes = sortedGens.flatMap(([gen, nodesMap]) =>
@@ -207,6 +228,7 @@ function buildResult(
     ...(collector.playoffs.length ? { playoffs: collector.playoffs } : {}),
     ...(collector.costBreakdown ? { costBreakdown: collector.costBreakdown } : {}),
     ...(collector.estimate ? { estimate: collector.estimate } : {}),
+    ...(paretoNodes.length ? { paretoFront: paretoNodes } : {}),
     best: best
       ? {
           prompt: best.prompt,
