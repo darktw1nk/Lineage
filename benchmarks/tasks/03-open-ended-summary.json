@@ -1,8 +1,10 @@
 {
   "name": "bench-03-open-ended-summary",
   "seedPrompt": "Summarize the meeting transcript.",
-  "models": ["gemini/gemini-2.5-flash-lite"],
-  "serviceModel": "gemini/gemini-2.5-flash",
+  "models": [
+    "gemini/gemini-2.5-flash-lite"
+  ],
+  "serviceModel": "gemini/gemini-2.5-flash-lite",
   "populationSize": 6,
   "generationSize": 6,
   "maxGenerations": 4,
@@ -10,35 +12,65 @@
   "parallelLimit": 6,
   "seed": 103,
   "samplesPerTest": 1,
-  "serviceModelMaxTokens": 4096,
+  "serviceModelMaxTokens": 2048,
   "retries": 3,
   "operators": {
     "mutationShare": 0.4,
     "crossoverShare": 0.15,
-    "metaPrompting": { "enabled": true, "share": 0.45 },
-    "paramVariation": { "enabled": false, "share": 0 },
-    "modelVariation": { "enabled": false, "share": 0 }
+    "metaPrompting": {
+      "enabled": true,
+      "share": 0.45
+    },
+    "paramVariation": {
+      "enabled": false,
+      "share": 0
+    },
+    "modelVariation": {
+      "enabled": false,
+      "share": 0
+    }
   },
-  "fitnessWeights": { "quality": 1.0 },
+  "fitnessWeights": {
+    "quality": 1.0
+  },
   "testSet": [
-    { "name": "sprint planning", "mode": "llm_grade",
+    {
+      "name": "sprint planning",
+      "mode": "llm_grade",
       "prompt": "Ana: okay so the checkout rewrite is behind, we said two weeks and it's been four. Ben: the payment provider sandbox was down for three days, that's most of it. Ana: fine but we need a date. Ben: end of next week if nothing else breaks. Ana: I'll tell the client Friday the 14th then. Also Priya, can you take over the analytics dashboard from Ben so he can focus? Priya: yes, I'll pick it up Monday.",
-      "expected": "Checkout rewrite is two weeks late, mostly due to a three-day payment sandbox outage. New target: end of next week; client will be told Friday the 14th. Priya takes over the analytics dashboard from Ben starting Monday so Ben can focus on checkout." },
-    { "name": "incident review", "mode": "llm_grade",
+      "expected": "Checkout rewrite is two weeks late, mostly due to a three-day payment sandbox outage. New target: end of next week; client will be told Friday the 14th. Priya takes over the analytics dashboard from Ben starting Monday so Ben can focus on checkout."
+    },
+    {
+      "name": "incident review",
+      "mode": "llm_grade",
       "prompt": "Sam: the outage lasted 47 minutes, started when the migration locked the orders table. Dev: we ran it during peak instead of the maintenance window. Sam: why? Dev: the runbook says maintenance window but nobody checked it. Sam: so the fix is enforcement, not the runbook. Dev: right, I'll add a CI check that blocks migrations outside the window. Sam: due by end of sprint.",
-      "expected": "A 47-minute outage was caused by a migration locking the orders table during peak traffic, run outside the documented maintenance window because nobody checked the runbook. The fix is enforcement rather than documentation: a CI check blocking out-of-window migrations, due by end of sprint." },
-    { "name": "hiring debrief", "mode": "llm_grade",
+      "expected": "A 47-minute outage was caused by a migration locking the orders table during peak traffic, run outside the documented maintenance window because nobody checked the runbook. The fix is enforcement rather than documentation: a CI check blocking out-of-window migrations, due by end of sprint."
+    },
+    {
+      "name": "hiring debrief",
+      "mode": "llm_grade",
       "prompt": "Rae: candidate was strong on system design, weaker on the SQL round. Tom: how weak? Rae: couldn't write a window function without help, but reasoned well once nudged. Tom: for a senior backend role that's borderline. Rae: agreed, but the design round was the best I've seen this quarter. Tom: let's do one more technical screen focused on data, then decide. Rae: I'll schedule it this week.",
-      "expected": "The candidate was strong in system design — the best of the quarter — but weak on SQL, needing help with window functions though reasoning well when nudged. That is borderline for a senior backend role, so the decision is deferred pending one more data-focused technical screen, which Rae will schedule this week." },
-    { "name": "roadmap sync", "mode": "llm_grade",
+      "expected": "The candidate was strong in system design \u2014 the best of the quarter \u2014 but weak on SQL, needing help with window functions though reasoning well when nudged. That is borderline for a senior backend role, so the decision is deferred pending one more data-focused technical screen, which Rae will schedule this week."
+    },
+    {
+      "name": "roadmap sync",
+      "mode": "llm_grade",
       "prompt": "Kim: we can't do both the mobile app and the API v2 this quarter. Jo: sales wants mobile, the biggest three customers want API v2. Kim: revenue attached? Jo: API v2 accounts for about 400k of renewals, mobile is prospective. Kim: then API v2 first, mobile slips to Q3. Jo: I'll rewrite the roadmap and tell sales today.",
-      "expected": "Mobile and API v2 cannot both ship this quarter. API v2 wins because it is tied to roughly $400k of renewals from the three biggest customers, while mobile revenue is only prospective. Mobile slips to Q3; Jo updates the roadmap and informs sales today." },
-
-    { "name": "budget call (unseen)", "mode": "llm_grade", "holdout": true,
+      "expected": "Mobile and API v2 cannot both ship this quarter. API v2 wins because it is tied to roughly $400k of renewals from the three biggest customers, while mobile revenue is only prospective. Mobile slips to Q3; Jo updates the roadmap and informs sales today."
+    },
+    {
+      "name": "budget call (unseen)",
+      "mode": "llm_grade",
+      "holdout": true,
       "prompt": "Nina: infra spend is up 60% quarter over quarter. Raj: most of it is the staging cluster, it runs 24/7 and nobody uses it at night. Nina: can we schedule it down? Raj: yes, off between 8pm and 7am, saves maybe 30%. Nina: do it this week. Also cancel the second monitoring vendor, we're paying twice for the same dashboards. Raj: I'll cancel at renewal on the 30th.",
-      "expected": "Infrastructure spend rose 60% quarter over quarter, driven mainly by a staging cluster running 24/7 while unused overnight. Raj will schedule it off between 8pm and 7am this week for roughly 30% savings, and will cancel the duplicate second monitoring vendor at its renewal on the 30th." },
-    { "name": "support retro (unseen)", "mode": "llm_grade", "holdout": true,
-      "prompt": "Ivo: ticket volume doubled after the release. Mel: 70% are about the new login flow. Ivo: same complaint? Mel: yes — the magic link expires in 5 minutes and people miss it. Ivo: that's a product bug, not a support problem. Mel: engineering says raising it to 30 minutes is a one-line change. Ivo: get it in the next patch and I'll write a canned response until then.",
-      "expected": "Ticket volume doubled after the release, with 70% about the new login flow: magic links expire after 5 minutes and users miss them. It is a product bug rather than a support issue, and engineering says extending to 30 minutes is a one-line change to land in the next patch. Ivo will write a canned response in the meantime." }
+      "expected": "Infrastructure spend rose 60% quarter over quarter, driven mainly by a staging cluster running 24/7 while unused overnight. Raj will schedule it off between 8pm and 7am this week for roughly 30% savings, and will cancel the duplicate second monitoring vendor at its renewal on the 30th."
+    },
+    {
+      "name": "support retro (unseen)",
+      "mode": "llm_grade",
+      "holdout": true,
+      "prompt": "Ivo: ticket volume doubled after the release. Mel: 70% are about the new login flow. Ivo: same complaint? Mel: yes \u2014 the magic link expires in 5 minutes and people miss it. Ivo: that's a product bug, not a support problem. Mel: engineering says raising it to 30 minutes is a one-line change. Ivo: get it in the next patch and I'll write a canned response until then.",
+      "expected": "Ticket volume doubled after the release, with 70% about the new login flow: magic links expire after 5 minutes and users miss them. It is a product bug rather than a support issue, and engineering says extending to 30 minutes is a one-line change to land in the next patch. Ivo will write a canned response in the meantime."
+    }
   ]
 }

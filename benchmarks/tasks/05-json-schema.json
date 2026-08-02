@@ -1,8 +1,10 @@
 {
   "name": "bench-05-json-schema",
   "seedPrompt": "Extract the details from the message.",
-  "models": ["gemini/gemini-2.5-flash-lite"],
-  "serviceModel": "gemini/gemini-2.5-flash",
+  "models": [
+    "gemini/gemini-2.5-flash-lite"
+  ],
+  "serviceModel": "gemini/gemini-2.5-flash-lite",
   "populationSize": 6,
   "generationSize": 6,
   "maxGenerations": 4,
@@ -10,52 +12,253 @@
   "parallelLimit": 6,
   "seed": 105,
   "samplesPerTest": 1,
-  "serviceModelMaxTokens": 4096,
+  "serviceModelMaxTokens": 2048,
   "retries": 3,
   "operators": {
     "mutationShare": 0.4,
     "crossoverShare": 0.15,
-    "metaPrompting": { "enabled": true, "share": 0.45 },
-    "paramVariation": { "enabled": false, "share": 0 },
-    "modelVariation": { "enabled": false, "share": 0 }
+    "metaPrompting": {
+      "enabled": true,
+      "share": 0.45
+    },
+    "paramVariation": {
+      "enabled": false,
+      "share": 0
+    },
+    "modelVariation": {
+      "enabled": false,
+      "share": 0
+    }
   },
-  "fitnessWeights": { "quality": 1.0 },
+  "fitnessWeights": {
+    "quality": 1.0
+  },
   "testSet": [
-    { "name": "flight", "mode": "json_schema",
+    {
+      "name": "flight",
+      "mode": "json_schema",
       "prompt": "Booked: Maria Chen, LH441 from Frankfurt to Boston on 12 March 2026, seat 14C, confirmation QX7T2P.",
-      "schema": { "type": "object", "required": ["passenger", "flight", "date", "confirmation"],
-        "properties": { "passenger": { "type": "string" }, "flight": { "type": "string" }, "date": { "type": "string" }, "confirmation": { "type": "string" } } },
-      "expected": "{\"passenger\":\"Maria Chen\",\"flight\":\"LH441\",\"date\":\"2026-03-12\",\"confirmation\":\"QX7T2P\"}" },
-    { "name": "hotel", "mode": "json_schema",
+      "schema": {
+        "type": "object",
+        "required": [
+          "passenger",
+          "flight",
+          "date",
+          "confirmation"
+        ],
+        "properties": {
+          "passenger": {
+            "type": "string"
+          },
+          "flight": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "confirmation": {
+            "type": "string"
+          }
+        }
+      },
+      "expected": "{\"passenger\":\"Maria Chen\",\"flight\":\"LH441\",\"date\":\"2026-03-12\",\"confirmation\":\"QX7T2P\"}"
+    },
+    {
+      "name": "hotel",
+      "mode": "json_schema",
       "prompt": "Reservation for Omar Haddad at the Grand Fjord, checking in 4 July 2026 for 3 nights, ref GF-99120.",
-      "schema": { "type": "object", "required": ["guest", "hotel", "check_in", "nights", "reference"],
-        "properties": { "guest": { "type": "string" }, "hotel": { "type": "string" }, "check_in": { "type": "string" }, "nights": { "type": "number" }, "reference": { "type": "string" } } },
-      "expected": "{\"guest\":\"Omar Haddad\",\"hotel\":\"Grand Fjord\",\"check_in\":\"2026-07-04\",\"nights\":3,\"reference\":\"GF-99120\"}" },
-    { "name": "invoice", "mode": "json_schema",
+      "schema": {
+        "type": "object",
+        "required": [
+          "guest",
+          "hotel",
+          "check_in",
+          "nights",
+          "reference"
+        ],
+        "properties": {
+          "guest": {
+            "type": "string"
+          },
+          "hotel": {
+            "type": "string"
+          },
+          "check_in": {
+            "type": "string"
+          },
+          "nights": {
+            "type": "number"
+          },
+          "reference": {
+            "type": "string"
+          }
+        }
+      },
+      "expected": "{\"guest\":\"Omar Haddad\",\"hotel\":\"Grand Fjord\",\"check_in\":\"2026-07-04\",\"nights\":3,\"reference\":\"GF-99120\"}"
+    },
+    {
+      "name": "invoice",
+      "mode": "json_schema",
       "prompt": "Invoice 2291 from Northwind Supplies, dated 9 January 2026, total 1,450.00 EUR, due in 30 days.",
-      "schema": { "type": "object", "required": ["invoice_number", "vendor", "date", "total", "currency"],
-        "properties": { "invoice_number": { "type": "string" }, "vendor": { "type": "string" }, "date": { "type": "string" }, "total": { "type": "number" }, "currency": { "type": "string" } } },
-      "expected": "{\"invoice_number\":\"2291\",\"vendor\":\"Northwind Supplies\",\"date\":\"2026-01-09\",\"total\":1450,\"currency\":\"EUR\"}" },
-    { "name": "shipment", "mode": "json_schema",
+      "schema": {
+        "type": "object",
+        "required": [
+          "invoice_number",
+          "vendor",
+          "date",
+          "total",
+          "currency"
+        ],
+        "properties": {
+          "invoice_number": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "total": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string"
+          }
+        }
+      },
+      "expected": "{\"invoice_number\":\"2291\",\"vendor\":\"Northwind Supplies\",\"date\":\"2026-01-09\",\"total\":1450,\"currency\":\"EUR\"}"
+    },
+    {
+      "name": "shipment",
+      "mode": "json_schema",
       "prompt": "Parcel 7Z991AA left Rotterdam on 22 February 2026, expected in Oslo 26 February 2026, carrier DPD.",
-      "schema": { "type": "object", "required": ["tracking", "origin", "destination", "carrier", "eta"],
-        "properties": { "tracking": { "type": "string" }, "origin": { "type": "string" }, "destination": { "type": "string" }, "carrier": { "type": "string" }, "eta": { "type": "string" } } },
-      "expected": "{\"tracking\":\"7Z991AA\",\"origin\":\"Rotterdam\",\"destination\":\"Oslo\",\"carrier\":\"DPD\",\"eta\":\"2026-02-26\"}" },
-
-    { "name": "flight (unseen)", "mode": "json_schema", "holdout": true,
+      "schema": {
+        "type": "object",
+        "required": [
+          "tracking",
+          "origin",
+          "destination",
+          "carrier",
+          "eta"
+        ],
+        "properties": {
+          "tracking": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "carrier": {
+            "type": "string"
+          },
+          "eta": {
+            "type": "string"
+          }
+        }
+      },
+      "expected": "{\"tracking\":\"7Z991AA\",\"origin\":\"Rotterdam\",\"destination\":\"Oslo\",\"carrier\":\"DPD\",\"eta\":\"2026-02-26\"}"
+    },
+    {
+      "name": "flight (unseen)",
+      "mode": "json_schema",
+      "holdout": true,
       "prompt": "Confirmed for Priya Raman: BA286 departing San Francisco to London on 5 May 2026, seat 22A, reference LM4KD9.",
-      "schema": { "type": "object", "required": ["passenger", "flight", "date", "confirmation"],
-        "properties": { "passenger": { "type": "string" }, "flight": { "type": "string" }, "date": { "type": "string" }, "confirmation": { "type": "string" } } },
-      "expected": "{\"passenger\":\"Priya Raman\",\"flight\":\"BA286\",\"date\":\"2026-05-05\",\"confirmation\":\"LM4KD9\"}" },
-    { "name": "invoice (unseen)", "mode": "json_schema", "holdout": true,
+      "schema": {
+        "type": "object",
+        "required": [
+          "passenger",
+          "flight",
+          "date",
+          "confirmation"
+        ],
+        "properties": {
+          "passenger": {
+            "type": "string"
+          },
+          "flight": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "confirmation": {
+            "type": "string"
+          }
+        }
+      },
+      "expected": "{\"passenger\":\"Priya Raman\",\"flight\":\"BA286\",\"date\":\"2026-05-05\",\"confirmation\":\"LM4KD9\"}"
+    },
+    {
+      "name": "invoice (unseen)",
+      "mode": "json_schema",
+      "holdout": true,
       "prompt": "Please settle invoice 8814 from Baltic Timber, issued 17 April 2026, amount 9,300.50 SEK, net 14 days.",
-      "schema": { "type": "object", "required": ["invoice_number", "vendor", "date", "total", "currency"],
-        "properties": { "invoice_number": { "type": "string" }, "vendor": { "type": "string" }, "date": { "type": "string" }, "total": { "type": "number" }, "currency": { "type": "string" } } },
-      "expected": "{\"invoice_number\":\"8814\",\"vendor\":\"Baltic Timber\",\"date\":\"2026-04-17\",\"total\":9300.5,\"currency\":\"SEK\"}" },
-    { "name": "shipment (unseen)", "mode": "json_schema", "holdout": true,
+      "schema": {
+        "type": "object",
+        "required": [
+          "invoice_number",
+          "vendor",
+          "date",
+          "total",
+          "currency"
+        ],
+        "properties": {
+          "invoice_number": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "total": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string"
+          }
+        }
+      },
+      "expected": "{\"invoice_number\":\"8814\",\"vendor\":\"Baltic Timber\",\"date\":\"2026-04-17\",\"total\":9300.5,\"currency\":\"SEK\"}"
+    },
+    {
+      "name": "shipment (unseen)",
+      "mode": "json_schema",
+      "holdout": true,
       "prompt": "Tracking 4KP20XZ dispatched from Lisbon 30 September 2026, arriving Dublin 3 October 2026 via GLS.",
-      "schema": { "type": "object", "required": ["tracking", "origin", "destination", "carrier", "eta"],
-        "properties": { "tracking": { "type": "string" }, "origin": { "type": "string" }, "destination": { "type": "string" }, "carrier": { "type": "string" }, "eta": { "type": "string" } } },
-      "expected": "{\"tracking\":\"4KP20XZ\",\"origin\":\"Lisbon\",\"destination\":\"Dublin\",\"carrier\":\"GLS\",\"eta\":\"2026-10-03\"}" }
+      "schema": {
+        "type": "object",
+        "required": [
+          "tracking",
+          "origin",
+          "destination",
+          "carrier",
+          "eta"
+        ],
+        "properties": {
+          "tracking": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "carrier": {
+            "type": "string"
+          },
+          "eta": {
+            "type": "string"
+          }
+        }
+      },
+      "expected": "{\"tracking\":\"4KP20XZ\",\"origin\":\"Lisbon\",\"destination\":\"Dublin\",\"carrier\":\"GLS\",\"eta\":\"2026-10-03\"}"
+    }
   ]
 }

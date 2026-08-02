@@ -189,8 +189,8 @@ Add `"image": "chart.png"` to any test for vision. Mark tests `"holdout": true` 
 |---|---|
 | `selection.policy: "topp"` + `topP: 0.8` | Probabilistic parent sampling instead of hard Top-K — more diversity, less greed |
 | `eliteShare` | How much of each generation is guaranteed survivors |
-| `selection.diversity` | 0–1, default 0. Discounts a parent for resembling parents already picked, so a converging population doesn't spend every slot on near-copies of one prompt. The fittest candidate is always kept first |
-| `operators.adaptivity` | 0–1, default 0. Lets measured results steer the breeding mix: operators whose children actually score better earn more of each later generation |
+| `selection.diversity` | 0–1, default 0. Discounts a parent for resembling parents already picked, so a converging population doesn't spend every slot on near-copies of one prompt. The fittest candidate is always kept first Measured on our benchmark: this did **not** help (see `benchmarks/ABLATION.md`); 0 is the measured-best default. |
+| `operators.adaptivity` | 0–1, default 0. Lets measured results steer the breeding mix: operators whose children actually score better earn more of each later generation Measured on our benchmark: within noise of zero, not shown to help (see `benchmarks/ABLATION.md`). |
 | `operators.*.share` | The breeding mix — crank `metaPrompting` when you have failing tests to learn from, `modelVariation` when hunting cheaper models |
 | `paramVariation.temperature.{min,max}` | The temperature range evolution may explore |
 | `pairwise.enabled` | Head-to-head playoff among the top contenders — the champion is picked by "which output is better?", not by a noisy 9.87-vs-9.89. Judge-limited: pair it with a strong `serviceModel` |

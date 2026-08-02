@@ -52,6 +52,11 @@ const SHAPE = { maxGenerations: 8, populationSize: 10, generationSize: 10, topK:
 const EXCLUDED = {
   '02-classification': 'saturates at 10.00 — cannot discriminate',
   '05-json-schema': 'documented bad test (schema never shown to the model)',
+  // Measured, not assumed: all 12 runs of this task returned holdout 7.33 —
+  // identical to the seed prompt's own score — while training fitness reached
+  // 10/10. The holdout cannot move, so every arm ties, and including it drags
+  // each feature's mean toward zero and makes it look less harmful than it is.
+  '04-tool-call': 'every arm scored an identical holdout 7.33 (= the seed prompt) across 12 runs — cannot discriminate',
 };
 const TASKS = fs.readdirSync(path.join(ROOT, 'benchmarks', 'tasks')).sort()
   .filter(f => f.endsWith('.json'))
@@ -177,6 +182,28 @@ L.push('');
 const totalUsd = rows.reduce((a, r) => a + ARMS.reduce((s, x) => s + (r.cells[x.key]?.usd ?? 0), 0), 0);
 L.push(`${rows.length} task/seed cells × ${ARMS.length} arms = ${rows.length * ARMS.length} runs, $${totalUsd.toFixed(2)} total.`);
 L.push('');
+L.push('## What the numbers mean', '');
+L.push('**None of the four earned its keep.** Every feature has a negative mean on held-out');
+L.push('tests, and `restart` lost every single cell it was measured in. This is not a case of a');
+L.push('mechanism failing to engage — `firing.mjs` confirms each arm fired its own mechanism and');
+L.push('only its own, tens of times per arm, while the baseline fired none.', '');
+L.push('**`novelty` is actively dangerous, and the worst cell shows why.** On');
+L.push('`03-open-ended-summary` seed 402 it scored 9.00 on training and **1.50 on holdout**');
+L.push('against a baseline of 8.00 — worse than the seed prompt it started from. Its champion:', '');
+L.push('> `Summarize the meeting transcript.` / `The candidate was strong in system design, the`');
+L.push('> `best of the quarter, but weak on SQL, needing help with window functions...`', '');
+L.push('That is a training case’s ANSWER pasted into the prompt. Novelty rewards prompts unlike');
+L.push('anything already evaluated, and memorised training content is maximally unlike a normal');
+L.push('instruction — so the mechanism selects for precisely the prompts that cannot generalise.');
+L.push('The holdout caught it, which is the system working; enabling novelty is what created it.', '');
+L.push('**Recommendation:** leave all four off, which is already the default. `novelty` should');
+L.push('carry an explicit warning rather than sit in the docs as a neutral tuning knob.');
+L.push('`adaptivity` (-0.29) is within noise of zero and is the only one worth re-testing at a');
+L.push('gentler setting; the others were measured at their intended strengths and lost.', '');
+L.push('**Caveat, stated so the result is not oversold:** 4 cells on 2 tasks with one service');
+L.push('model. That is enough to refute "these help" — nothing here beat baseline — but not');
+L.push('enough to prove they always hurt. Two of five benchmark tasks could not discriminate at');
+L.push('all, which is itself a gap in the benchmark suite.', '');
 L.push('Run `node benchmarks/firing.mjs` for evidence of whether each mechanism actually engaged —');
 L.push('a feature that never fired can be neither credited nor blamed.');
 fs.writeFileSync(path.join(ROOT, 'benchmarks', 'ABLATION.md'), L.join('\n'));

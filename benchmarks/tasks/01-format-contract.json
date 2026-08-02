@@ -1,8 +1,10 @@
 {
   "name": "bench-01-format-contract",
   "seedPrompt": "Summarize the customer ticket.",
-  "models": ["gemini/gemini-2.5-flash-lite"],
-  "serviceModel": "gemini/gemini-2.5-flash",
+  "models": [
+    "gemini/gemini-2.5-flash-lite"
+  ],
+  "serviceModel": "gemini/gemini-2.5-flash-lite",
   "populationSize": 6,
   "generationSize": 6,
   "maxGenerations": 4,
@@ -10,45 +12,100 @@
   "parallelLimit": 6,
   "seed": 101,
   "samplesPerTest": 1,
-  "serviceModelMaxTokens": 4096,
+  "serviceModelMaxTokens": 2048,
   "retries": 3,
   "operators": {
     "mutationShare": 0.4,
     "crossoverShare": 0.15,
-    "metaPrompting": { "enabled": true, "share": 0.45 },
-    "paramVariation": { "enabled": false, "share": 0 },
-    "modelVariation": { "enabled": false, "share": 0 }
+    "metaPrompting": {
+      "enabled": true,
+      "share": 0.45
+    },
+    "paramVariation": {
+      "enabled": false,
+      "share": 0
+    },
+    "modelVariation": {
+      "enabled": false,
+      "share": 0
+    }
   },
-  "fitnessWeights": { "quality": 1.0 },
+  "fitnessWeights": {
+    "quality": 1.0
+  },
   "testSet": [
-    { "name": "cracked jar", "mode": "exact_match",
-      "prompt": "Hi, I ordered the strawberry preserve twin pack last week (order #4821) and one jar arrived cracked, sticky mess everywhere. I don't want my money back, just send me a new jar please. — Dana",
+    {
+      "name": "cracked jar",
+      "mode": "exact_match",
+      "prompt": "Hi, I ordered the strawberry preserve twin pack last week (order #4821) and one jar arrived cracked, sticky mess everywhere. I don't want my money back, just send me a new jar please. \u2014 Dana",
       "expected": "order=4821 | issue=cracked jar | request=replacement",
-      "grading": { "distanceMetric": "levenshtein", "strictZeroOnDeviation": false } },
-    { "name": "double charge", "mode": "exact_match",
-      "prompt": "I was charged twice for order #9917 — my card shows $39.98 but the order total was $19.99. Please sort this out, this is really frustrating. — Sam",
+      "grading": {
+        "distanceMetric": "levenshtein",
+        "strictZeroOnDeviation": false
+      }
+    },
+    {
+      "name": "double charge",
+      "mode": "exact_match",
+      "prompt": "I was charged twice for order #9917 \u2014 my card shows $39.98 but the order total was $19.99. Please sort this out, this is really frustrating. \u2014 Sam",
       "expected": "order=9917 | issue=duplicate charge | request=refund",
-      "grading": { "distanceMetric": "levenshtein", "strictZeroOnDeviation": false } },
-    { "name": "wrong address", "mode": "exact_match",
-      "prompt": "Hey, I just realized I put my OLD address on order #5510. Can you change it to 42 Birch Lane before it ships? It hasn't shipped yet according to the tracking. — Priya",
+      "grading": {
+        "distanceMetric": "levenshtein",
+        "strictZeroOnDeviation": false
+      }
+    },
+    {
+      "name": "wrong address",
+      "mode": "exact_match",
+      "prompt": "Hey, I just realized I put my OLD address on order #5510. Can you change it to 42 Birch Lane before it ships? It hasn't shipped yet according to the tracking. \u2014 Priya",
       "expected": "order=5510 | issue=wrong address | request=address change",
-      "grading": { "distanceMetric": "levenshtein", "strictZeroOnDeviation": false } },
-    { "name": "late delivery", "mode": "exact_match",
-      "prompt": "Order #2287 was supposed to arrive Tuesday and it is now Friday with no update at all. Where is it? I need it before the weekend. — Marcus",
+      "grading": {
+        "distanceMetric": "levenshtein",
+        "strictZeroOnDeviation": false
+      }
+    },
+    {
+      "name": "late delivery",
+      "mode": "exact_match",
+      "prompt": "Order #2287 was supposed to arrive Tuesday and it is now Friday with no update at all. Where is it? I need it before the weekend. \u2014 Marcus",
       "expected": "order=2287 | issue=late delivery | request=status update",
-      "grading": { "distanceMetric": "levenshtein", "strictZeroOnDeviation": false } },
-
-    { "name": "missing item (unseen)", "mode": "exact_match", "holdout": true,
-      "prompt": "Hello, my order #3302 arrived today but the lavender candle is missing from the box — everything else is there. Could you ship the candle? — Lee",
+      "grading": {
+        "distanceMetric": "levenshtein",
+        "strictZeroOnDeviation": false
+      }
+    },
+    {
+      "name": "missing item (unseen)",
+      "mode": "exact_match",
+      "holdout": true,
+      "prompt": "Hello, my order #3302 arrived today but the lavender candle is missing from the box \u2014 everything else is there. Could you ship the candle? \u2014 Lee",
       "expected": "order=3302 | issue=missing item | request=ship missing item",
-      "grading": { "distanceMetric": "levenshtein", "strictZeroOnDeviation": false } },
-    { "name": "promo code (unseen)", "mode": "exact_match", "holdout": true,
-      "prompt": "My promo code SPRING10 wasn't applied on order #7145 and I paid full price. Can you credit me the difference? — Robin",
+      "grading": {
+        "distanceMetric": "levenshtein",
+        "strictZeroOnDeviation": false
+      }
+    },
+    {
+      "name": "promo code (unseen)",
+      "mode": "exact_match",
+      "holdout": true,
+      "prompt": "My promo code SPRING10 wasn't applied on order #7145 and I paid full price. Can you credit me the difference? \u2014 Robin",
       "expected": "order=7145 | issue=promo not applied | request=credit difference",
-      "grading": { "distanceMetric": "levenshtein", "strictZeroOnDeviation": false } },
-    { "name": "damaged box (unseen)", "mode": "exact_match", "holdout": true,
-      "prompt": "The outer box for order #6690 was completely crushed in transit. The mug inside seems fine but I'd like it noted in case it cracks later. — Tomas",
+      "grading": {
+        "distanceMetric": "levenshtein",
+        "strictZeroOnDeviation": false
+      }
+    },
+    {
+      "name": "damaged box (unseen)",
+      "mode": "exact_match",
+      "holdout": true,
+      "prompt": "The outer box for order #6690 was completely crushed in transit. The mug inside seems fine but I'd like it noted in case it cracks later. \u2014 Tomas",
       "expected": "order=6690 | issue=damaged packaging | request=note on file",
-      "grading": { "distanceMetric": "levenshtein", "strictZeroOnDeviation": false } }
+      "grading": {
+        "distanceMetric": "levenshtein",
+        "strictZeroOnDeviation": false
+      }
+    }
   ]
 }
