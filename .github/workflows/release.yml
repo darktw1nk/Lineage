@@ -39,6 +39,27 @@ jobs:
 
       - run: npm ci
 
+      # electron-builder shells out to a bundled 7-Zip. On the Linux and macOS
+      # runners `npm ci` left node_modules/7zip-bin/<platform>/ empty and the
+      # build died with `ENOENT: chmod .../7za` — the binaries are present after
+      # a plain install, so the lockfile-strict path is dropping them. Repair it
+      # here rather than abandoning `npm ci` for the whole job, and print the
+      # directory so a future failure names itself instead of needing a rerun.
+      - name: Ensure electron-builder's 7-Zip binary is present
+        shell: bash
+        run: |
+          probe() { node -e "
+            const {path7za} = require('7zip-bin');
+            const fs = require('fs');
+            console.log('7za path:', path7za, 'exists:', fs.existsSync(path7za));
+            process.exit(fs.existsSync(path7za) ? 0 : 1);
+          "; }
+          if ! probe; then
+            echo "::warning::7zip-bin binary missing after npm ci — reinstalling it"
+            npm install 7zip-bin --no-save --force
+            probe
+          fi
+
       # Never ship an installer built from code that does not typecheck or
       # pass its tests. CI runs these on push too, but a tag can point at any
       # commit, including one that never went through a push build.
