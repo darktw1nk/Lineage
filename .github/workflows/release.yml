@@ -161,6 +161,24 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      # The release must exist before assets can be attached. v1.0.1 only worked
+      # because electron-builder happened to leave a draft behind — an accident,
+      # not a contract. Create it here if it is missing so a tag push is
+      # sufficient on its own.
+      - name: Ensure the release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "creating release ${GITHUB_REF_NAME}"
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "Lineage ${GITHUB_REF_NAME#v}" \
+              --generate-notes
+          else
+            echo "release ${GITHUB_REF_NAME} already exists"
+          fi
+
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
