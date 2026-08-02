@@ -92,6 +92,18 @@ lineage --estimate --config evolve.json   # what it will cost, before you spend 
 lineage --config evolve.json --output results.json
 ```
 
+**Using a coding agent?** Install the skill once and let it drive:
+
+```bash
+lineage --install-skill              # ~/.claude/skills — or: --install-skill .claude/skills
+```
+
+Then just ask, in Claude Code, Codex, Cursor or anything else that reads `AGENTS.md`:
+
+> *Use the evolving-prompts skill to improve the system prompt in `src/prompt.ts` — my test cases are in `tests/fixtures/`. Keep it under $2.*
+
+The agent authors the config, picks catalogued models, runs the evolution, and reads the result back. The skill teaches it the parts that are easy to get wrong: meta-prompting is the only failure-aware operator, an uncatalogued model is priced at $0 so budgets can't trip, and the **holdout** score is the one worth reporting — not the training number.
+
 **Desktop app** — [download an installer](https://github.com/darktw1nk/Lineage/releases/latest) for Windows, macOS or Linux. Installers are unsigned, so the first run needs one extra click; every release ships checksums and verifiable build provenance ([details](docs/signing.md)).
 
 <details>

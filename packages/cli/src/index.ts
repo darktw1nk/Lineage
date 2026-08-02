@@ -107,6 +107,7 @@ USAGE:
 
 OPTIONS:
   --init [path]                Write a starter config (default: evolution.json) and exit
+  --install-skill [dir]        Install the evolving-prompts agent skill (default: ~/.claude/skills)
   --config <path>              Run evolution from a JSON config file
   --output <path>              Write JSON results to file (default: stdout)
   --db <path>                  Use a specific database file
@@ -175,6 +176,8 @@ function parseArgs(argv: string[]): {
   archiveRuns?: string;
   pruneRuns?: number;
   init?: string;
+  installSkill?: string | true;
+  force?: boolean;
 } {
   const args = argv.slice(2);
   const result = {
@@ -193,6 +196,8 @@ function parseArgs(argv: string[]): {
     archiveRuns: undefined as string | undefined,
     pruneRuns: undefined as number | undefined,
     init: undefined as string | undefined,
+    installSkill: undefined as string | true | undefined,
+    force: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -253,6 +258,14 @@ function parseArgs(argv: string[]): {
       }
       case '--estimate':
         result.estimate = true;
+        break;
+      case '--install-skill':
+        // Optional directory, exactly like --init: a bare --install-skill must
+        // not swallow the next flag as its value.
+        result.installSkill = (args[i + 1] && !args[i + 1].startsWith('-')) ? args[++i] : true;
+        break;
+      case '--force':
+        result.force = true;
         break;
       case '--init':
         // Optional filename: `--init` alone writes evolution.json. A bare
@@ -832,7 +845,8 @@ async function main(): Promise<void> {
   // good, so `--config cfg.json --prune-runs 99` exited 0 having never
   // evolved anything and never said why.
   const utilityCommand =
-    args.init ? '--init'
+    args.installSkill ? '--install-skill'
+    : args.init ? '--init'
     : args.setKey ? '--set-key'
     : args.syncModels ? '--sync-models'
     : args.listModels ? '--list-models'
@@ -851,6 +865,27 @@ async function main(): Promise<void> {
   }
 
   // Before everything else: --init needs no database, no keys and no config.
+  if (args.installSkill) {
+    const { installSkill } = await import('./installSkill.js');
+    const dir = typeof args.installSkill === 'string' ? args.installSkill : undefined;
+    try {
+      const res = installSkill(dir, { force: args.force });
+      if (res.skipped) {
+        console.error(`A skill already exists at ${res.path} — left unchanged.`);
+        console.error('Pass --force to replace it.');
+      } else {
+        console.error(`Installed the evolving-prompts skill to ${res.path}`);
+        console.error('');
+        console.error('Your coding agent can now be told: "use the evolving-prompts skill to improve this prompt".');
+        if (!dir) console.error(`(Project-scoped instead? lineage --install-skill .claude/skills)`);
+      }
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+    return;
+  }
+
   if (args.init) {
     handleInit(args.init);
     return;

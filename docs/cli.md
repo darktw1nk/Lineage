@@ -26,6 +26,8 @@ npm run cli -- --help                       # Show help
 
 Starting from nothing: `--init` writes a runnable config (four tests, a $1 budget, a 25% holdout, and models that are all in the fresh-install price catalog) so `--estimate` on it quotes real numbers. It refuses to overwrite an existing file.
 
+Driving Lineage from a coding agent: `--install-skill` writes the `evolving-prompts` skill to `~/.claude/skills` (or a directory you name, e.g. `.claude/skills` to scope it to one project). The skill is what teaches an agent the parts that are easy to get wrong — that meta-prompting is the only failure-aware operator, that an uncatalogued model is priced at $0 so `budget` can never trip, and that the holdout score is the one worth reporting. It refuses to overwrite an existing skill unless `--force` is passed, so local edits survive an upgrade.
+
 Any command that opens the database prints `Database: <path>` to stderr (`--help`, `--init` and `--set-key` do not open one). Without `--db` the CLI shares the **desktop app's** database when its data directory exists, and uses `~/.lineage/evolution.db` otherwise — so it is worth reading that line before wondering where a run went.
 
 Progress and all engine logs go to stderr. **stdout carries the JSON result for `--config` runs and for `--estimate`**; `--help` and `--list-models` print human-readable text there instead, and `--init`, `--set-key`, `--archive-runs` and `--prune-runs` write only to stderr. Every error path exits non-zero with an empty stdout. **When capturing stdout, add `--silent` to `npm run`** — without it npm prints its own two-line banner to stdout ahead of the payload, and `JSON.parse` fails on it:

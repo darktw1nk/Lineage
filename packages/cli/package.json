@@ -9,12 +9,14 @@
   },
   "files": [
     "dist",
+    "skill",
     "README.md"
   ],
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "prepack": "node scripts/copy-skill.mjs"
   },
   "engines": {
     "node": ">=20"
