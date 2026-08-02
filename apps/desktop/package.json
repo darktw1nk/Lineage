@@ -112,7 +112,8 @@
           ]
         }
       ],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icons/512x512.png"
     },
     "linux": {
       "target": [
