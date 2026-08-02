@@ -35,70 +35,68 @@
   },
   "testSet": [
     {
-      "name": "billing",
+      "name": "plain billing",
       "mode": "exact_match",
       "prompt": "I was charged twice for my subscription this month. Can you refund the extra one?",
+      "expected": "BILLING"
+    },
+    {
+      "name": "plain shipping",
+      "mode": "exact_match",
+      "prompt": "My package says delivered but there is nothing at my door.",
+      "expected": "SHIPPING"
+    },
+    {
+      "name": "plain technical",
+      "mode": "exact_match",
+      "prompt": "The app crashes every time I open the settings screen on Android 14.",
+      "expected": "TECHNICAL"
+    },
+    {
+      "name": "lockout from failed payment",
+      "mode": "exact_match",
+      "prompt": "I can't log into my account at all anymore. It started right after a payment of mine failed last week.",
+      "expected": "BILLING"
+    },
+    {
+      "name": "crash from expired plan",
+      "mode": "exact_match",
+      "prompt": "The desktop app closes instantly on launch. Support said my licence lapsed when the card expired.",
+      "expected": "BILLING"
+    },
+    {
+      "name": "refund request for lost parcel",
+      "mode": "exact_match",
+      "prompt": "I want my money back. The courier lost the parcel and it has been three weeks.",
+      "expected": "SHIPPING"
+    },
+    {
+      "name": "upgrade dispute (unseen)",
+      "mode": "exact_match",
+      "prompt": "You upgraded me to the annual plan without asking. I want to go back to monthly.",
       "expected": "BILLING",
-      "grading": {
-        "strictZeroOnDeviation": true
-      }
+      "holdout": true
     },
     {
-      "name": "shipping",
+      "name": "stalled tracking (unseen)",
       "mode": "exact_match",
-      "prompt": "My package says delivered but there is nothing at my door. Tracking number is 9J882.",
+      "prompt": "Order went out three weeks ago and the tracking has not moved since it left the depot.",
       "expected": "SHIPPING",
-      "grading": {
-        "strictZeroOnDeviation": true
-      }
+      "holdout": true
     },
     {
-      "name": "technical",
+      "name": "export bug (unseen)",
       "mode": "exact_match",
-      "prompt": "The app crashes every time I open the settings screen on Android 14. Reinstalling did not help.",
+      "prompt": "CSV export produces an empty file when the report has more than 5000 rows. Smaller ones are fine.",
       "expected": "TECHNICAL",
-      "grading": {
-        "strictZeroOnDeviation": true
-      }
+      "holdout": true
     },
     {
-      "name": "account",
+      "name": "access blocked by billing (unseen)",
       "mode": "exact_match",
-      "prompt": "I can't log in anymore \u2014 the reset email never arrives, and I've checked spam. Email is lee@example.com.",
-      "expected": "ACCOUNT",
-      "grading": {
-        "strictZeroOnDeviation": true
-      }
-    },
-    {
-      "name": "billing (unseen)",
-      "mode": "exact_match",
-      "holdout": true,
-      "prompt": "You upgraded me to the annual plan without asking. I want to go back to monthly and get the difference back.",
+      "prompt": "My whole team is locked out this morning. Our invoice bounced on Friday.",
       "expected": "BILLING",
-      "grading": {
-        "strictZeroOnDeviation": true
-      }
-    },
-    {
-      "name": "shipping (unseen)",
-      "mode": "exact_match",
-      "holdout": true,
-      "prompt": "Order went out three weeks ago and the tracking has not moved since it left the warehouse.",
-      "expected": "SHIPPING",
-      "grading": {
-        "strictZeroOnDeviation": true
-      }
-    },
-    {
-      "name": "technical (unseen)",
-      "mode": "exact_match",
-      "holdout": true,
-      "prompt": "CSV export produces an empty file when the report has more than 5000 rows. Smaller reports are fine.",
-      "expected": "TECHNICAL",
-      "grading": {
-        "strictZeroOnDeviation": true
-      }
+      "holdout": true
     }
   ]
 }

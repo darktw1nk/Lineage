@@ -75,3 +75,20 @@ all, which is itself a gap in the benchmark suite.
 
 Run `node benchmarks/firing.mjs` for evidence of whether each mechanism actually engaged —
 a feature that never fired can be neither credited nor blamed.
+
+---
+
+## Stale as of the task fixes
+
+These results were measured on two tasks (`01`, `03`) with `gemini-2.5-flash-lite`.
+Since then the other three benchmark tasks were repaired and re-enabled:
+
+| task | was | now |
+|---|---|---|
+| `02-classification` | seed already scored 10/10 — no gradient | 0.50 → 10.00, holdout 0 → 10 |
+| `04-tool-call` | seed already scored 10/10 — no gradient | 5.67 → 10.00, holdout 4 → 10 |
+| `05-json-schema` | engine never sent the schema to the model | 4.00 → 10.00, holdout 6 → 10 |
+
+Re-running `node benchmarks/ablation.mjs` now covers all five tasks (5 × 2 seeds ×
+6 arms = 60 runs). The per-feature verdict above stands for the two tasks it was
+measured on; it has not been re-tested against the three repaired ones.

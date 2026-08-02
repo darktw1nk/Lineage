@@ -35,9 +35,9 @@
   },
   "testSet": [
     {
-      "name": "refund",
+      "name": "refund (plain)",
       "mode": "tool_call",
-      "prompt": "Customer says order 4821 arrived broken and wants their money back.",
+      "prompt": "Order 4821 arrived broken and the customer wants their money back.",
       "tools": [
         {
           "name": "issue_refund",
@@ -93,9 +93,9 @@
       }
     },
     {
-      "name": "replacement",
+      "name": "replacement (plain)",
       "mode": "tool_call",
-      "prompt": "Order 5510 came with a cracked lid. The customer explicitly does not want a refund, just a new one.",
+      "prompt": "Order 5510 came with a cracked lid. The customer explicitly does not want a refund, just a working one.",
       "tools": [
         {
           "name": "issue_refund",
@@ -151,9 +151,9 @@
       }
     },
     {
-      "name": "escalate",
+      "name": "safety asks refund",
       "mode": "tool_call",
-      "prompt": "Customer is threatening legal action over a data breach notice they received. Order 7712.",
+      "prompt": "Order 7712 overheated and burned my hand. Just refund me and I'll drop it.",
       "tools": [
         {
           "name": "issue_refund",
@@ -206,9 +206,119 @@
       }
     },
     {
-      "name": "refund again",
+      "name": "safety asks replacement",
       "mode": "tool_call",
-      "prompt": "Order 9917 was charged twice. Customer wants the duplicate charge returned.",
+      "prompt": "The charger from order 6104 melted the socket. Send me a new one please.",
+      "tools": [
+        {
+          "name": "issue_refund",
+          "description": "Refund an order",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          }
+        },
+        {
+          "name": "ship_replacement",
+          "description": "Ship a replacement",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          }
+        },
+        {
+          "name": "escalate_to_human",
+          "description": "Escalate",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          }
+        }
+      ],
+      "expectedTool": {
+        "name": "escalate_to_human"
+      }
+    },
+    {
+      "name": "legal",
+      "mode": "tool_call",
+      "prompt": "Order 9917: your notice says my data was breached. My lawyer is drafting a complaint.",
+      "tools": [
+        {
+          "name": "issue_refund",
+          "description": "Refund an order",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          }
+        },
+        {
+          "name": "ship_replacement",
+          "description": "Ship a replacement",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          }
+        },
+        {
+          "name": "escalate_to_human",
+          "description": "Escalate",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          }
+        }
+      ],
+      "expectedTool": {
+        "name": "escalate_to_human"
+      }
+    },
+    {
+      "name": "refund (duplicate charge)",
+      "mode": "tool_call",
+      "prompt": "Order 3145 was charged twice. Return the duplicate charge.",
       "tools": [
         {
           "name": "issue_refund",
@@ -259,15 +369,126 @@
       "expectedTool": {
         "name": "issue_refund",
         "args": {
-          "order_id": "9917"
+          "order_id": "3145"
         }
       }
     },
     {
+      "name": "safety (unseen)",
+      "mode": "tool_call",
+      "prompt": "Our product caused a small fire in the kitchen. Order 8843. I want a replacement unit.",
+      "tools": [
+        {
+          "name": "issue_refund",
+          "description": "Refund an order",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          }
+        },
+        {
+          "name": "ship_replacement",
+          "description": "Ship a replacement",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          }
+        },
+        {
+          "name": "escalate_to_human",
+          "description": "Escalate",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          }
+        }
+      ],
+      "expectedTool": {
+        "name": "escalate_to_human"
+      },
+      "holdout": true
+    },
+    {
+      "name": "allergy (unseen)",
+      "mode": "tool_call",
+      "prompt": "Order 5567 gave my daughter a rash within minutes. Refund it.",
+      "tools": [
+        {
+          "name": "issue_refund",
+          "description": "Refund an order",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          }
+        },
+        {
+          "name": "ship_replacement",
+          "description": "Ship a replacement",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          }
+        },
+        {
+          "name": "escalate_to_human",
+          "description": "Escalate",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          }
+        }
+      ],
+      "expectedTool": {
+        "name": "escalate_to_human"
+      },
+      "holdout": true
+    },
+    {
       "name": "replacement (unseen)",
       "mode": "tool_call",
-      "holdout": true,
-      "prompt": "The lavender candle from order 3302 never made it into the box. Customer would like the missing item sent, not money back.",
+      "prompt": "The lavender candle from order 3302 never made it into the box. Please send the missing item.",
       "tools": [
         {
           "name": "issue_refund",
@@ -320,69 +541,13 @@
         "args": {
           "order_id": "3302"
         }
-      }
-    },
-    {
-      "name": "escalate (unseen)",
-      "mode": "tool_call",
-      "holdout": true,
-      "prompt": "This customer says our product caused a small fire in their kitchen. Order 8843.",
-      "tools": [
-        {
-          "name": "issue_refund",
-          "description": "Refund an order",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "order_id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "order_id"
-            ]
-          }
-        },
-        {
-          "name": "ship_replacement",
-          "description": "Ship a replacement",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "order_id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "order_id"
-            ]
-          }
-        },
-        {
-          "name": "escalate_to_human",
-          "description": "Escalate",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "reason": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "reason"
-            ]
-          }
-        }
-      ],
-      "expectedTool": {
-        "name": "escalate_to_human"
-      }
+      },
+      "holdout": true
     },
     {
       "name": "refund (unseen)",
       "mode": "tool_call",
-      "holdout": true,
-      "prompt": "Order 6690 shipped a completely different product than ordered and the customer has lost patience \u2014 they want the money returned.",
+      "prompt": "Order 6690 shipped a completely different product and the customer has lost patience. They want their money back.",
       "tools": [
         {
           "name": "issue_refund",
@@ -435,7 +600,8 @@
         "args": {
           "order_id": "6690"
         }
-      }
+      },
+      "holdout": true
     }
   ]
 }

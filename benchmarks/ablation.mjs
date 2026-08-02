@@ -42,26 +42,27 @@ const SEEDS = [401, 402];
 const SHAPE = { maxGenerations: 8, populationSize: 10, generationSize: 10, topK: 4 };
 
 /**
- * Tasks 02 and 05 are excluded, and the reason is stated here rather than in a
- * footnote, because silently dropping tasks is how a benchmark starts lying:
- *  - 02-classification saturates at 10.00/10.00 for every arm, so it cannot
- *    show a difference in either direction.
+ * No task is excluded any more, and that took fixing rather than asserting.
  *
- * 05-json-schema WAS excluded as "a documented bad test". It was not: the
- * engine never sent the schema to the model, and a 2048-token service cap
- * starved the reasoning model so operators returned empty and 4 of 6 children
- * per generation were carried parents. With both fixed the task goes 4.00 ->
- * 10.00 and holdout 6 -> 10, which makes it the most discriminating task here.
- * "The test is bad" was a comfortable explanation for two real bugs.
+ * Three of five were previously dropped as unable to discriminate. Every one
+ * turned out to be a real defect, not a bad test:
+ *
+ *  - 05-json-schema: the engine never sent the schema to the model, so
+ *    candidates were graded against a contract they were never shown.
+ *    Fixed: 4.00 -> 10.00, holdout 6 -> 10.
+ *  - 02-classification and 04-tool-call: every training case was unambiguous,
+ *    so the SEED prompt already scored 10/10 and fitness was flat from
+ *    generation 0 — no gradient, so no candidate could be told from another.
+ *    Rebuilt around a rule the seed does not know (02: classify by root cause,
+ *    not by the remedy asked for; 04: safety/injury/legal escalate regardless
+ *    of what the customer requests), with holdout cases testing that rule on
+ *    unseen wording. Now 02 goes 0.50 -> 10.00 (holdout 0 -> 10) and 04 goes
+ *    5.67 -> 10.00 (holdout 4 -> 10).
+ *
+ * A benchmark whose tasks cannot separate two configurations is not a weak
+ * benchmark; it is a broken instrument that reports every change as no change.
  */
-const EXCLUDED = {
-  '02-classification': 'saturates at 10.00 — cannot discriminate',
-  // Measured, not assumed: all 12 runs of this task returned holdout 7.33 —
-  // identical to the seed prompt's own score — while training fitness reached
-  // 10/10. The holdout cannot move, so every arm ties, and including it drags
-  // each feature's mean toward zero and makes it look less harmful than it is.
-  '04-tool-call': 'every arm scored an identical holdout 7.33 (= the seed prompt) across 12 runs — cannot discriminate',
-};
+const EXCLUDED = {};
 const TASKS = fs.readdirSync(path.join(ROOT, 'benchmarks', 'tasks')).sort()
   .filter(f => f.endsWith('.json'))
   .filter(f => !Object.keys(EXCLUDED).some(x => f.startsWith(x)))
