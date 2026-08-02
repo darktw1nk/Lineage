@@ -96,7 +96,16 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
         run: |
+          # electron-builder treats an EMPTY CSC_LINK as "a certificate was
+          # configured", then tries to resolve it as a path and dies with
+          # "Env WIN_CSC_LINK is not correct, cannot resolve". These have to be
+          # ABSENT, not blank — and GitHub Actions cannot conditionally omit an
+          # env key, so they are unset here instead.
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!v}" ] || unset "$v"
+          done
           echo "signing enabled: ${{ steps.signing.outputs.signed }}"
           npm run build --workspace evolution2
 
