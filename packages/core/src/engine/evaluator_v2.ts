@@ -1404,6 +1404,7 @@ async function runSingleSample(
         maxTokens,
         timeoutMs: state.config.callTimeoutMs,
         ...(test.mode === 'tool_call' && test.tools?.length ? { tools: test.tools } : {}),
+        ...(test.mode === 'json_schema' && test.schema ? { jsonSchema: test.schema } : {}),
         providerOptions: state.config.providerOptions,
         images,
       });

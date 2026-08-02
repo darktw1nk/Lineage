@@ -91,6 +91,11 @@ Help the user.
 
 ## bench-05-json-schema
 
+> **Stale.** These numbers were measured before `json_schema` mode sent the schema to
+> the model at all — candidates were graded against a contract they were never shown,
+> so every score here understates the mode. With the schema delivered, the same task
+> now runs 4.00 -> 10.00 with holdout 6 -> 10. Re-run `benchmarks/run.mjs` to refresh.
+
 **One-shot rewrite:**
 
 ```text

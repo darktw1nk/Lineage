@@ -46,12 +46,16 @@ const SHAPE = { maxGenerations: 8, populationSize: 10, generationSize: 10, topK:
  * footnote, because silently dropping tasks is how a benchmark starts lying:
  *  - 02-classification saturates at 10.00/10.00 for every arm, so it cannot
  *    show a difference in either direction.
- *  - 05-json-schema is a documented bad test (the schema is never shown to the
- *    model), so its score measures the test's flaw, not the search.
+ *
+ * 05-json-schema WAS excluded as "a documented bad test". It was not: the
+ * engine never sent the schema to the model, and a 2048-token service cap
+ * starved the reasoning model so operators returned empty and 4 of 6 children
+ * per generation were carried parents. With both fixed the task goes 4.00 ->
+ * 10.00 and holdout 6 -> 10, which makes it the most discriminating task here.
+ * "The test is bad" was a comfortable explanation for two real bugs.
  */
 const EXCLUDED = {
   '02-classification': 'saturates at 10.00 — cannot discriminate',
-  '05-json-schema': 'documented bad test (schema never shown to the model)',
   // Measured, not assumed: all 12 runs of this task returned holdout 7.33 —
   // identical to the seed prompt's own score — while training fitness reached
   // 10/10. The holdout cannot move, so every arm ties, and including it drags

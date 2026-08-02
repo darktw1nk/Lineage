@@ -12,7 +12,7 @@
   "parallelLimit": 6,
   "seed": 101,
   "samplesPerTest": 1,
-  "serviceModelMaxTokens": 2048,
+  "serviceModelMaxTokens": 16000,
   "retries": 3,
   "operators": {
     "mutationShare": 0.4,

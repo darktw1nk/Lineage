@@ -520,3 +520,33 @@ function balancedArraySpans(text: string): string[] {
   // Longest first: the outer array is the answer, a nested one rarely is.
   return balancedSpans(text, '[', ']').sort((a, b) => b.length - a.length);
 }
+
+/**
+ * Why a service-model reply came back empty, phrased so a user can fix it.
+ *
+ * A reasoning model bills its thinking against the same completion budget as
+ * its answer, so a modest cap can be consumed entirely by reasoning and return
+ * NOTHING. Measured on gpt-5-nano at max_completion_tokens 2048:
+ * finish_reason "length", reasoning_tokens 2048, content length 0 — the same
+ * request answered normally at 16000.
+ *
+ * Operators used to throw a bare "Empty response", so the run degraded to
+ * carried parents with no indication that a setting caused it. Returns null
+ * when there is usable output, so a caller cannot accidentally report a
+ * failure that did not happen.
+ */
+export function emptyResponseReason(
+  result: { output?: string | null; truncated?: boolean },
+  maxTokens: number | undefined,
+): string | null {
+  if ((result.output ?? '').trim() !== '') return null;
+  if (!result.truncated) {
+    return 'the service model returned an empty response';
+  }
+  const cap = typeof maxTokens === 'number' && Number.isFinite(maxTokens)
+    ? `${maxTokens}-token`
+    : 'configured';
+  return `the service model hit its ${cap} limit before writing any output — `
+    + 'reasoning models spend this same budget on internal reasoning, so raise '
+    + '`serviceModelMaxTokens` (16000+ is a safe starting point for them)';
+}

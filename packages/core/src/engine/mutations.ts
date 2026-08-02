@@ -8,7 +8,7 @@
 import type { EvaluationConfig, ChangeLogLine } from '../types.js';
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
-import { stripPromptDelimiters, extractJsonArray, fillTemplate, sanitizeForJudge, appliedPromptProblem } from '../utils/text.js';
+import { stripPromptDelimiters, extractJsonArray, fillTemplate, sanitizeForJudge, appliedPromptProblem, emptyResponseReason } from '../utils/text.js';
 import type { AppliedPromptProblem } from '../utils/text.js';
 import { withPartialCost } from './operator-cost.js';
 
@@ -251,8 +251,9 @@ export async function mutateNode(
       
       console.log(`[Mutation] Proposal attempt ${attempt + 1} cost: $${proposalResult.usd.toFixed(6)}`);
       
-      if (!proposalResult.output || proposalResult.output.trim() === '') {
-        throw new Error('Empty response from service model (proposal step)');
+      const emptyReason = emptyResponseReason(proposalResult, maxTokens);
+      if (emptyReason) {
+        throw new Error(`Mutation proposal produced nothing — ${emptyReason}`);
       }
       
       // Try to parse JSON (tolerates fences and surrounding prose)

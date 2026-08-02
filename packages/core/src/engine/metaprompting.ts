@@ -9,7 +9,7 @@ import type { CandidateNode, EvaluationConfig, ChangeLogLine } from '../types.js
 import { getProviderAdapter } from '../providers/index.js';
 import { store } from '../store.js';
 import { withPartialCost } from './operator-cost.js';
-import { sanitizeForJudge } from '../utils/text.js';
+import { sanitizeForJudge, emptyResponseReason } from '../utils/text.js';
 import { stripPromptDelimiters, extractJsonArray, fillTemplate, appliedPromptProblem } from '../utils/text.js';
 import type { AppliedPromptProblem } from '../utils/text.js';
 
@@ -215,8 +215,12 @@ export async function metaPromptNode(
   totalUsd += proposalResult.usd;
   totalCalls++;
   
-  if (!proposalResult.output || proposalResult.output.trim() === '') {
-    throw new Error('Empty response from meta-prompting');
+  const emptyReason = emptyResponseReason(proposalResult, maxTokens);
+  if (emptyReason) {
+    // Naming the cause matters more here than anywhere else: meta-prompting is
+    // the only failure-aware operator, so when it silently returns nothing the
+    // run keeps costing full price while producing carried parents.
+    throw new Error(`Meta-prompting produced no edits — ${emptyReason}`);
   }
   
   // Parse edits

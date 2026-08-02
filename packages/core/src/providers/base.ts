@@ -26,6 +26,13 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     maxTokens?: number;
     timeoutMs?: number;
     tools?: ToolDef[];
+    /**
+     * JSON Schema the reply must conform to. `json_schema` tests grade the
+     * output against this, so it has to reach the model — otherwise the
+     * candidate is scored on a contract it was never shown and can only pass
+     * by guessing the field names.
+     */
+    jsonSchema?: object;
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
@@ -54,6 +61,13 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     maxTokens?: number;
     timeoutMs?: number;
     tools?: ToolDef[];
+    /**
+     * JSON Schema the reply must conform to. `json_schema` tests grade the
+     * output against this, so it has to reach the model — otherwise the
+     * candidate is scored on a contract it was never shown and can only pass
+     * by guessing the field names.
+     */
+    jsonSchema?: object;
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{

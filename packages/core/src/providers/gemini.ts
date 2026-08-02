@@ -39,6 +39,7 @@ export class GeminiAdapter extends BaseProviderAdapter {
     maxTokens?: number;
     timeoutMs?: number;
     tools?: ToolDef[];
+    jsonSchema?: object;
     providerOptions?: Record<string, any>;
   }): Promise<{
     output: string;
@@ -77,6 +78,16 @@ export class GeminiAdapter extends BaseProviderAdapter {
         // win over anything the caller puts in the same object.
         generationConfig: {
           ...((opts.providerOptions as any)?.generationConfig || {}),
+          // Same reason as the OpenAI adapter: the schema is the grading
+          // contract, so it must reach the model. stripUnsupportedSchemaKeys
+          // is reused because Gemini rejects several standard JSON Schema
+          // keywords that the tool path already had to strip.
+          ...(opts.jsonSchema
+            ? {
+                responseMimeType: 'application/json',
+                responseSchema: stripUnsupportedSchemaKeys(opts.jsonSchema as any),
+              }
+            : {}),
           temperature: opts.temperature,
           maxOutputTokens: opts.maxTokens ?? 4096,
           ...(opts.seed !== undefined ? { seed: opts.seed } : {}),

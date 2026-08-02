@@ -22,6 +22,7 @@ export class OpenAIAdapter extends BaseProviderAdapter {
     maxTokens?: number;
     timeoutMs?: number;
     tools?: ToolDef[];
+    jsonSchema?: object;
     providerOptions?: Record<string, any>;
     images?: Array<{ base64: string; mimeType: string; detail?: 'auto' | 'low' | 'high' }>;
   }): Promise<{
@@ -104,6 +105,16 @@ export class OpenAIAdapter extends BaseProviderAdapter {
       if (opts.tools?.length) {
         body.tools = opts.tools.map(t => ({ type: 'function', function: t }));
         body.tool_choice = 'auto';
+      }
+
+      // Structured output: the scorer validates against this exact schema, so
+      // asking for `json_object` alone is not enough — the field names have to
+      // travel with the request or the model is guessing them.
+      if (opts.jsonSchema) {
+        body.response_format = {
+          type: 'json_schema',
+          json_schema: { name: 'response', strict: false, schema: opts.jsonSchema },
+        };
       }
 
       console.log(`[OpenAI] REQUEST:`, logSafeBody(body));
