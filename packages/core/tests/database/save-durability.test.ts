@@ -77,6 +77,27 @@ function failRename(code: string, times: number): { calls: () => number } {
   return { calls: () => calls };
 }
 
+/**
+ * Wait for a condition instead of for a duration.
+ *
+ * These tests wait on a re-armed save timer. A fixed sleep encodes one
+ * machine's speed: 600ms was ample locally and failed on a loaded CI runner,
+ * which is a false alarm about durability — the least useful kind, since this
+ * suite exists to prove data is never silently lost. Polling keeps the fast
+ * path fast and only spends the extra time when the machine is slow.
+ */
+async function waitFor(
+  condition: () => boolean,
+  { timeoutMs = 10_000, intervalMs = 25, what = 'condition' } = {},
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (condition()) return;
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}`);
+}
+
 describe('atomic save: the rename retry (Windows sharing violations)', () => {
   it('retries a transient EPERM rename rather than dropping the checkpoint', () => {
     // Defender, Search Indexer, OneDrive, or our own lock-free --list-models
@@ -183,7 +204,7 @@ describe('a failed save is reported and retried, never swallowed', () => {
 
     failing = false;
     // Deliberately no further write: the re-armed timer alone must get it there.
-    await new Promise(resolve => setTimeout(resolve, 600));
+    await waitFor(() => fs.existsSync(dbPath), { what: 're-armed save to reach disk' });
 
     expect(fs.existsSync(dbPath)).toBe(true);
     expect(rowsOnDisk(dbPath, 'SELECT v FROM t')).toEqual(['survives']);
@@ -201,7 +222,7 @@ describe('a failed save is reported and retried, never swallowed', () => {
     const rename = failRename('ENOSPC', 2); // two scheduled saves fail, the third works
 
     db.prepare('INSERT INTO t (v) VALUES (?)').run('debounced');
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await waitFor(() => fs.existsSync(dbPath), { what: 'debounced retry to reach disk' });
 
     expect(rename.calls()).toBeGreaterThanOrEqual(3); // it really did retry
     expect(fs.existsSync(dbPath)).toBe(true);
