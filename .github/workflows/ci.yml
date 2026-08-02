@@ -1,0 +1,80 @@
+name: CI
+
+# Every push and PR. The suite is fast and hermetic — no API keys, no network —
+# so there is no reason to gate it behind a label or a schedule.
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # `npm ci` and not `npm install`: it fails when package-lock.json and the
+      # package.json files disagree, which is exactly the breakage a scope
+      # rename introduces and a developer with a warm node_modules never sees.
+      - run: npm ci
+
+      - name: Type-check all workspaces
+        run: npm run type-check
+
+      - name: Test
+        run: npm test
+
+      # Publishable packages must BUILD, not merely type-check. dist/ is what
+      # consumers get, and tsup can fail on entry points tsc is happy with.
+      - name: Build packages
+        run: npm run build:packages
+
+      # The published tarball is the actual artifact. `--dry-run` catches a
+      # missing `files` entry or a stale bin path before a release does.
+      - name: Verify packages pack cleanly
+        run: |
+          npm pack --dry-run --workspace @voxor/lineage-core
+          npm pack --dry-run --workspace @voxor/lineage-cli
+
+  # Guards the class of bug that has actually shipped here: the renderer
+  # importing the core barrel drags sql.js/fs/path into the browser bundle,
+  # which under contextIsolation becomes an undefined `require` and a BLANK
+  # WINDOW. Type-check cannot see it; only building the renderer can.
+  desktop-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build renderer + main bundles
+        run: npm run build:dev --workspace evolution2
+      - name: Renderer import boundary
+        run: npx vitest run apps/desktop/tests/renderer-import-boundary.test.ts
+
+  # Drift between the hardcoded model catalog and what providers actually serve.
+  # Non-blocking: it needs provider credentials, which forks and PRs do not get,
+  # and a missing key must not read as a red build.
+  model-catalog:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Check catalog against live provider listings
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node scripts/check-models.mjs
