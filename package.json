@@ -4,7 +4,10 @@
   "description": "Lineage - Genetic Algorithm for LLM Prompt Optimization",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "dev": "npm run dev -w apps/desktop",
     "electron:dev": "npm run electron:dev -w apps/desktop",
@@ -25,5 +28,8 @@
     "tsx": "^4.21.0",
     "typescript": "^5.3.3",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "7zip-bin": "^5.2.0"
   }
 }

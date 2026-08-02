@@ -65,15 +65,7 @@ jobs:
       # commit, including one that never went through a push build.
       - run: npm run type-check
 
-      - name: Probe 7-Zip after type-check
-        shell: bash
-        run: node -e "const{path7za}=require('7zip-bin');const fs=require('fs');console.log('AFTER-TYPECHECK exists:',fs.existsSync(path7za))"
-
       - run: npm test
-
-      - name: Probe 7-Zip after tests
-        shell: bash
-        run: node -e "const{path7za}=require('7zip-bin');const fs=require('fs');console.log('AFTER-TESTS exists:',fs.existsSync(path7za))"
 
       - name: Build installers
         env:
