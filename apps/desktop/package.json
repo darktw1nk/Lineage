@@ -112,8 +112,7 @@
           ]
         }
       ],
-      "category": "public.app-category.developer-tools",
-      "icon": "build/icon.png"
+      "category": "public.app-category.developer-tools"
     },
     "linux": {
       "target": [
@@ -131,8 +130,12 @@
         }
       ],
       "category": "Development",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "maintainer": "darktw1nk <noreply@github.com>",
+      "synopsis": "Genetic-algorithm prompt optimisation for LLMs"
     },
     "npmRebuild": false
-  }
+  },
+  "homepage": "https://github.com/darktw1nk/Lineage",
+  "license": "MIT"
 }
