@@ -8,6 +8,12 @@ Scores are on **held-out tests** the run never trained on.
 Shape: 8 generations, population 10, top-4 selection, 10% elitism.
 Settings: `diversity 0.5`, `novelty 0.5`, `restartAfter 2`, `adaptivity 0.7`.
 
+
+> **Provenance:** these numbers were measured on `gemini/gemini-2.5-flash-lite`,
+> which is being retired. The task files now specify `openai/gpt-5-nano` (same
+> completion price, half the prompt price, current generation). The scores below
+> have NOT been re-measured on that model — re-run this script to refresh them.
+
 > This shape was chosen deliberately. An earlier attempt at 4 generations / population 6
 > could not answer the question at all: `restartAfter: 2` never fired, `adaptivity`'s
 > share shifts rounded to zero children, and only 3 parents were selected. Those deltas

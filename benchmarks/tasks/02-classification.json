@@ -2,9 +2,9 @@
   "name": "bench-02-classification",
   "seedPrompt": "Classify the support ticket.",
   "models": [
-    "gemini/gemini-2.5-flash-lite"
+    "openai/gpt-5-nano"
   ],
-  "serviceModel": "gemini/gemini-2.5-flash-lite",
+  "serviceModel": "openai/gpt-5-nano",
   "populationSize": 6,
   "generationSize": 6,
   "maxGenerations": 4,

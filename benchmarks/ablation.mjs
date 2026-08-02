@@ -141,6 +141,12 @@ L.push('the holdout split are identical across arms — the difference is the se
 L.push('Scores are on **held-out tests** the run never trained on.', '');
 L.push(`Shape: ${SHAPE.maxGenerations} generations, population ${SHAPE.populationSize}, top-${SHAPE.topK} selection, 10% elitism.`);
 L.push('Settings: `diversity 0.5`, `novelty 0.5`, `restartAfter 2`, `adaptivity 0.7`.', '');
+L.push('');
+L.push('> **Provenance:** these numbers were measured on `gemini/gemini-2.5-flash-lite`,');
+L.push('> which is being retired. The task files now specify `openai/gpt-5-nano` (same');
+L.push('> completion price, half the prompt price, current generation). The scores below');
+L.push('> have NOT been re-measured on that model — re-run this script to refresh them.');
+L.push('');
 L.push('> This shape was chosen deliberately. An earlier attempt at 4 generations / population 6');
 L.push('> could not answer the question at all: `restartAfter: 2` never fired, `adaptivity`\'s');
 L.push('> share shifts rounded to zero children, and only 3 parents were selected. Those deltas');
