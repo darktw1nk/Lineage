@@ -7,11 +7,18 @@ description: Use when asked to improve, optimize, or evolve an LLM prompt with m
 
 ## Overview
 
-This repo's genetic-algorithm engine evolves a seed prompt against a test set. You author a JSON config, run the CLI, and read the JSON result. Full config reference: `docs/cli.md`.
+Lineage's genetic-algorithm engine evolves a seed prompt against a test set. You author a JSON config, run the CLI, and read the JSON result. Full config reference: `docs/cli.md`.
 
 ```bash
+# Published package — anywhere, no checkout needed
+npm i -g @voxor/lineage-cli
+lineage --config cfg.json --db ./run.db --output results.json
+
+# Inside this repo, running from source
 npm run cli -- --config cfg.json --db ./run.db --output results.json
 ```
+
+`lineage --init cfg.json` writes a runnable starter config, which is faster and less error-prone than authoring one from scratch. Both forms take identical flags; every example below uses `npm run cli --` and works with a bare `lineage` too.
 
 Progress/logs → stderr. `--output` (and stdout) → pure JSON. Exit 0 = usable best prompt; exit 1 = none. A markdown report lands in `testoutputs/` beside the output file (`--report none` to skip it when only results.json matters; `--report <path>` to choose the destination).
 

@@ -85,11 +85,25 @@ Evolution won 4 of 5 and never lost — but the honest lesson is in the arrows: 
 ## Quick start
 
 ```bash
-npm install
-npm run cli -- --init                                      # writes a runnable evolve.json
-npm run cli -- --config evolve.json --output results.json  # run it
-npm run electron:dev                                       # or watch it in the desktop app
+npm i -g @voxor/lineage-cli
+lineage --init evolve.json           # writes a runnable config
+lineage --set-key openai <your-key>  # or export OPENAI_API_KEY
+lineage --estimate --config evolve.json   # what it will cost, before you spend it
+lineage --config evolve.json --output results.json
 ```
+
+**Desktop app** — [download an installer](https://github.com/darktw1nk/Lineage/releases/latest) for Windows, macOS or Linux. Installers are unsigned, so the first run needs one extra click; every release ships checksums and verifiable build provenance ([details](docs/signing.md)).
+
+<details>
+<summary>From source (contributors)</summary>
+
+```bash
+npm install
+npm run cli -- --init evolve.json
+npm run cli -- --config evolve.json --output results.json
+npm run electron:dev     # desktop app with HMR
+```
+</details>
 
 |  | For | What you get |
 |---|---|---|
