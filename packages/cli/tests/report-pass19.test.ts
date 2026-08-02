@@ -180,12 +180,21 @@ describe('pass-20 escaper and path fixes', () => {
   });
 
   it('defaultReportDir does not nest testoutputs/testoutputs, case-insensitively (F10)', () => {
-    const inTestoutputs = path.join('D:', 'proj', 'testoutputs', 'run.json');
-    expect(defaultReportDir(inTestoutputs)).toBe(path.join('D:', 'proj', 'testoutputs'));
-    const inTestoutputsCased = path.join('D:', 'proj', 'TestOutputs', 'run.json');
-    expect(defaultReportDir(inTestoutputsCased)).toBe(path.join('D:', 'proj', 'TestOutputs'));
-    const elsewhere = path.join('D:', 'proj', 'results', 'run.json');
-    expect(defaultReportDir(elsewhere)).toBe(path.join('D:', 'proj', 'results', 'testoutputs'));
+    // Build the root from path.resolve rather than hardcoding a drive letter.
+    // `path.join('D:', 'proj')` is absolute only on Windows; on Linux
+    // path.resolve prepends the cwd, so the expectation held on one developer's
+    // machine and failed everywhere else — caught the first time CI ran.
+    const root = path.resolve(path.sep === '\\' ? 'D:\\proj' : '/proj');
+
+    const inTestoutputs = path.join(root, 'testoutputs', 'run.json');
+    expect(defaultReportDir(inTestoutputs)).toBe(path.join(root, 'testoutputs'));
+
+    const inTestoutputsCased = path.join(root, 'TestOutputs', 'run.json');
+    expect(defaultReportDir(inTestoutputsCased)).toBe(path.join(root, 'TestOutputs'));
+
+    const elsewhere = path.join(root, 'results', 'run.json');
+    expect(defaultReportDir(elsewhere)).toBe(path.join(root, 'results', 'testoutputs'));
+
     expect(defaultReportDir(null)).toBe(path.resolve('testoutputs'));
   });
 });
