@@ -133,7 +133,8 @@
       "category": "Development",
       "icon": "build/icons",
       "maintainer": "darktw1nk <noreply@github.com>",
-      "synopsis": "Genetic-algorithm prompt optimisation for LLMs"
+      "synopsis": "Genetic-algorithm prompt optimisation for LLMs",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "npmRebuild": false
   },
