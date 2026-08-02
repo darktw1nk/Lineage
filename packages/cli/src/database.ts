@@ -76,7 +76,7 @@ export async function initCliDatabase(explicitPath?: string, options: { readOnly
   );
 
   // Import the engine's database init — it accepts an optional dbPath
-  const { initializeDatabase } = await import('@lineage/core');
+  const { initializeDatabase } = await import('@voxor/lineage-core');
   await initializeDatabase(dbPath, { readOnly: options.readOnly });
 }
 

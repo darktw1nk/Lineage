@@ -11,12 +11,12 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import type { UUID } from '../types';
-// Subpath, NOT the barrel: importing '@lineage/core' from renderer code pulls
+// Subpath, NOT the barrel: importing '@voxor/lineage-core' from renderer code pulls
 // the whole engine (sql.js, fs, path, ajv) into the browser bundle, where
 // vite-plugin-electron-renderer rewrites the Node built-ins to `require` —
 // undefined under contextIsolation. The built app then rendered a blank window
 // while dev mode stayed fine. Same single implementation, no engine.
-import { selectChampion } from '@lineage/core/champion';
+import { selectChampion } from '@voxor/lineage-core/champion';
 import { useEvaluation } from '../hooks/useEvaluation';
 
 interface CenterViewProps {

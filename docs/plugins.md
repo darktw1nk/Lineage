@@ -50,14 +50,14 @@ Plugins are authored in plain JavaScript (ESM). TypeScript authors precompile �
 **Report your real spend in `cost`.** It feeds run totals, the cost breakdown, and budget enforcement. If your operator throws *after* making paid calls, attach the spend to the error so it is still accounted:
 
 ```js
-import { withPartialCost } from '@lineage/core';
+import { withPartialCost } from '@voxor/lineage-core';
 try { /* ... */ } catch (err) { throw withPartialCost(err, spentSoFar); }
 ```
 
 **Binary operators get two different parents** where the population allows it; with a single surviving performer `parentB` may equal `parent`.
 
 - Give users a share via `operators.custom` in the evaluation config: `{ "custom": { "section-shuffle": { "share": 0.3 } } }`. Shares are normalized together with the built-in operators. In the desktop app, plugin operators appear automatically in New Evaluation → Variations (Advanced mode).
-- Need an LLM inside your operator? `import { getProviderAdapter } from '@lineage/core'` and call the service model from `config.serviceModel` — report the spend in `cost` so budget enforcement stays accurate.
+- Need an LLM inside your operator? `import { getProviderAdapter } from '@voxor/lineage-core'` and call the service model from `config.serviceModel` — report the spend in `cost` so budget enforcement stays accurate.
 - Throwing from `apply()` is safe: the engine falls back to carrying the parent forward with an `ERROR` changelog entry.
 - Need randomness? Use `ctx.rng()` instead of `Math.random()` — it's a deterministic stream when the run is seeded (`"seed"` / `--seed`), so your operator stays reproducible for free.
 - **Multi-call operators: check `ctx.shouldAbort(spentSoFarUSD)` between your own LLM calls**, passing what you have billed so far. The host's budget gate only runs once, before your first call — an operator that never checks can bill its whole retry ceiling past `budgetUSD`. When it returns `true`, stop and return a carry (the parent's prompt with an honest changelog) including the spend you already made.
@@ -80,7 +80,7 @@ try { /* ... */ } catch (err) { throw withPartialCost(err, spentSoFar); }
 }
 ```
 
-- Prefer subclassing `BaseProviderAdapter` (exported from `@lineage/core`) to inherit retry, concurrency-semaphore, and stored-key handling; implement `callAPI()` and `getApiKey()`. A plain object adapter (like the Ollama example) also works but bypasses those services.
+- Prefer subclassing `BaseProviderAdapter` (exported from `@voxor/lineage-core`) to inherit retry, concurrency-semaphore, and stored-key handling; implement `callAPI()` and `getApiKey()`. A plain object adapter (like the Ollama example) also works but bypasses those services.
 - API keys resolve from `<PROVIDER>_API_KEY` env vars (uppercased, dashes→underscores), a `"<provider>Key"` field in the CLI config, `--set-key <provider> <key>`, or the desktop Settings.
 - **`requiresApiKey: true`** — set this if your provider needs a key. Hosts refuse to start a run when a required key is missing, naming your provider and how to set it. Without it the run starts and every call fails against the real API, with retries and backoff, before reporting a generic failure. Omit it for a keyless provider (a local server like the Ollama example): defaulting to "required" is what used to make that example unusable.
 - **`supportsSeed: false`** — set this if you accept `seed` in `call()` but do not forward it. The engine partitions its result cache by seed, so an adapter that silently drops it turns identical work into cache misses. Leave it unset if you do pass the seed through.

@@ -34,7 +34,7 @@ Each of these cost a debugging session at least once.
 
 **Never write a literal invisible character into source.** A raw U+2028/U+2029/U+200B in a regex or string is an esbuild hard break, not a style issue. Build them with `String.fromCharCode(0x200B)` or `\uXXXX` escapes, then byte-scan the file to confirm none landed.
 
-**The renderer must never import the `@lineage/core` barrel.** It drags sql.js, `fs`, `path` and ajv into a browser context, where the Electron renderer plugin rewrites them to `require` — undefined under contextIsolation. The production window then renders nothing while dev mode looks fine. Shared engine logic gets a browser-safe subpath (see `@lineage/core/champion`); `apps/desktop/tests/renderer-import-boundary.test.ts` enforces it.
+**The renderer must never import the `@voxor/lineage-core` barrel.** It drags sql.js, `fs`, `path` and ajv into a browser context, where the Electron renderer plugin rewrites them to `require` — undefined under contextIsolation. The production window then renders nothing while dev mode looks fine. Shared engine logic gets a browser-safe subpath (see `@voxor/lineage-core/champion`); `apps/desktop/tests/renderer-import-boundary.test.ts` enforces it.
 
 **Reject bad values at every entry point, including reads.** Write-side validation only protects rows written after it existed. Negative model prices, unpriced models, non-finite costs and plugin-reported spend all have to be refused where they are *read*, too — a stale catalog row with a negative price inverts fitness and disarms `budgetUSD`.
 

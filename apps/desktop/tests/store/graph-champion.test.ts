@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { selectChampion } from '@lineage/core';
+import { selectChampion } from '@voxor/lineage-core';
 
 /**
  * The graph's 🥇 crown must be the champion the tool actually reports.

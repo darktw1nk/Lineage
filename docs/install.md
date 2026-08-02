@@ -82,7 +82,7 @@ Notes:
 
 ## Installable packages
 
-`@lineage/core` (engine) and `@lineage/cli` (the `lineage` command) are publish-ready but not yet on npm. To use them outside this repo today:
+`@voxor/lineage-core` (engine) and `@voxor/lineage-cli` (the `lineage` command) are publish-ready but not yet on npm. To use them outside this repo today:
 
 ```bash
 npm run build:packages

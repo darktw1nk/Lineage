@@ -13,7 +13,7 @@
 import fs from 'fs';
 import path from 'path';
 import Conf from 'conf';
-import type { Provider } from '@lineage/core';
+import type { Provider } from '@voxor/lineage-core';
 
 // Must match apps/desktop/electron/main.ts. It is a hardcoded constant in an
 // open-source repo, so it provides obfuscation rather than security — but the

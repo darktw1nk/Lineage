@@ -236,8 +236,8 @@ OpenAI, Anthropic, Google Gemini and Groq directly — any model via OpenRouter 
 ## Project layout
 
 ```
-packages/core     @lineage/core — engine, operators, providers, sql.js persistence
-packages/cli      @lineage/cli  — the lineage command
+packages/core     @voxor/lineage-core — engine, operators, providers, sql.js persistence
+packages/cli      @voxor/lineage-cli  — the lineage command
 apps/desktop      Electron app (React + React Flow)
 examples/plugins  drop-in operator/provider examples (section-shuffle, Ollama)
 docs/             cli.md · plugins.md · install.md · analysis/ (bug-hunt logs)

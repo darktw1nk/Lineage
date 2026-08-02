@@ -3,7 +3,7 @@
 ## Install
 
 - **From this repo**: `npm run cli -- <options>` (runs from source via tsx).
-- **As a package** (not yet published to npm): install `@lineage/core` + `@lineage/cli` tarballs (`npm pack` in each package), then use `npx lineage <options>`.
+- **As a package** (not yet published to npm): install `@voxor/lineage-core` + `@voxor/lineage-cli` tarballs (`npm pack` in each package), then use `npx lineage <options>`.
 
 ## Usage
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateReport, slugify } from '../src/report.js';
-import type { EvaluationConfig } from '@lineage/core';
+import type { EvaluationConfig } from '@voxor/lineage-core';
 import type { EvolutionResult } from '../src/engine.js';
 
 // Test 1 is held out, so node.tests contains ONLY tests 2 and 3 — the shape

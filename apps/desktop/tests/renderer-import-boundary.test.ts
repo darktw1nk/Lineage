@@ -7,7 +7,7 @@ import path from 'node:path';
  * nodeIntegration — `require` does not exist there.
  *
  * A single runtime import of the engine barrel (`import { selectChampion }
- * from '@lineage/core'`) pulled database/init.ts (sql.js, fs, path) and ajv
+ * from '@voxor/lineage-core'`) pulled database/init.ts (sql.js, fs, path) and ajv
  * into the renderer bundle; vite-plugin-electron-renderer rewrote those Node
  * built-ins to `const ED=require, Ft=ED("path")`, and the PRODUCTION window
  * threw `ReferenceError: require is not defined` before React mounted — a
@@ -15,7 +15,7 @@ import path from 'node:path';
  * produced installers whose window renders nothing.
  *
  * Engine logic the renderer genuinely shares (the champion rule) is exported
- * as the browser-safe `@lineage/core/champion` subpath instead.
+ * as the browser-safe `@voxor/lineage-core/champion` subpath instead.
  */
 const SRC = path.resolve(__dirname, '../src');
 
@@ -34,7 +34,7 @@ describe('renderer source never imports the engine barrel at runtime', () => {
     expect(files.length).toBeGreaterThan(10);
   });
 
-  it('has no value import of @lineage/core outside a type position', () => {
+  it('has no value import of @voxor/lineage-core outside a type position', () => {
     const offenders: string[] = [];
     for (const file of files) {
       const text = fs.readFileSync(file, 'utf-8');
@@ -60,7 +60,7 @@ describe('renderer source never imports the engine barrel at runtime', () => {
 
   it('the champion subpath IS used, so the rule is still shared with the engine', () => {
     const centerView = fs.readFileSync(path.join(SRC, 'components/CenterView.tsx'), 'utf-8');
-    expect(centerView).toContain("from '@lineage/core/champion'");
+    expect(centerView).toContain("from '@voxor/lineage-core/champion'");
   });
 });
 

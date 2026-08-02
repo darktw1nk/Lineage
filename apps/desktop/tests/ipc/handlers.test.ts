@@ -28,8 +28,8 @@ const { storeBacking, storeDelete, startEvalSpy } = vi.hoisted(() => {
   };
 });
 
-vi.mock('@lineage/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@lineage/core')>();
+vi.mock('@voxor/lineage-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@voxor/lineage-core')>();
   return {
     ...actual,
     store: {
@@ -47,7 +47,7 @@ vi.mock('@lineage/core', async (importOriginal) => {
 });
 
 import { registerIPCHandlers } from '../../electron/ipc/handlers';
-import { initializeDatabase, closeDatabase } from '@lineage/core';
+import { initializeDatabase, closeDatabase } from '@voxor/lineage-core';
 
 // Mock IpcMain that records handlers for direct invocation
 const channels = new Map<string, (...args: any[]) => Promise<any>>();
@@ -124,7 +124,7 @@ describe('evaluation CRUD round-trip', () => {
     expect(list.find((r: any) => r.id === run.id).interrupted).toBe(true);
 
     // Finished runs are NOT interrupted
-    const { getDatabase } = await import('@lineage/core');
+    const { getDatabase } = await import('@voxor/lineage-core');
     const db = getDatabase();
     const row = db.prepare('SELECT run_json FROM evaluation_runs WHERE id = ?').get(run.id) as any;
     const finishedRun = { ...JSON.parse(row.run_json), status: 'finished' };
@@ -212,7 +212,7 @@ describe('model cost handlers', () => {
     // earlier are in real databases today: the model list showed
     // `openrouter/auto` at -$1,000,000 and let it be selected, which inverts
     // fitness and disarms budgetUSD. The READ path must refuse them too.
-    const { getDatabase } = await import('@lineage/core');
+    const { getDatabase } = await import('@voxor/lineage-core');
     const db = getDatabase();
     db.prepare(`
       INSERT OR REPLACE INTO model_costs (provider, model, prompt_usd_per_1k, completion_usd_per_1k)

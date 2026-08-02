@@ -4,7 +4,7 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@lineage/core': path.resolve(__dirname, '../core/src/index.ts'),
+      '@voxor/lineage-core': path.resolve(__dirname, '../core/src/index.ts'),
     },
   },
   test: {

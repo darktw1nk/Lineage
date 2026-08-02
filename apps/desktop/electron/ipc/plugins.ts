@@ -1,6 +1,6 @@
 import type { IpcMain } from 'electron';
 import fs from 'fs';
-import { store, type PluginManifest } from '@lineage/core';
+import { store, type PluginManifest } from '@voxor/lineage-core';
 
 interface PluginState {
   manifests: PluginManifest[];

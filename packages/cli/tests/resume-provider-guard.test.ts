@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { listProviders, registerProvider, resetRegistry } from '@lineage/core';
+import { listProviders, registerProvider, resetRegistry } from '@voxor/lineage-core';
 
 /**
  * The guard added to handleResumeRun asks listProviders() whether every

@@ -1,5 +1,5 @@
 /**
- * @lineage/core — public API surface.
+ * @voxor/lineage-core — public API surface.
  *
  * The host application (Electron desktop, CLI, or an embedding program)
  * injects platform services before starting an evaluation:

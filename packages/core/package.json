@@ -1,5 +1,5 @@
 {
-  "name": "@lineage/core",
+  "name": "@voxor/lineage-core",
   "version": "1.0.0",
   "description": "Genetic-algorithm engine for LLM prompt optimization: operators, fitness, providers, persistence.",
   "license": "MIT",

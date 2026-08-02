@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import { format } from 'node:util';
 import { installStoreShim } from '../packages/cli/src/engine.js';
-import { getProviderAdapter, initializeDatabase, closeDatabase } from '@lineage/core';
+import { getProviderAdapter, initializeDatabase, closeDatabase } from '@voxor/lineage-core';
 
 // Adapters log with console.log. stdout here is a data channel — the runner
 // parses it as JSON — so route every log line to stderr, exactly as the CLI does.

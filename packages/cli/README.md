@@ -1,4 +1,4 @@
-# @lineage/cli
+# @voxor/lineage-cli
 
 Command-line runner for Lineage prompt evolution — designed for CI,
 scripts, and AI agents.

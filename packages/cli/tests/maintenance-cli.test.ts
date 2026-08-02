@@ -32,7 +32,7 @@ function runCli(args: string[]): { code: number; out: string } {
   // documented contract), and execFileSync only surfaces stderr when the
   // process FAILS — so a success case read as empty and the assertion passed
   // for the wrong reason.
-    // --tsconfig is REQUIRED. Without it `@lineage/core` resolves through the
+    // --tsconfig is REQUIRED. Without it `@voxor/lineage-core` resolves through the
   // package exports map to packages/core/dist, which is gitignored — so this
   // silently tested a STALE BUILD (it scored a wrong answer 6, a value removed
   // two commits earlier) and failed outright on a fresh clone with

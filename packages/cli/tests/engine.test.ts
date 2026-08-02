@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { EvaluationConfig, CandidateNode, UUID } from '@lineage/core';
+import type { EvaluationConfig, CandidateNode, UUID } from '@voxor/lineage-core';
 import { selectChampion as realSelectChampion } from '../../core/src/engine/champion.js';
 // The REAL implementations: a mock that stubs these would let the result
 // assembly drift from the engine's own rules without any test noticing.
@@ -17,7 +17,7 @@ const mockDbPrepare = vi.fn();
 const mockDbRun = vi.fn();
 const mockDbFlush = vi.fn();
 
-vi.mock('@lineage/core', () => ({
+vi.mock('@voxor/lineage-core', () => ({
   setSendUpdate: (fn: (runId: UUID, data: any) => void) => {
     capturedSendUpdate = fn;
   },

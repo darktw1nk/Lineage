@@ -6,7 +6,7 @@
  */
 
 import path from 'path';
-import type { EvaluationConfig } from '@lineage/core';
+import type { EvaluationConfig } from '@voxor/lineage-core';
 import type { EvolutionResult, EvolutionResultNode } from './engine.js';
 import type { CliConfig } from './config.js';
 

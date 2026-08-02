@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateReport } from '../src/report.js';
-import type { EvaluationConfig } from '@lineage/core';
+import type { EvaluationConfig } from '@voxor/lineage-core';
 import type { EvolutionResult } from '../src/engine.js';
 
 const CONFIG = {

@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
-import { initializeDatabase, closeDatabase, runningEvaluationIds, setStore, setSendUpdate, loadPlugins, type StoreInterface } from '@lineage/core';
+import { initializeDatabase, closeDatabase, runningEvaluationIds, setStore, setSendUpdate, loadPlugins, type StoreInterface } from '@voxor/lineage-core';
 import { registerIPCHandlers } from './ipc/handlers.js';
 import { registerPluginHandlers, setPluginState } from './ipc/plugins.js';
 import { initLogger } from './logger.js';

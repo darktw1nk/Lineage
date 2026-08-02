@@ -7,8 +7,8 @@
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import type { EvaluationConfig, ModelRef, TestCase, Provider } from '@lineage/core';
-import { listProviders } from '@lineage/core';
+import type { EvaluationConfig, ModelRef, TestCase, Provider } from '@voxor/lineage-core';
+import { listProviders } from '@voxor/lineage-core';
 
 export interface CliConfig {
   name?: string;

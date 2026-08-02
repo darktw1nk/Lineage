@@ -1,7 +1,7 @@
 import { IpcMain, app } from 'electron';
 import { validateSettings } from './validateSettings.js';
-import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from '@lineage/core';
-import { getDatabase, store, OpenRouterAdapter, isEvaluationActive } from '@lineage/core';
+import type { EvaluationConfig, EvaluationRun, ModelRef, ModelCostEntry, AppSettings } from '@voxor/lineage-core';
+import { getDatabase, store, OpenRouterAdapter, isEvaluationActive } from '@voxor/lineage-core';
 import { v4 as uuidv4 } from 'uuid';
 import { getLogBuffer } from '../logger.js';
 
@@ -58,7 +58,7 @@ export function registerIPCHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('eval:estimate', async (_event, config: EvaluationConfig) => {
     try {
-      const { estimateRunCost, getModelCost } = await import('@lineage/core');
+      const { estimateRunCost, getModelCost } = await import('@voxor/lineage-core');
       return await estimateRunCost(config, getModelCost);
     } catch (error) {
       // Return the REASON, not a bare null. A null was indistinguishable from
@@ -203,7 +203,7 @@ async function createEvaluation(config: EvaluationConfig): Promise<EvaluationRun
 
   // Stamp the preflight estimate — the report compares it to actual spend
   try {
-    const { estimateRunCost, getModelCost } = await import('@lineage/core');
+    const { estimateRunCost, getModelCost } = await import('@voxor/lineage-core');
     const est = await estimateRunCost(config, getModelCost);
     run.estimate = { calls: est.calls, low: est.low, high: est.high, breakdown: est.breakdown };
   } catch (error) {
@@ -276,7 +276,7 @@ async function startEvaluation(runId: string): Promise<void> {
     requiredProviders.add(config.serviceModel.provider);
     // Only adapters that declare they need a key. A plugin provider may talk to
     // a local server (the shipped Ollama example does) and need none.
-    const { getProviderAdapter } = await import('@lineage/core');
+    const { getProviderAdapter } = await import('@voxor/lineage-core');
     const needsKey = (p: string) => {
       try { return (getProviderAdapter(p as any) as any)?.requiresApiKey === true; } catch { return false; }
     };
@@ -293,7 +293,7 @@ async function startEvaluation(runId: string): Promise<void> {
     // remaining node with "Unknown provider", degenerates into cache-hit copies
     // of whichever node still had results, marks itself `finished`, and can
     // then never be resumed again. One click permanently burns the run.
-    const { listProviders } = await import('@lineage/core');
+    const { listProviders } = await import('@voxor/lineage-core');
     const available = new Set(listProviders());
     const missingProviders = [...requiredProviders].filter(p => !available.has(p as any));
     if (missingProviders.length > 0) {
@@ -304,7 +304,7 @@ async function startEvaluation(runId: string): Promise<void> {
       );
     }
 
-    const { startEvaluation: startEval } = await import('@lineage/core');
+    const { startEvaluation: startEval } = await import('@voxor/lineage-core');
     console.log('[IPC] Calling engine startEvaluation (V2)...');
     await startEval(runId, config, run);
     console.log('[IPC] Engine startEvaluation (V2) completed');
@@ -315,17 +315,17 @@ async function startEvaluation(runId: string): Promise<void> {
 }
 
 async function pauseEvaluation(runId: string): Promise<void> {
-  const { pauseEvaluation: pauseEval } = await import('@lineage/core');
+  const { pauseEvaluation: pauseEval } = await import('@voxor/lineage-core');
   pauseEval(runId);
 }
 
 async function resumeEvaluation(runId: string): Promise<void> {
-  const { resumeEvaluation: resumeEval } = await import('@lineage/core');
+  const { resumeEvaluation: resumeEval } = await import('@voxor/lineage-core');
   resumeEval(runId);
 }
 
 async function stopEvaluation(runId: string): Promise<void> {
-  const { stopEvaluation: stopEval } = await import('@lineage/core');
+  const { stopEvaluation: stopEval } = await import('@voxor/lineage-core');
   stopEval(runId);
 }
 
@@ -460,7 +460,7 @@ async function deleteEvaluation(runId: string): Promise<void> {
   // that no longer existed, and still ran the playoff and holdout passes.
   if (isEvaluationActive(runId)) {
     console.log(`[IPC] Stopping active evaluation ${runId.slice(0, 8)} before deleting it`);
-    const { stopEvaluation } = await import('@lineage/core');
+    const { stopEvaluation } = await import('@voxor/lineage-core');
     stopEvaluation(runId);
     // Give the engine a moment to unwind in-flight work before the rows vanish
     for (let i = 0; i < 50 && isEvaluationActive(runId); i++) {
@@ -505,7 +505,7 @@ async function deleteEvaluation(runId: string): Promise<void> {
 
   // The deleted run's spend sidecar has nothing left to describe.
   try {
-    const { clearSpend } = await import('@lineage/core');
+    const { clearSpend } = await import('@voxor/lineage-core');
     clearSpend(db.dbPath, runId);
   } catch { /* best effort */ }
 

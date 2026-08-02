@@ -6,8 +6,8 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       // Subpath first — alias order matters, the barrel would swallow it.
-      '@lineage/core/champion': path.resolve(__dirname, '../../packages/core/src/engine/champion.ts'),
-      '@lineage/core': path.resolve(__dirname, '../../packages/core/src/index.ts'),
+      '@voxor/lineage-core/champion': path.resolve(__dirname, '../../packages/core/src/engine/champion.ts'),
+      '@voxor/lineage-core': path.resolve(__dirname, '../../packages/core/src/index.ts'),
     },
   },
   test: {

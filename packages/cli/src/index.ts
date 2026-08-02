@@ -22,7 +22,7 @@ import { providerRequiresApiKey } from './providers.js';
 
 /** The database this process locked, so the exit handler can release it. */
 let lastResolvedDbPath: string | null = null;
-import type { Provider, EvaluationConfig } from '@lineage/core';
+import type { Provider, EvaluationConfig } from '@voxor/lineage-core';
 import type { CliConfig } from './config.js';
 
 // The engine logs via console.log/info/warn. Route ALL of it to stderr so
@@ -60,13 +60,13 @@ async function cleanup(signal: string): Promise<void> {
 
   if (activeRunId) {
     try {
-      const { stopEvaluation } = await import('@lineage/core');
+      const { stopEvaluation } = await import('@voxor/lineage-core');
       stopEvaluation(activeRunId);
     } catch { /* best-effort */ }
   }
 
   try {
-    const { closeDatabase } = await import('@lineage/core');
+    const { closeDatabase } = await import('@voxor/lineage-core');
     closeDatabase();
   } catch { /* best-effort */ }
 
@@ -393,7 +393,7 @@ async function handleMaintenance(archiveDir?: string, pruneKeep?: number, dbPath
   // the function containing it was not.
   await initCliDatabase(dbPath);
 
-  const { getDatabase, closeDatabase } = await import('@lineage/core');
+  const { getDatabase, closeDatabase } = await import('@voxor/lineage-core');
   const db = getDatabase();
   const { archiveRuns, pruneRuns } = await import('./maintenance.js');
 
@@ -467,11 +467,11 @@ async function handleSyncModels(dbPath?: string, configKeys?: Record<string, str
 
   console.log('Fetching models from OpenRouter...');
 
-  const { OpenRouterAdapter } = await import('@lineage/core');
+  const { OpenRouterAdapter } = await import('@voxor/lineage-core');
   const models = await OpenRouterAdapter.fetchModels(apiKey);
 
   // Upsert into database
-  const { getDatabase } = await import('@lineage/core');
+  const { getDatabase } = await import('@voxor/lineage-core');
   const db = getDatabase();
 
   const upsert = db.prepare(`
@@ -488,7 +488,7 @@ async function handleSyncModels(dbPath?: string, configKeys?: Record<string, str
 
   emit(`Synced ${models.length} models from OpenRouter`);
 
-  const { closeDatabase } = await import('@lineage/core');
+  const { closeDatabase } = await import('@voxor/lineage-core');
   closeDatabase();
 }
 
@@ -496,7 +496,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
   lastResolvedDbPath = null; // read-only opens take no lock
   await initCliDatabase(dbPath, { readOnly: true });
 
-  const { getDatabase } = await import('@lineage/core');
+  const { getDatabase } = await import('@voxor/lineage-core');
   const db = getDatabase();
 
   const rows = db.prepare(`
@@ -512,7 +512,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
 
   if (rows.length === 0) {
     emit('No models found. Run --sync-models to fetch from OpenRouter.');
-    const { closeDatabase } = await import('@lineage/core');
+    const { closeDatabase } = await import('@voxor/lineage-core');
     closeDatabase();
     return;
   }
@@ -530,7 +530,7 @@ async function handleListModels(dbPath?: string): Promise<void> {
   emit();
   emit(`Total: ${rows.length} models`);
 
-  const { closeDatabase } = await import('@lineage/core');
+  const { closeDatabase } = await import('@voxor/lineage-core');
   closeDatabase();
 }
 
@@ -647,7 +647,7 @@ async function emitOutputs(
     }
   }
 
-  const { closeDatabase } = await import('@lineage/core');
+  const { closeDatabase } = await import('@voxor/lineage-core');
   closeDatabase();
 
   // Agents rely on exit codes: no usable best prompt means the run failed.
@@ -701,7 +701,7 @@ async function handleEstimate(configPath: string, dbPath?: string, seedOverride?
     // Keep the preview faithful: the seed influences the holdout partition
     evalConfig.seed = seedOverride;
   }
-  const { estimateRunCost, getModelCost, closeDatabase } = await import('@lineage/core');
+  const { estimateRunCost, getModelCost, closeDatabase } = await import('@voxor/lineage-core');
   const est = await estimateRunCost(evalConfig, getModelCost);
 
   // Human breakdown to stderr, machine JSON to stdout (CLI contract)
@@ -731,7 +731,7 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
 
   lastResolvedDbPath = resolveDbPath(dbPath);
   await initCliDatabase(dbPath);
-  const { getDatabase } = await import('@lineage/core');
+  const { getDatabase } = await import('@voxor/lineage-core');
   const db = getDatabase();
   const row = db.prepare('SELECT run_json, config_id FROM evaluation_runs WHERE id = ?').get(runId) as { run_json: string; config_id: string } | undefined;
   if (!row) {
@@ -774,7 +774,7 @@ async function handleResumeRun(runId: string, configPath?: string, outputPath?: 
   // not fail — it grinds through every remaining node with "Unknown provider",
   // marks itself finished, exits 0, and can never be resumed again. Refuse
   // before spending anything.
-  const { listProviders } = await import('@lineage/core');
+  const { listProviders } = await import('@voxor/lineage-core');
   const available = new Set(listProviders());
   const missing = [...requiredProviders].filter(p => !available.has(p));
   if (missing.length > 0) {
@@ -924,7 +924,7 @@ async function main(): Promise<void> {
 main().catch((err) => {
   console.error('Fatal error:', err.message || err);
   // Best-effort cleanup on fatal error
-  import('@lineage/core')
+  import('@voxor/lineage-core')
     .then(({ closeDatabase }) => closeDatabase())
     .catch(() => {})
     .finally(() => process.exit(1));

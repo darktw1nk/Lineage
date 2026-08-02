@@ -10,7 +10,7 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "paths": {
-      "@lineage/core": ["../../packages/core/src/index.ts"]
+      "@voxor/lineage-core": ["../../packages/core/src/index.ts"]
     }
   },
   "include": ["vite.config.ts", "electron"]

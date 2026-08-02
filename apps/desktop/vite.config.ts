@@ -22,7 +22,7 @@ export default defineConfig(({ mode }) => ({
         vite: {
           resolve: {
             alias: {
-              '@lineage/core': path.resolve(__dirname, '../../packages/core/src/index.ts')
+              '@voxor/lineage-core': path.resolve(__dirname, '../../packages/core/src/index.ts')
             }
           },
           build: {
@@ -56,11 +56,11 @@ export default defineConfig(({ mode }) => ({
     alias: {
       '@': path.resolve(__dirname, './src'),
       // Subpath FIRST: vite matches aliases in order, and the barrel entry
-      // would otherwise swallow '@lineage/core/champion'. The renderer must
+      // would otherwise swallow '@voxor/lineage-core/champion'. The renderer must
       // never resolve the barrel — it drags sql.js/fs/path into the browser
       // bundle, which the electron-renderer plugin rewrites to `require`.
-      '@lineage/core/champion': path.resolve(__dirname, '../../packages/core/src/engine/champion.ts'),
-      '@lineage/core': path.resolve(__dirname, '../../packages/core/src/index.ts')
+      '@voxor/lineage-core/champion': path.resolve(__dirname, '../../packages/core/src/engine/champion.ts'),
+      '@voxor/lineage-core': path.resolve(__dirname, '../../packages/core/src/index.ts')
     }
   },
   server: {
