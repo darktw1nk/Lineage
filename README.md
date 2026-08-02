@@ -252,3 +252,5 @@ Architecture notes in [CLAUDE.md](CLAUDE.md), contributor guide in [CONTRIBUTING
 **[MIT](LICENSE)** licensed · built with TypeScript, Electron and sql.js
 
 </div>
+
+> Installers are unsigned, so Windows SmartScreen and macOS Gatekeeper will warn on first run. Every release ships SHA256 checksums and build provenance you can verify — see [docs/signing.md](docs/signing.md).
