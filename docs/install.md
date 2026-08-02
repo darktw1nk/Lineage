@@ -76,22 +76,26 @@ npm run build            # build a local dmg/zip (macOS) or AppImage/deb (Linux)
 
 Notes:
 
-- A **locally built** macOS app runs without Gatekeeper warnings (quarantine only applies to downloaded binaries). Distributing a dmg to others would need codesigning/notarization — irrelevant for build-it-yourself.
-- The app icon currently ships as `.ico` only; macOS/Linux builds fall back to the default Electron icon. Cosmetic.
-- The project is developed and CI-tested on Windows; macOS/Linux are expected-good but less traveled. If something breaks, please open an issue with the command output.
+- A **locally built** macOS app runs without Gatekeeper warnings (quarantine only applies to downloaded binaries). Released binaries are unsigned — see [signing.md](signing.md) for the workaround and for how to enable signing.
+- Icons ship for every platform: `build/icon.ico` carries seven frames (16-256) and `build/icons/` holds 16-1024. The 512 and 1024 macOS uses are upscales of the 256 master — no larger source exists.
+- CI builds and tests on Windows, macOS and Linux on every push, and installers for all three are attached to each release. If something breaks, please open an issue with the command output.
 
 ## Installable packages
 
-`@voxor/lineage-core` (engine) and `@voxor/lineage-cli` (the `lineage` command) are publish-ready but not yet on npm. To use them outside this repo today:
+Both packages are on npm.
+
+```bash
+npm i -g @voxor/lineage-cli     # the `lineage` command; pulls the engine with it
+lineage --help
+```
+
+`@voxor/lineage-core` is the engine on its own, for embedding it in your own tool. To install a
+local build instead of the published one:
 
 ```bash
 npm run build:packages
-cd packages/core && npm pack       # -> lineage-core-1.0.0.tgz
-cd ../cli && npm pack              # -> lineage-cli-1.0.0.tgz
-
-# in any project or empty directory:
-npm install /path/to/lineage-core-1.0.0.tgz /path/to/lineage-cli-1.0.0.tgz
-npx lineage --help
+cd packages/core && npm pack && cd ../cli && npm pack
+npm install /path/to/voxor-lineage-core-*.tgz /path/to/voxor-lineage-cli-*.tgz
 ```
 
 Requires only plain Node — the engine uses sql.js (WebAssembly), so there are no native modules to compile.
