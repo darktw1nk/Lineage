@@ -101,4 +101,4 @@ jobs:
         run: |
           find artifacts -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \
             -o -name '*.AppImage' -o -name '*.deb' \) -print0 \
-            | xargs -0 gh release upload "${GITHUB_REF_NAME}" --clobber
+            | xargs -0 gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber
