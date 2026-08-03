@@ -259,7 +259,7 @@ export function samePromptText(a: string, b: string): boolean {
  * the default again.
  */
 function isEditLanguage(instruction: string): boolean {
-  return /\b(rewrite|replace|reword|rephrase|remove|delete|prune|add|insert|append|convert|reorder|restructure|tighten|adjust|switch|merge|change|force|introduce)\b[^.!?]{0,60}\b(prompt|instruction|statement|section|line|sentence|paragraph|wording|phrasing|role|identity|constraint|rule|example|scaffold|hint|term|block|pattern)s?\b/i
+  return /\b(rewrite|replace|reword|rephrase|remove|delete|prune|add|insert|append|convert|reorder|restructure|tighten|adjust|switch|merge|change|force|introduce)\b[^.!?]{0,60}\b(prompt|instruction|statement|section|line|sentence|paragraph|wording|phrasing|role|identity|constraint|rule|example|scaffold|hint|term|block|pattern|anti-pattern|checklist|rubric|few-shot)s?\b/i
     .test(instruction);
 }
 
@@ -271,10 +271,34 @@ function isEditLanguage(instruction: string): boolean {
  * ("(e.g., …)", quoted anti-pattern lists) that mark advice-about-prompts.
  */
 function readsAsReplacementText(instruction: string): boolean {
-  return instruction.trim().length >= 40 &&
-    !isEditLanguage(instruction) &&
-    !/\(e\.?g\.?[,.]?\s/i.test(instruction) &&
-    !/["“'’][^"“”'’]{3,}["”'’]\s*\)/.test(instruction);
+  const text = instruction.trim();
+  if (text.length < 40 || isEditLanguage(text)) return false;
+
+  // Text with no example marker keeps the ORIGINAL behaviour exactly. An
+  // earlier attempt replaced that rule with a "does it frame itself as a
+  // prompt?" test, which read well and regressed production from 13% to 40%
+  // waste: real applied prompts often open with neither a role nor a task verb
+  // ("Focus on: * Order Number * Issue Type"), so they stopped being exempt and
+  // were rejected as echoes. This is now strictly a SUPERSET of the old rule —
+  // it can only accept more, never less.
+  const hasExampleMarker =
+    /\(e\.?g\.?[,.]?\s/i.test(text) ||
+    /["“'’][^"“”'’]{3,}["”'’]\s*\)/.test(text);
+  if (!hasExampleMarker) return true;
+
+  // With an example marker the text could be a prompt carrying a few-shot case,
+  // or an entry from the strategy catalog, which is what the marker originally
+  // screened out. Accept only when it reads as a prompt AND the example is not
+  // most of it — `Add anti-patterns ("Do not create subtasks for 'thanks'")` is
+  // 65% example, a real prompt with an example is well under half.
+  const examples = [...text.matchAll(/\([^)]*\)/g)].map(m => m[0].length);
+  const exampleShare = examples.reduce((a, b) => a + b, 0) / text.length;
+  if (exampleShare >= 0.5) return false;
+
+  return (
+    /^\s*(you\s+(are|will|should|must)|your\s+(task|role|job)|act\s+as|as\s+an?)/i.test(text) ||
+    /^\s*(extract|summari[sz]e|classify|categori[sz]e|translate|answer|write|generate|produce|analy[sz]e|identify|list|respond|review|evaluate|explain|describe|transform|parse|label|rank|score|read|given)/i.test(text)
+  );
 }
 
 /**
