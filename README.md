@@ -277,7 +277,7 @@ Architecture notes in [CLAUDE.md](CLAUDE.md), contributor guide in [CONTRIBUTING
 
 ### Check out our other projects
 
-<img src="docs/assets/voxor-mark.png" alt="" height="30" valign="middle">&nbsp; **[Voxor](https://voxor.ai/)** — AI Dictation &amp; Voice-to-Text for Mac, Windows, iPhone &amp; Android &nbsp;[![built for builders](https://img.shields.io/badge/built%20for%20builders-E3AD01?style=flat-square&labelColor=E3AD01&color=E3AD01)](https://voxor.ai/)
+<img src="docs/assets/voxor-mark.png" alt="" height="30" valign="middle">&nbsp; **[Voxor](https://voxor.ai/)** — AI Dictation &amp; Voice-to-Text for Mac, Windows, iPhone &amp; Android &nbsp;<a href="https://voxor.ai/"><img src="https://img.shields.io/badge/built%20for%20builders-E3AD01?style=flat-square&labelColor=E3AD01&color=E3AD01" alt="built for builders" height="20" valign="middle"></a>
 
 </div>
 
