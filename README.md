@@ -273,18 +273,7 @@ Architecture notes in [CLAUDE.md](CLAUDE.md), contributor guide in [CONTRIBUTING
 
 ---
 
-<div align="center">
-
-### Check out our other projects
-
-<a href="https://voxor.ai/">
-  <img src="docs/assets/voxor.jpg" alt="Voxor — AI dictation and voice-to-text for Mac, Windows, iPhone and Android" width="880">
-</a>
-
-**[Voxor](https://voxor.ai/)** — AI Dictation &amp; Voice-to-Text for Mac, Windows, iPhone &amp; Android<br>
-<sub>built for builders</sub>
-
-</div>
+<img src="docs/assets/voxor.png" alt="" width="24" height="24" valign="middle"> **Check out our other projects — [Voxor](https://voxor.ai/):** AI Dictation &amp; Voice-to-Text for Mac, Windows, iPhone &amp; Android, built for builders
 
 <div align="center">
 
