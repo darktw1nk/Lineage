@@ -1,6 +1,6 @@
 {
   "name": "@voxor/lineage-cli",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Command-line runner for Lineage prompt evolution \u2014 for CI, scripts, and AI agents.",
   "license": "MIT",
   "type": "module",
@@ -22,7 +22,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@voxor/lineage-core": "^1.1.0",
+    "@voxor/lineage-core": "^1.1.1",
     "conf": "^10.2.0",
     "uuid": "^9.0.1"
   },

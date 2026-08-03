@@ -1,6 +1,6 @@
 {
   "name": "evolution2",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Lineage desktop app - Genetic Algorithm for LLM Prompt Optimization",
   "author": "Alexander Goncharov",
   "private": true,
