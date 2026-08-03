@@ -5,7 +5,7 @@
 ### Stop hand-tuning prompts. Breed them.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1%2C274%20passing-brightgreen?style=flat-square)](#project-layout)
+[![Tests](https://img.shields.io/badge/tests-1%2C481%20passing-brightgreen?style=flat-square)](#project-layout)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square)](#project-layout)
 [![Desktop + CLI](https://img.shields.io/badge/desktop-%2B%20CLI-8b5cf6?style=flat-square)](#quick-start)
 [![Providers](https://img.shields.io/badge/OpenAI%20·%20Anthropic%20·%20Gemini%20·%20Groq%20·%20OpenRouter-000?style=flat-square)](#providers)
@@ -269,7 +269,21 @@ examples/plugins  drop-in operator/provider examples (section-shuffle, Ollama)
 docs/             cli.md · plugins.md · install.md · analysis/ (bug-hunt logs)
 ```
 
-Architecture notes in [CLAUDE.md](CLAUDE.md), contributor guide in [CONTRIBUTING.md](CONTRIBUTING.md), and [AGENTS.md](AGENTS.md) if a coding agent is doing the work. `npm test` runs 1,274 tests across all packages — including end-to-end evolutions driven entirely by plugins, and the regression pins left behind by twenty adversarial bug-hunt passes ([docs/analysis/](docs/analysis/)).
+Architecture notes in [CLAUDE.md](CLAUDE.md), contributor guide in [CONTRIBUTING.md](CONTRIBUTING.md), and [AGENTS.md](AGENTS.md) if a coding agent is doing the work. `npm test` runs 1,481 tests across all packages — including end-to-end evolutions driven entirely by plugins, and the regression pins left behind by twenty adversarial bug-hunt passes ([docs/analysis/](docs/analysis/)).
+
+---
+
+<div align="center">
+
+<a href="https://voxor.ai/">
+  <img src="docs/assets/voxor.png" alt="Voxor" width="96" height="96">
+</a>
+
+### Check out our other projects
+
+**[voxor.ai](https://voxor.ai/)** — built for builders
+
+</div>
 
 <div align="center">
 
@@ -278,5 +292,3 @@ Architecture notes in [CLAUDE.md](CLAUDE.md), contributor guide in [CONTRIBUTING
 **[MIT](LICENSE)** licensed · built with TypeScript, Electron and sql.js
 
 </div>
-
-> Installers are unsigned, so Windows SmartScreen and macOS Gatekeeper will warn on first run. Every release ships SHA256 checksums and build provenance you can verify — see [docs/signing.md](docs/signing.md).
